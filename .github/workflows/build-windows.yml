@@ -147,13 +147,15 @@ jobs:
       - name: Initialize Visual Studio x64 Developer Environment, Build & Package Hellbird
         shell: cmd
         run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALLDIR=%%i"
-          if not defined VSINSTALLDIR (
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "HELLBIRD_VS_DIR=%%i"
+          if not defined HELLBIRD_VS_DIR (
             echo Visual Studio x64 C++ build tools not found >&2
             exit /b 1
           )
-          call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
+          call "%HELLBIRD_VS_DIR%\VC\Auxiliary\Build\vcvars64.bat"
           set "PATH=%HELLBIRD_LLVM_BIN%;%PATH%"
+          echo VCToolsInstallDir=%VCToolsInstallDir%
+          echo LIB=%LIB%
           where clang-cl
           clang-cl --version
           python tools\hellbird.py build --upstream upstream\ladybird --preset %PRESET% --no-tests --target ladybird

@@ -73,10 +73,12 @@ jobs:
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           git config --global --add safe.directory "${GITHUB_WORKSPACE}/upstream/ladybird"
           echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache" >> "$GITHUB_ENV"
-          mkdir -p "${GITHUB_WORKSPACE}/.ccache" "${GITHUB_WORKSPACE}/upstream/ladybird/Build/caches/vcpkg-binary-cache"
+          mkdir -p "${GITHUB_WORKSPACE}/.ccache"
 
       - name: Prepare patched Ladybird source tree
-        run: python3 tools/hellbird.py prepare --upstream upstream/ladybird
+        run: |
+          python3 tools/hellbird.py prepare --upstream upstream/ladybird
+          mkdir -p "${GITHUB_WORKSPACE}/upstream/ladybird/Build/caches/vcpkg-binary-cache"
 
       - name: Install full build dependencies (Ubuntu 24.04 container)
         if: ${{ env.TARGET_DISTRO == 'ubuntu-24.04' }}
