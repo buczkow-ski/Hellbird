@@ -1,0 +1,106 @@
+name: Build Linux (x64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: 'CMake build preset'
+        type: choice
+        default: 'Distribution'
+        options:
+          - Distribution
+          - Release
+      package_format:
+        description: 'Linux package format'
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - txz
+          - deb
+  workflow_call:
+    inputs:
+      preset:
+        type: string
+        default: 'Distribution'
+      package_format:
+        type: string
+        default: 'all'
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    name: Linux x64 (${{ inputs.preset || 'Distribution' }})
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/ladybirdbrowser/ladybird-ci:2026.11.21
+      options: --ulimit core=1
+
+    env:
+      PRESET: ${{ inputs.preset || 'Distribution' }}
+      PKG_FORMAT: ${{ inputs.package_format || 'all' }}
+      CC: clang
+      CXX: clang++
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_COMPILERCHECK: "%compiler% -v"
+
+    steps:
+      - name: Checkout Hellbird
+        uses: actions/checkout@v4
+
+      - name: Configure git safe directories
+        run: |
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}/upstream/ladybird"
+
+      - name: Prepare patched Ladybird source tree
+        run: python3 tools/hellbird.py prepare --upstream upstream/ladybird
+
+      - name: Restore ccache and vcpkg caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.ccache
+            ${{ github.workspace }}/upstream/ladybird/Build/caches/vcpkg-binary-cache
+            ~/.cargo/registry
+          key: hellbird-linux-x64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**') }}
+          restore-keys: |
+            hellbird-linux-x64-${{ env.PRESET }}-
+            hellbird-linux-x64-
+
+      - name: Warm up Rust dependencies & vcpkg
+        working-directory: ${{ github.workspace }}/upstream/ladybird
+        run: |
+          for manifest in Cargo.toml Libraries/LibJS/Flap/Cargo.toml; do
+            if [ -f "${manifest}" ]; then
+              cargo fetch --locked --manifest-path "${manifest}"
+            fi
+          done
+          ./Meta/ladybird.py vcpkg --preset "${PRESET}"
+
+      - name: Configure & Build Hellbird
+        run: |
+          python3 tools/hellbird.py build \
+            --upstream upstream/ladybird \
+            --preset "${PRESET}" \
+            --extra-cmake-arg="-DCMAKE_C_COMPILER=clang" \
+            --extra-cmake-arg="-DCMAKE_CXX_COMPILER=clang++"
+
+      - name: Package Linux archives and Debian package
+        run: |
+          python3 tools/hellbird.py package \
+            --upstream upstream/ladybird \
+            --preset "${PRESET}" \
+            --format "${PKG_FORMAT}" \
+            --out dist
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hellbird-linux-x64-${{ env.PRESET }}
+          path: |
+            dist/*.tar.xz
+            dist/*.deb
+          if-no-files-found: error

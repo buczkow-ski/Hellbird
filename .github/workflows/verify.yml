@@ -1,0 +1,38 @@
+name: Verify Patches & Tooling
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify patch stack & unit tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Hellbird
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Python toolchain unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Check Hellbird patch & resource status
+        run: python3 tools/hellbird.py status
+
+      - name: Fetch pinned Ladybird upstream
+        run: python3 tools/hellbird.py fetch --upstream upstream/ladybird
+
+      - name: Verify full patch series applies and reverses cleanly
+        run: python3 tools/hellbird.py check --upstream upstream/ladybird
+
+      - name: Verify full prepare (patches + resource overlays)
+        run: python3 tools/hellbird.py prepare --upstream upstream/ladybird --no-fetch

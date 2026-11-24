@@ -1,0 +1,28 @@
+{
+  "mappings": [
+    {
+      "src": "branding/hellbird-256.png",
+      "dest": "UI/Icons/ladybird.png"
+    },
+    {
+      "src": "branding/hellbird-private-256.png",
+      "dest": "UI/Icons/ladybird-private.png"
+    },
+    {
+      "src": "branding/hellbird-48.png",
+      "dest": "Base/res/icons/48x48/app-browser.png"
+    },
+    {
+      "src": "branding/hellbird.svg",
+      "dest": "Meta/CMake/freedesktop/org.hellbird.Hellbird.svg"
+    },
+    {
+      "src": "branding/hellbird.ico",
+      "dest": "UI/Icons/hellbird.ico"
+    },
+    {
+      "src": "branding/hellbird.rc",
+      "dest": "UI/Icons/hellbird.rc"
+    }
+  ]
+}

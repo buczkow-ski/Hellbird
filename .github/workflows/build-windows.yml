@@ -1,0 +1,120 @@
+name: Build Windows (x64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: 'CMake build preset'
+        type: choice
+        default: 'Distribution'
+        options:
+          - Distribution
+          - Release
+          - Debug
+  workflow_call:
+    inputs:
+      preset:
+        type: string
+        default: 'Distribution'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Windows x64 (${{ inputs.preset || 'Distribution' }}, ClangCL)
+    runs-on: windows-2025
+
+    env:
+      PRESET: ${{ inputs.preset || 'Distribution' }}
+      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+      SCCACHE_CACHE_SIZE: 4G
+      SCCACHE_IDLE_TIMEOUT: 0
+
+    steps:
+      - name: Checkout Hellbird
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prepare patched Ladybird source tree
+        shell: pwsh
+        run: python tools/hellbird.py prepare --upstream upstream/ladybird
+
+      - name: Install Windows build tooling (sccache, pkgconfiglite, LLVM, wasm-tools)
+        shell: bash
+        run: |
+          choco install -y sccache pkgconfiglite --no-progress
+          if ! where clang-cl > /dev/null 2>&1 ; then
+            choco install -y llvm --no-progress --version=20.1.8
+            echo "C:/Program Files/LLVM/bin" >> "${GITHUB_PATH}"
+          fi
+          clang-cl --version
+
+          WASM_TOOLS_VER=1.243.0
+          WASM_NAME="wasm-tools-${WASM_TOOLS_VER}-x86_64-windows"
+          curl --fail --location --output "${WASM_NAME}.zip" \
+            "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VER}/${WASM_NAME}.zip"
+          unzip -q "${WASM_NAME}.zip"
+          rm "${WASM_NAME}.zip"
+          mv "${WASM_NAME}" "${GITHUB_WORKSPACE}/wasm-tools"
+          echo "${GITHUB_WORKSPACE}/wasm-tools" >> "${GITHUB_PATH}"
+
+      - name: Warm up Rust toolchain & cargo dependencies
+        working-directory: ${{ github.workspace }}/upstream/ladybird
+        shell: bash
+        run: |
+          rustup toolchain install
+          cargo --version
+          rustc --version
+          for manifest in Cargo.toml Libraries/LibJS/Flap/Cargo.toml; do
+            if [ -f "${manifest}" ]; then
+              cargo fetch --locked --manifest-path "${manifest}"
+            fi
+          done
+
+      - name: Restore sccache and vcpkg caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/.sccache
+            ${{ github.workspace }}/upstream/ladybird/Build/caches/vcpkg-binary-cache
+            ~/.cargo/registry
+          key: hellbird-windows-x64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**') }}
+          restore-keys: |
+            hellbird-windows-x64-${{ env.PRESET }}-
+            hellbird-windows-x64-
+
+      - name: Bootstrap vcpkg
+        working-directory: ${{ github.workspace }}/upstream/ladybird
+        shell: bash
+        run: python Meta/ladybird.py vcpkg --preset "${PRESET}"
+
+      - name: Initialize Visual Studio x64 Developer Environment & Build Hellbird
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALLDIR=%%i"
+          if not defined VSINSTALLDIR (
+            echo Visual Studio x64 C++ build tools not found >&2
+            exit /b 1
+          )
+          call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
+          python tools\hellbird.py build --upstream upstream\ladybird --preset %PRESET% --target ladybird
+
+      - name: Package Windows portable archive (.zip)
+        shell: pwsh
+        run: |
+          python tools/hellbird.py package `
+            --upstream upstream/ladybird `
+            --preset $env:PRESET `
+            --out dist
+
+      - name: Upload Windows portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: hellbird-windows-x64-${{ env.PRESET }}
+          path: dist/hellbird-*-Windows-x86_64.zip
+          if-no-files-found: error
