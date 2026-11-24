@@ -1,0 +1,137 @@
+diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
+index 3e8acc84ac..39434daa88 100644
+--- a/UI/Qt/Application.cpp
++++ b/UI/Qt/Application.cpp
+@@ -487,6 +487,13 @@ public:
+                 tab->focus_location_editor();
+         });
+ 
++        m_copy_url_action = make_action("Copy Page &URL");
++        m_copy_url_action->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
++        QObject::connect(m_copy_url_action, &QAction::triggered, this, []() {
++            if (auto* tab = Application::the().active_tab())
++                tab->copy_url();
++        });
++
+         m_open_settings_action = create_application_action(*m_application_widget, application.open_settings_page_action(), IncludeActionIcon::No);
+         m_open_downloads_action = create_application_action(*m_application_widget, application.open_downloads_page_action(), IncludeActionIcon::No);
+ 
+@@ -662,6 +669,7 @@ private:
+     QAction* m_toggle_bookmark_bar_action { nullptr };
+     QAction* m_toggle_sidebar_action { nullptr };
+     QAction* m_open_location_action { nullptr };
++    QAction* m_copy_url_action { nullptr };
+     QAction* m_reload_action { nullptr };
+     QAction* m_reload_bypassing_cache_action { nullptr };
+     QAction* m_stop_action { nullptr };
+@@ -3000,6 +3008,8 @@ QMenuBar* Application::create_application_menu_bar(ForBrowserWindow for_browser_
+     edit_menu->addAction(create_application_action(*menu_bar, application.select_all_action(), IncludeActionIcon::No));
+     edit_menu->addSeparator();
+     if (for_browser_window == ForBrowserWindow::Yes) {
++        edit_menu->addAction(copy_url_action());
++        edit_menu->addSeparator();
+         edit_menu->addAction(find_in_page_action());
+         edit_menu->addAction(find_next_action());
+         edit_menu->addAction(find_previous_action());
+@@ -3100,6 +3110,7 @@ DEFINE_APP_MENU_GETTER(QAction, open_downloads_action);
+ DEFINE_APP_MENU_GETTER(QAction, toggle_bookmark_bar_action);
+ DEFINE_APP_MENU_GETTER(QAction, toggle_sidebar_action);
+ DEFINE_APP_MENU_GETTER(QAction, open_location_action);
++DEFINE_APP_MENU_GETTER(QAction, copy_url_action);
+ DEFINE_APP_MENU_GETTER(QAction, reload_action);
+ DEFINE_APP_MENU_GETTER(QAction, reload_bypassing_cache_action);
+ DEFINE_APP_MENU_GETTER(QAction, stop_action);
+diff --git a/UI/Qt/Application.h b/UI/Qt/Application.h
+index 1663d14af3..127f55228f 100644
+--- a/UI/Qt/Application.h
++++ b/UI/Qt/Application.h
+@@ -207,6 +207,7 @@ public:
+     QAction* toggle_bookmark_bar_action();
+     QAction* toggle_sidebar_action();
+     QAction* open_location_action();
++    QAction* copy_url_action();
+     QAction* reload_action();
+     QAction* reload_bypassing_cache_action();
+     QAction* stop_action();
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index 42462650ec..6ee71fe1d4 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -503,6 +503,7 @@ void BrowserWindow::initialize_application_actions()
+     addAction(application.toggle_bookmark_bar_action());
+     addAction(application.toggle_sidebar_action());
+     addAction(application.open_location_action());
++    addAction(application.copy_url_action());
+     addAction(application.reload_action());
+     addAction(application.reload_bypassing_cache_action());
+     addAction(application.find_in_page_action());
+diff --git a/UI/Qt/Menu.cpp b/UI/Qt/Menu.cpp
+index 9d24174694..ff8cd1d8d8 100644
+--- a/UI/Qt/Menu.cpp
++++ b/UI/Qt/Menu.cpp
+@@ -306,7 +306,6 @@ static void set_action_shortcuts(QAction& qaction, ActionID id)
+     case ActionID::ToggleDevTools:
+         qaction.setShortcuts({
+             QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I),
+-            QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C),
+             QKeySequence(Qt::Key_F12),
+         });
+         break;
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index c5169d34b2..7b5432d4b6 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -904,13 +904,16 @@ void Tab::create_tab_context_menu()
+         m_window->detach_tab_to_new_window(tab_index(), m_window->mapToGlobal(QPoint(m_window->width() / 4, m_window->height() / 4)));
+     });
+ 
+-    auto* copy_link_action = new QAction("Copy &Link", this);
+-    QObject::connect(copy_link_action, &QAction::triggered, this, [this]() {
+-        QGuiApplication::clipboard()->setText(qstring_from_ak_string(url().serialize()));
++    // NB: The shortcuts belong to the application's actions. The menu only shows them.
++    auto* copy_url_action = new QAction("Copy &URL", this);
++    copy_url_action->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
++    copy_url_action->setShortcutContext(Qt::WidgetShortcut);
++    copy_url_action->setShortcutVisibleInContextMenu(true);
++    QObject::connect(copy_url_action, &QAction::triggered, this, [this]() {
++        copy_url();
+     });
+ 
+     auto* close_tab_action = new QAction("&Close Tab", this);
+-    // NB: The shortcuts belong to the application's actions. The menu only shows them.
+     close_tab_action->setShortcut(QKeySequence(QKeySequence::Close));
+     close_tab_action->setShortcutContext(Qt::WidgetShortcut);
+     close_tab_action->setShortcutVisibleInContextMenu(true);
+@@ -952,7 +955,7 @@ void Tab::create_tab_context_menu()
+     m_context_menu->addAction(mute_tab_action);
+     m_context_menu->addSeparator();
+     m_context_menu->addAction(move_to_new_window_action);
+-    m_context_menu->addAction(copy_link_action);
++    m_context_menu->addAction(copy_url_action);
+     m_context_menu->addSeparator();
+     m_context_menu->addAction(close_tab_action);
+     m_context_menu->addAction(close_other_tabs_action);
+@@ -1069,6 +1072,11 @@ void Tab::set_window(BrowserWindow& window)
+     m_view->set_window_size({ window.width(), window.height() });
+ }
+ 
++void Tab::copy_url()
++{
++    QGuiApplication::clipboard()->setText(qstring_from_ak_string(url().serialize()));
++}
++
+ void Tab::set_pinned(bool pinned)
+ {
+     m_is_pinned = pinned;
+diff --git a/UI/Qt/Tab.h b/UI/Qt/Tab.h
+index fb1452fc56..06e63dcde1 100644
+--- a/UI/Qt/Tab.h
++++ b/UI/Qt/Tab.h
+@@ -99,6 +99,7 @@ public:
+     void ensure_loaded();
+ 
+     URL::URL url() const;
++    void copy_url();
+ 
+     Optional<SessionTabId> session_tab_id() const;
+     void set_session_tab_id(SessionTabId);

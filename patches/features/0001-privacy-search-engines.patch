@@ -1,0 +1,91 @@
+diff --git a/Base/res/ladybird/about-pages/welcome.js b/Base/res/ladybird/about-pages/welcome.js
+index 2222df1d57..2dc35bba9e 100644
+--- a/Base/res/ladybird/about-pages/welcome.js
++++ b/Base/res/ladybird/about-pages/welcome.js
+@@ -50,7 +50,7 @@ function updateSearchSuggestions() {
+ }
+ 
+ function renderSearchEngines() {
+-    const names = engines.search.map(engine => engine.name).sort((a, b) => a.localeCompare(b));
++    const names = engines.search.map(engine => engine.name);
+ 
+     searchEngines.replaceChildren();
+     for (const name of names) {
+diff --git a/Libraries/LibWebView/SearchEngine.cpp b/Libraries/LibWebView/SearchEngine.cpp
+index e9136fa722..71526066a3 100644
+--- a/Libraries/LibWebView/SearchEngine.cpp
++++ b/Libraries/LibWebView/SearchEngine.cpp
+@@ -11,15 +11,18 @@
+ 
+ namespace WebView {
+ 
++// NB: The engines are offered in this order, which starts with the ones that do not profile their users.
+ static auto const& s_builtin_search_engines = *new auto(to_array<SearchEngine>({
+-    { "Bing"_string, "https://www.bing.com/search?q=%s"_string, "https://www.bing.com/osjson.aspx?query=%s"_string },
+-    { "Brave"_string, "https://search.brave.com/search?q=%s"_string, "https://search.brave.com/api/suggest?q=%s"_string },
+     { "DuckDuckGo"_string, "https://duckduckgo.com/?q=%s"_string, "https://duckduckgo.com/ac/?q=%s&type=list"_string },
+-    { "Ecosia"_string, "https://ecosia.org/search?q=%s"_string, "https://ac.ecosia.org/autocomplete?q=%s&type=list"_string },
+-    { "Google"_string, "https://www.google.com/search?q=%s"_string, "https://www.google.com/complete/search?client=chrome&q=%s"_string },
+     { "Kagi"_string, "https://kagi.com/search?q=%s"_string, "https://kagisuggest.com/api/autosuggest?q=%s"_string },
++    { "Startpage"_string, "https://www.startpage.com/sp/search?query=%s"_string, "https://www.startpage.com/osuggestions?q=%s"_string },
++    { "Qwant"_string, "https://www.qwant.com/?q=%s"_string, "https://api.qwant.com/api/suggest/?q=%s&client=opensearch"_string },
++    { "Brave Search"_string, "https://search.brave.com/search?q=%s"_string, "https://search.brave.com/api/suggest?q=%s"_string },
++    { "Ecosia"_string, "https://www.ecosia.org/search?q=%s"_string, "https://ac.ecosia.org/autocomplete?q=%s&type=list"_string },
+     { "Mojeek"_string, "https://www.mojeek.com/search?q=%s"_string },
+-    { "Startpage"_string, "https://startpage.com/search?q=%s"_string, "https://www.startpage.com/osuggestions?q=%s"_string },
++    { "Wikipedia"_string, "https://en.wikipedia.org/w/index.php?search=%s"_string, "https://en.wikipedia.org/w/api.php?action=opensearch&search=%s"_string },
++    { "Google"_string, "https://www.google.com/search?q=%s"_string, "https://www.google.com/complete/search?client=chrome&q=%s"_string },
++    { "Bing"_string, "https://www.bing.com/search?q=%s"_string, "https://www.bing.com/osjson.aspx?query=%s"_string },
+     { "Yahoo"_string, "https://search.yahoo.com/search?p=%s"_string, "https://search.yahoo.com/sugg/gossip/gossip-us-ura/?output=fxjson&command=%s"_string },
+     { "Yandex"_string, "https://yandex.com/search/?text=%s"_string, "https://suggest.yandex.com/suggest-ff.cgi?part=%s&uil=en&v=3"_string },
+ }));
+@@ -29,6 +32,11 @@ ReadonlySpan<SearchEngine> builtin_search_engines()
+     return s_builtin_search_engines;
+ }
+ 
++SearchEngine const& default_search_engine()
++{
++    return s_builtin_search_engines.first();
++}
++
+ String SearchEngine::format_search_query_for_display(StringView query) const
+ {
+     static constexpr auto MAX_SEARCH_STRING_LENGTH = 32;
+diff --git a/Libraries/LibWebView/SearchEngine.h b/Libraries/LibWebView/SearchEngine.h
+index a5e0d62a1c..c1704688a3 100644
+--- a/Libraries/LibWebView/SearchEngine.h
++++ b/Libraries/LibWebView/SearchEngine.h
+@@ -26,5 +26,6 @@ struct SearchEngine {
+ };
+ 
+ WEBVIEW_API ReadonlySpan<SearchEngine> builtin_search_engines();
++WEBVIEW_API SearchEngine const& default_search_engine();
+ 
+ }
+diff --git a/Libraries/LibWebView/Settings.cpp b/Libraries/LibWebView/Settings.cpp
+index 47f028aef4..c88fc8f46f 100644
+--- a/Libraries/LibWebView/Settings.cpp
++++ b/Libraries/LibWebView/Settings.cpp
+@@ -455,8 +455,12 @@ void Settings::load_from_json(JsonValue const& json_value)
+             });
+         }
+ 
+-        if (auto search_engine_name = search_engine->get_string(SEARCH_ENGINE_SELECTION_KEY); search_engine_name.has_value())
+-            m_search_engine_settings.engine = find_search_engine_by_name(*search_engine_name);
++        // NB: An engine of null is the user's choice to go without one, so the default must not take its place.
++        if (auto selection = search_engine->get(SEARCH_ENGINE_SELECTION_KEY); selection.has_value()) {
++            m_search_engine_settings.engine.clear();
++            if (selection->is_string())
++                m_search_engine_settings.engine = find_search_engine_by_name(selection->as_string());
++        }
+ 
+         m_search_engine_settings.suggestions = search_engine->get_bool(SEARCH_SUGGESTIONS_ENABLED_KEY).value_or(false);
+     }
+@@ -748,6 +752,7 @@ void Settings::reset_to_defaults()
+ 
+     m_new_tab_page_url = default_new_tab_page_url();
+     m_languages = Web::default_preferred_languages();
++    m_search_engine_settings.engine = default_search_engine();
+ 
+     for (auto const& variable : config_variable_definitions()) {
+         m_config_variables[static_cast<size_t>(variable.id)] = variable.default_value;

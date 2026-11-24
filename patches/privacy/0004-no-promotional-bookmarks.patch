@@ -1,0 +1,57 @@
+diff --git a/UI/Qt/BookmarkStore.cpp b/UI/Qt/BookmarkStore.cpp
+index fd41381d0d..8da4ac4738 100644
+--- a/UI/Qt/BookmarkStore.cpp
++++ b/UI/Qt/BookmarkStore.cpp
+@@ -141,51 +141,12 @@ static JsonObject serialize_bookmark_item(BookmarkItem const& item, BookmarkStor
+     return object;
+ }
+ 
+-static Vector<BookmarkItem> create_default_bookmarks()
+-{
+-    auto now = UnixDateTime::now();
+-
+-    return {
+-        {
+-            .id = generate_random_uuid(),
+-            .date_added = now,
+-            .last_modified = now,
+-            .data = BookmarkItem::Bookmark {
+-                .url = URL::Parser::basic_parse("https://ladybird.org/"sv).release_value(),
+-                .title = "Ladybird"_string,
+-                .favicon_hash = {},
+-            },
+-        },
+-        {
+-            .id = generate_random_uuid(),
+-            .date_added = now,
+-            .last_modified = now,
+-            .data = BookmarkItem::Bookmark {
+-                .url = URL::Parser::basic_parse("https://github.com/LadybirdBrowser/ladybird"sv).release_value(),
+-                .title = "Ladybird GitHub"_string,
+-                .favicon_hash = {},
+-            },
+-        },
+-        {
+-            .id = generate_random_uuid(),
+-            .date_added = now,
+-            .last_modified = now,
+-            .data = BookmarkItem::Bookmark {
+-                .url = URL::Parser::basic_parse("https://discord.com/invite/nvfjVJ4Svh"sv).release_value(),
+-                .title = "Ladybird Discord"_string,
+-                .favicon_hash = {},
+-            },
+-        },
+-    };
+-}
+-
+ BookmarkStore BookmarkStore::create(ByteString bookmarks_path, WebView::FaviconStore& favicon_store)
+ {
+     BookmarkStore store { move(bookmarks_path), favicon_store };
+ 
+     if (!FileSystem::exists(store.m_bookmarks_path)) {
+-        store.m_items = create_default_bookmarks();
+-        store.read_missing_favicons();
++        // NB: A new profile starts with no bookmarks.
+         store.persist_bookmarks();
+         return store;
+     }

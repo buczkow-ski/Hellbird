@@ -1,0 +1,263 @@
+diff --git a/Base/res/ladybird/about-pages/settings.html b/Base/res/ladybird/about-pages/settings.html
+index 9737c774dc..afdffb38d6 100644
+--- a/Base/res/ladybird/about-pages/settings.html
++++ b/Base/res/ladybird/about-pages/settings.html
+@@ -1280,7 +1280,7 @@
+                         <label for="update-checks">
+                             Update checks
+                             <p id="update-checks-description" class="description">
+-                                Periodically check whether a newer version of Ladybird is available.
++                                Periodically ask ladybird.org whether a newer Ladybird engine release is available.
+                             </p>
+                         </label>
+                         <input id="update-checks" type="checkbox" switch />
+diff --git a/Base/res/ladybird/about-pages/welcome.html b/Base/res/ladybird/about-pages/welcome.html
+index ba6aac03b2..107f044a7c 100644
+--- a/Base/res/ladybird/about-pages/welcome.html
++++ b/Base/res/ladybird/about-pages/welcome.html
+@@ -141,13 +141,6 @@ SPDX-License-Identifier: BSD-2-Clause
+                             aria-labelledby="ad-blocking-title"
+                         />
+                     </div>
+-                    <div class="switch-row control-row">
+-                        <label for="enable-update-checks">
+-                            <h2 id="update-checks-title">Check for updates</h2>
+-                            <p class="muted small description">Ladybird tells you when a newer version is available.</p>
+-                        </label>
+-                        <input id="enable-update-checks" type="checkbox" switch aria-labelledby="update-checks-title" />
+-                    </div>
+                     <div id="default-browser" class="switch-row hidden">
+                         <label id="default-browser-label">
+                             <h2>Default browser</h2>
+diff --git a/Base/res/ladybird/about-pages/welcome.js b/Base/res/ladybird/about-pages/welcome.js
+index 7b755fd7dd..2222df1d57 100644
+--- a/Base/res/ladybird/about-pages/welcome.js
++++ b/Base/res/ladybird/about-pages/welcome.js
+@@ -14,7 +14,6 @@ const searchSuggestionsDescription = document.querySelector("#search-suggestions
+ const tabLayoutInputs = document.querySelectorAll('input[name="tab-layout"]');
+ const colorThemeInputs = document.querySelectorAll('input[name="color-theme"]');
+ const enableContentBlocking = document.querySelector("#enable-content-blocking");
+-const enableUpdateChecks = document.querySelector("#enable-update-checks");
+ const defaultBrowser = document.querySelector("#default-browser");
+ const defaultBrowserLabel = document.querySelector("#default-browser-label");
+ const defaultBrowserDescription = document.querySelector("#default-browser-description");
+@@ -123,12 +122,6 @@ function updateDefaultBrowser() {
+     else defaultBrowserLabel.removeAttribute("for");
+ }
+ 
+-function updateUpdateChecks() {
+-    const networkFeatures = settings.backgroundNetworking.features;
+-    if (Object.hasOwn(networkFeatures, "updateChecks")) enableUpdateChecks.checked = networkFeatures.updateChecks;
+-    else enableUpdateChecks.closest(".switch-row").remove();
+-}
+-
+ function initialize() {
+     if (initialized || !settings || !engines || !features) return;
+     initialized = true;
+@@ -142,7 +135,6 @@ function initialize() {
+     updateSearchSuggestions();
+ 
+     enableContentBlocking.checked = settings.contentBlockers.enabled;
+-    updateUpdateChecks();
+     setupOptions.disabled = false;
+     startBrowsing.disabled = false;
+ }
+@@ -187,11 +179,6 @@ function applyContentBlocking() {
+     ladybird.sendMessage("setFilterListUpdatesEnabled", enableContentBlocking.checked);
+ }
+ 
+-enableUpdateChecks.addEventListener("change", () => {
+-    if (!initialized) return;
+-    ladybird.sendMessage("setUpdateChecksEnabled", enableUpdateChecks.checked);
+-});
+-
+ // The system may ask before it changes the default browser, so the button waits for its answer.
+ makeDefaultBrowser.addEventListener("click", () => {
+     if (!initialized) return;
+@@ -234,7 +221,6 @@ document.addEventListener("WebUIMessage", event => {
+                     radio.checked = radio.value === settings.searchEngine.engine;
+                 updateSearchSuggestions();
+             }
+-            if (Object.hasOwn(data, "backgroundNetworking")) updateUpdateChecks();
+             if (Object.hasOwn(data, "defaultBrowser")) {
+                 defaultBrowserFailure = null;
+                 updateDefaultBrowser();
+diff --git a/Libraries/LibWebView/UpdateCheck.cpp b/Libraries/LibWebView/UpdateCheck.cpp
+index c72fd92818..92c49ccf09 100644
+--- a/Libraries/LibWebView/UpdateCheck.cpp
++++ b/Libraries/LibWebView/UpdateCheck.cpp
+@@ -12,7 +12,6 @@
+ #include <AK/JsonObject.h>
+ #include <AK/JsonValue.h>
+ #include <AK/LexicalPath.h>
+-#include <AK/StringBuilder.h>
+ #include <LibCore/BrowserVersion.h>
+ #include <LibCore/EventLoop.h>
+ #include <LibCore/File.h>
+@@ -34,10 +33,6 @@
+ #    include <sys/sysctl.h>
+ #endif
+ 
+-#if defined(AK_OS_WINDOWS) && defined(LADYBIRD_HAS_UPDATE_CHECK)
+-#    include <AK/Windows.h>
+-#endif
+-
+ namespace WebView {
+ 
+ #if defined(LADYBIRD_HAS_UPDATE_CHECK)
+@@ -183,31 +178,6 @@ static Optional<String> current_macos_version()
+ #endif
+ }
+ 
+-#if defined(AK_OS_WINDOWS) && defined(LADYBIRD_HAS_UPDATE_CHECK)
+-// GetVersionEx reports an older version of Windows to an application that does not declare in its manifest that it
+-// supports the newer one. RtlGetVersion always reports the version that runs.
+-static Optional<String> current_windows_version()
+-{
+-    using RtlGetVersionFunction = NTSTATUS(WINAPI*)(PRTL_OSVERSIONINFOW);
+-
+-    auto* ntdll = GetModuleHandleW(L"ntdll.dll");
+-    if (!ntdll)
+-        return {};
+-#    pragma clang diagnostic push
+-#    pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+-    auto rtl_get_version = reinterpret_cast<RtlGetVersionFunction>(GetProcAddress(ntdll, "RtlGetVersion"));
+-#    pragma clang diagnostic pop
+-    if (!rtl_get_version)
+-        return {};
+-
+-    RTL_OSVERSIONINFOW info {};
+-    info.dwOSVersionInfoSize = sizeof(info);
+-    if (rtl_get_version(&info) != STATUS_SUCCESS)
+-        return {};
+-    return MUST(String::formatted("{}.{}.{}", info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber));
+-}
+-#endif
+-
+ SystemDescription describe_current_system()
+ {
+     SystemDescription system;
+@@ -360,102 +330,6 @@ AK::Duration time_until_next_update_check(UnixDateTime last_check, UnixDateTime
+     return interval - elapsed;
+ }
+ 
+-struct CountedPeriods {
+-    bool day { false };
+-    bool week { false };
+-    bool month { false };
+-};
+-
+-// Days, weeks and months begin at midnight UTC. Weeks start on Monday, like those of ISO 8601, and the Unix epoch fell
+-// on a Thursday.
+-static CountedPeriods periods_begun_since(UnixDateTime earlier, UnixDateTime now)
+-{
+-    auto days = [](UnixDateTime time) { return time.seconds_since_epoch() / (24 * 60 * 60); };
+-    auto weeks = [&](UnixDateTime time) { return (days(time) + 3) / 7; };
+-    auto month = [](UnixDateTime time) { return time.to_byte_string("%Y-%m"sv, UnixDateTime::LocalTime::No); };
+-    return { .day = days(now) > days(earlier), .week = weeks(now) > weeks(earlier), .month = month(now) > month(earlier) };
+-}
+-
+-static StringView install_method_name(InstallMethod install_method)
+-{
+-    switch (install_method) {
+-    case InstallMethod::MacOSApp:
+-        return "app"sv;
+-    case InstallMethod::DEB:
+-        return "deb"sv;
+-    case InstallMethod::RPM:
+-        return "rpm"sv;
+-    case InstallMethod::Flatpak:
+-        return "flatpak"sv;
+-    case InstallMethod::Source:
+-        return "source"sv;
+-    }
+-    VERIFY_NOT_REACHED();
+-}
+-
+-static void append_member(StringBuilder& builder, StringView key, StringView value)
+-{
+-    if (!builder.is_empty())
+-        builder.append(", "sv);
+-    builder.append(key);
+-    if (!value.is_empty())
+-        builder.appendff("={}", value);
+-}
+-
+-static void append_string_member(StringBuilder& builder, StringView key, StringView value)
+-{
+-    if (value.is_empty() || !all_of(value, [](char c) { return c >= 0x20 && c <= 0x7e; }))
+-        return;
+-
+-    StringBuilder string;
+-    string.append('"');
+-    for (auto c : value) {
+-        if (c == '"' || c == '\\')
+-            string.append('\\');
+-        string.append(c);
+-    }
+-    string.append('"');
+-    append_member(builder, key, string.string_view());
+-}
+-
+-// The header is a dictionary of structured field values (RFC 9651), which the server parses like any other. It tells
+-// which kind of installation checks, and nothing that tells one installation apart from another of the same kind.
+-static ByteString update_check_header(SystemDescription const& system, StringView browser_version, CountedPeriods counted)
+-{
+-    StringBuilder builder;
+-    append_string_member(builder, "version"sv, browser_version);
+-
+-#    if defined(AK_OS_MACOS)
+-    append_member(builder, "os"sv, "macos"sv);
+-    if (system.macos_version.has_value())
+-        append_string_member(builder, "os-version"sv, system.macos_version->bytes_as_string_view().find_first_split_view('.'));
+-#    elif defined(AK_OS_LINUX)
+-    append_member(builder, "os"sv, "linux"sv);
+-    if (system.os_release.version_id.has_value())
+-        append_string_member(builder, "os-version"sv, *system.os_release.version_id);
+-    if (system.os_release.id.has_value())
+-        append_string_member(builder, "distro"sv, *system.os_release.id);
+-#    elif defined(AK_OS_WINDOWS)
+-    append_member(builder, "os"sv, "windows"sv);
+-    if (auto windows_version = current_windows_version(); windows_version.has_value())
+-        append_string_member(builder, "os-version"sv, *windows_version);
+-#    endif
+-
+-    if (system.architecture == Architecture::X86_64)
+-        append_member(builder, "arch"sv, "x86_64"sv);
+-    else if (system.architecture == Architecture::AArch64)
+-        append_member(builder, "arch"sv, "aarch64"sv);
+-
+-    append_member(builder, "pkg"sv, install_method_name(system.install_method));
+-    if (counted.day)
+-        append_member(builder, "daily"sv, {});
+-    if (counted.week)
+-        append_member(builder, "weekly"sv, {});
+-    if (counted.month)
+-        append_member(builder, "monthly"sv, {});
+-    return builder.to_byte_string();
+-}
+-
+ String release_page_url(StringView version)
+ {
+     return MUST(String::formatted("https://github.com/LadybirdBrowser/ladybird/releases/tag/{}", version));
+@@ -599,19 +473,9 @@ void UpdateChecker::check(UpdateCheckTrigger trigger)
+         return;
+     }
+ 
+-    // The first check of each day, week and month counts this installation once for it, and the very first check counts
+-    // it for all three.
+-    CountedPeriods counted;
+-    if (BROWSER_IS_RELEASE_BUILD) {
+-        if (auto previous_check = last_check(); previous_check.has_value())
+-            counted = periods_begun_since(*previous_check, m_check_started);
+-        else
+-            counted = { .day = true, .week = true, .month = true };
+-    }
+-
++    // NB: The request says nothing about this installation, so checks are not counted and cannot tell users apart.
+     auto headers = HTTP::HeaderList::create();
+     headers->set({ "User-Agent"sv, Web::default_user_agent });
+-    headers->set({ "Ladybird-Update-Check"sv, update_check_header(describe_current_system(), BROWSER_VERSION ""sv, counted) });
+     m_request = client.value()->start_request("GET"sv, URL::Parser::basic_parse(RELEASES_FEED_URL).release_value(), {}, *headers, {},
+         HTTP::CacheMode::NoStore, HTTP::Cookie::IncludeCredentials::No);
+     if (!m_request) {

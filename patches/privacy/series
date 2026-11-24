@@ -1,0 +1,5 @@
+# Stage 2: privacy-by-default and zero-telemetry patches.
+0001-private-by-default-settings.patch
+0002-no-default-report-server.patch
+0003-anonymous-opt-in-update-checks.patch
+0004-no-promotional-bookmarks.patch

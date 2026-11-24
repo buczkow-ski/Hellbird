@@ -1,0 +1,141 @@
+diff --git a/Libraries/LibWebView/ReportSubmission.cpp b/Libraries/LibWebView/ReportSubmission.cpp
+index fddb2f7e57..dd181be6aa 100644
+--- a/Libraries/LibWebView/ReportSubmission.cpp
++++ b/Libraries/LibWebView/ReportSubmission.cpp
+@@ -27,7 +27,6 @@
+ 
+ namespace WebView {
+ 
+-static constexpr auto default_endpoint = "https://reports.app.ladybird.org"sv;
+ static constexpr auto challenge_path = "/api/v1/challenges"sv;
+ static constexpr auto report_path = "/api/v1/reports"sv;
+ static constexpr auto challenge_algorithm = "sha256-seed-nonce-le-v1"sv;
+@@ -388,14 +387,22 @@ void ReportSubmission::send_report(ProofOfWork proof)
+ // A response outside the 2xx range fails this attempt, and the activity names what was going on in that message.
+ static Optional<URL::URL> report_server_url(StringView path)
+ {
+-    auto endpoint = Core::Environment::get("LADYBIRD_REPORTS_ENDPOINT"sv).value_or(default_endpoint);
+-    auto url = URL::Parser::basic_parse(MUST(String::formatted("{}{}{}", endpoint,
+-        endpoint.ends_with('/') ? ""sv : "/"sv, path.substring_view(1))));
++    // NB: No report leaves this computer by default, so there is no server that reports go to on their own.
++    auto endpoint = Core::Environment::get("LADYBIRD_REPORTS_ENDPOINT"sv);
++    if (!endpoint.has_value() || endpoint->is_empty())
++        return {};
++    auto url = URL::Parser::basic_parse(MUST(String::formatted("{}{}{}", *endpoint,
++        endpoint->ends_with('/') ? ""sv : "/"sv, path.substring_view(1))));
+     if (!url.has_value() || (url->scheme() != "https"sv && url->scheme() != "http"sv))
+         return {};
+     return url;
+ }
+ 
++bool ReportSubmission::has_report_server()
++{
++    return report_server_url(report_path).has_value();
++}
++
+ bool ReportSubmission::is_report_server_url(URL::URL const& url)
+ {
+     for (auto path : { challenge_path, report_path }) {
+@@ -410,7 +417,7 @@ void ReportSubmission::post(StringView path, StringView activity, StringView con
+ {
+     auto url = report_server_url(path);
+     if (!url.has_value()) {
+-        fail("Invalid report server configuration."_string, ShouldRetry::No);
++        fail("This build does not send reports anywhere."_string, ShouldRetry::No);
+         return;
+     }
+ 
+diff --git a/Libraries/LibWebView/ReportSubmission.h b/Libraries/LibWebView/ReportSubmission.h
+index 1a2c472b04..b88f234403 100644
+--- a/Libraries/LibWebView/ReportSubmission.h
++++ b/Libraries/LibWebView/ReportSubmission.h
+@@ -91,6 +91,8 @@ public:
+     using PostFunction = Function<Function<void()>(URL::URL const&, Vector<HTTP::Header>, ByteString body, Function<void(PostResponse)>)>;
+     // A process with no RequestServer of its own posts its reports through this.
+     static void set_post_function(PostFunction);
++    // Whether there is a server to post reports to. There is none unless LADYBIRD_REPORTS_ENDPOINT names one.
++    static bool has_report_server();
+     // Whether the URL is one that reports are posted to.
+     static bool is_report_server_url(URL::URL const&);
+ 
+diff --git a/Libraries/LibWebView/ViewImplementation.cpp b/Libraries/LibWebView/ViewImplementation.cpp
+index 469eeb7b77..aa51a58693 100644
+--- a/Libraries/LibWebView/ViewImplementation.cpp
++++ b/Libraries/LibWebView/ViewImplementation.cpp
+@@ -38,6 +38,7 @@
+ #include <LibWebView/HistoryDebug.h>
+ #include <LibWebView/PageTranslation.h>
+ #include <LibWebView/PermissionManager.h>
++#include <LibWebView/ReportSubmission.h>
+ #include <LibWebView/SessionHistory.h>
+ #include <LibWebView/TabPerformanceMonitor.h>
+ #include <LibWebView/URL.h>
+@@ -1942,6 +1943,8 @@ void ViewImplementation::did_start_showing_page_source()
+ // Only a website the page is showing can be reported, so not a browser page or a page that crashed.
+ bool ViewImplementation::can_report_website_issue() const
+ {
++    if (!ReportSubmission::has_report_server())
++        return false;
+     auto url = this->url();
+     return (url.scheme() == "http"sv || url.scheme() == "https"sv) && !crash_overlay_active();
+ }
+diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
+index 15d259da41..3e8acc84ac 100644
+--- a/UI/Qt/Application.cpp
++++ b/UI/Qt/Application.cpp
+@@ -547,8 +547,10 @@ public:
+         m_debug_menu = create_application_menu(*m_application_widget, application.debug_menu());
+ 
+         m_help_menu = new QMenu("Help", m_application_widget);
+-        m_help_menu->addAction(create_application_action(*m_application_widget, application.report_website_issue_action(), IncludeActionIcon::No));
+-        m_help_menu->addSeparator();
++        if (WebView::ReportSubmission::has_report_server()) {
++            m_help_menu->addAction(create_application_action(*m_application_widget, application.report_website_issue_action(), IncludeActionIcon::No));
++            m_help_menu->addSeparator();
++        }
+         m_help_menu->addAction(create_application_action(*m_application_widget, application.open_about_page_action(), IncludeActionIcon::No));
+ 
+ #if defined(LADYBIRD_HAS_UPDATE_CHECK)
+diff --git a/UI/Qt/ContextMenus.cpp b/UI/Qt/ContextMenus.cpp
+index a372c68801..36e733278e 100644
+--- a/UI/Qt/ContextMenus.cpp
++++ b/UI/Qt/ContextMenus.cpp
+@@ -230,12 +230,12 @@ static NonnullRefPtr<Menu> create_page_context_menu(RemoteView& view, ContextMen
+         view_source_action->set_enabled(view.can_view_source());
+         menu->add_action(move(view_source_action));
+     }
+-    auto report_website_issue_action = Action::create("Report Website Issue…"sv, ActionID::ReportWebsiteIssue, on_view(view_id, [](RemoteView& view) {
+-        view.report_website_issue();
+-    }));
+-    report_website_issue_action->set_enabled(view.can_report_website_issue());
+-    menu->add_action(move(report_website_issue_action));
+-    menu->add_separator();
++    if (view.can_report_website_issue()) {
++        menu->add_action(Action::create("Report Website Issue…"sv, ActionID::ReportWebsiteIssue, on_view(view_id, [](RemoteView& view) {
++            view.report_website_issue();
++        })));
++        menu->add_separator();
++    }
+     if (is_about_page) {
+         menu->add_action(Action::create("Take Screenshot..."sv, ActionID::TakeScreenshot, on_view(view_id, [](RemoteView& view) {
+             if (view.on_request_screenshot)
+diff --git a/UI/Qt/SiteSettingsPopover.cpp b/UI/Qt/SiteSettingsPopover.cpp
+index 1d83427e86..c79080abd5 100644
+--- a/UI/Qt/SiteSettingsPopover.cpp
++++ b/UI/Qt/SiteSettingsPopover.cpp
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: BSD-2-Clause
+  */
+ 
++#include <LibWebView/ReportSubmission.h>
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/SiteSettingsPopover.h>
+@@ -352,6 +353,7 @@ SiteSettingsPopover::SiteSettingsPopover(QWidget* parent, WebView::Settings& set
+         if (on_report_broken_site)
+             on_report_broken_site();
+     });
++    report_link->setVisible(WebView::ReportSubmission::has_report_server());
+     blocked_links->addWidget(report_link);
+     blocked_links->addStretch(1);
+     auto* filter_lists_link = create_link(*m_blocked_page, "Filter lists");
