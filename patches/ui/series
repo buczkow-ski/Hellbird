@@ -11,3 +11,5 @@
 0010-hellbird-shield-toolbar-and-popup.patch
 0011-fix-windows-dynamic-ui-and-overlays.patch
 0012-i18n-polish-and-german.patch
+0013-fix-location-popup-and-suggestions.patch
+0014-ublock-element-picker.patch

@@ -1,0 +1,3536 @@
+diff --git a/Libraries/LibWeb/CMakeLists.txt b/Libraries/LibWeb/CMakeLists.txt
+index f4ca96c649..6367169872 100644
+--- a/Libraries/LibWeb/CMakeLists.txt
++++ b/Libraries/LibWeb/CMakeLists.txt
+@@ -680,6 +680,7 @@ set(SOURCES
+     Page/AutoScrollHandler.cpp
+     Page/DragAndDropEventHandler.cpp
+     Page/ElementResizeAction.cpp
++    Page/ElementPicker.cpp
+     Page/EventHandler.cpp
+     Page/MiddleButtonScrollHandler.cpp
+     Page/Page.cpp
+diff --git a/Libraries/LibWeb/CSS/StyleScope.cpp b/Libraries/LibWeb/CSS/StyleScope.cpp
+index 1dc3fc4742..42df88ceba 100644
+--- a/Libraries/LibWeb/CSS/StyleScope.cpp
++++ b/Libraries/LibWeb/CSS/StyleScope.cpp
+@@ -290,7 +290,8 @@ void StyleScope::build_user_style_sheet_if_needed()
+ 
+     auto user_style_source = document().page().user_style();
+     auto const& content_blocker_style_source = document().content_blocker_style_sheet();
+-    if (!user_style_source.has_value() && content_blocker_style_source.is_empty())
++    auto const& element_picker_preview_style_source = document().element_picker_preview_style_sheet();
++    if (!user_style_source.has_value() && content_blocker_style_source.is_empty() && element_picker_preview_style_source.is_empty())
+         return;
+ 
+     Utf16StringBuilder source;
+@@ -301,6 +302,11 @@ void StyleScope::build_user_style_sheet_if_needed()
+             source.append_ascii('\n');
+         source.append(content_blocker_style_source.utf16_view());
+     }
++    if (!element_picker_preview_style_source.is_empty()) {
++        if (!source.is_empty())
++            source.append_ascii('\n');
++        source.append(element_picker_preview_style_source.utf16_view());
++    }
+ 
+     m_user_style_sheet = parse_css_stylesheet(CSS::Parser::ParsingParams(document()), source.view());
+ }
+diff --git a/Libraries/LibWeb/DOM/Document.cpp b/Libraries/LibWeb/DOM/Document.cpp
+index 2c41cc2500..295308c01e 100644
+--- a/Libraries/LibWeb/DOM/Document.cpp
++++ b/Libraries/LibWeb/DOM/Document.cpp
+@@ -1021,6 +1021,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
+         visitor.visit(flexbox_highlight.node);
+     for (auto const& grid_highlight : m_grid_highlights)
+         visitor.visit(grid_highlight.node);
++    visitor.visit(m_element_picker_highlights);
+     visitor.visit(m_active_favicon);
+     visitor.visit(m_browsing_context);
+     visitor.visit(m_focused_area);
+@@ -3327,6 +3328,42 @@ void Document::clear_grid_highlighted_node(GC::Ptr<Node> node)
+         node->set_needs_repaint(InvalidateDisplayList::PaintCommands);
+ }
+ 
++void Document::show_element_picker_highlights(ReadonlySpan<GC::Ref<Element>> elements)
++{
++    set_element_picker_state(true, elements, {});
++}
++
++void Document::show_element_picker_preview(Utf16String style_sheet)
++{
++    set_element_picker_state(false, {}, move(style_sheet));
++}
++
++void Document::close_element_picker()
++{
++    set_element_picker_state(false, {}, {});
++}
++
++void Document::set_element_picker_state(bool shows_highlights, ReadonlySpan<GC::Ref<Element>> elements, Utf16String preview_style_sheet)
++{
++    // NB: The highlights are not the painting of any one node. The document's own box is damaged, as a recording without
++    //     damage is the last one again, with the highlights that were in it.
++    auto highlights_changed = m_shows_element_picker_highlights != shows_highlights || m_element_picker_highlights.span() != elements;
++    if (highlights_changed) {
++        m_shows_element_picker_highlights = shows_highlights;
++        m_element_picker_highlights.clear();
++        m_element_picker_highlights.append(elements.data(), elements.size());
++        Node::set_needs_repaint(InvalidateDisplayList::PaintCommands);
++    }
++
++    if (m_element_picker_preview_style_sheet != preview_style_sheet) {
++        m_element_picker_preview_style_sheet = move(preview_style_sheet);
++        style_scope().invalidate_user_style_sheet();
++        if (style_computer_if_created())
++            CSS::record_non_author_stylesheets(*this);
++        set_needs_repaint();
++    }
++}
++
+ Layout::Node* Document::highlighted_layout_node(Layout::BegunRead const& read)
+ {
+     if (!m_highlighted_node)
+@@ -6959,6 +6996,14 @@ bool Document::is_allowed_to_use_feature(PolicyControlledFeature feature) const
+ 
+ void Document::did_stop_being_active_document_in_navigable()
+ {
++    // NB: The document is no longer shown, so nothing of the element picker's is left to repaint.
++    m_shows_element_picker_highlights = false;
++    m_element_picker_highlights.clear();
++    if (!m_element_picker_preview_style_sheet.is_empty()) {
++        m_element_picker_preview_style_sheet = {};
++        style_scope().invalidate_user_style_sheet();
++    }
++
+     stop_compositor_animation_timers();
+     tear_down_layout_tree();
+ 
+@@ -11252,6 +11297,25 @@ Painting::DisplayListRecording Document::commit_display_list_recording(Layout::B
+     return start_recording(read, config, Painting::PaintCommandCacheMode::ReadWrite, move(presentation)).release_value();
+ }
+ 
++// An element whose own box is left out, with "display: contents", is highlighted by those of its children.
++static void append_element_picker_highlight(Layout::BegunRead const& read, Element const& element, Vector<Layout::Node const*>& highlights)
++{
++    if (!element.is_connected())
++        return;
++    if (auto const* layout_node = element.unsafe_layout_node(read)) {
++        if (Painting::has_committed_box(*layout_node))
++            highlights.append(layout_node);
++        return;
++    }
++    auto const* box_values = element.style_group<CSS::ComputedValues::BoxValues>();
++    if (!box_values || !CSS::display_from_ffi_display(box_values->display).is_contents())
++        return;
++    for (auto const* child = element.first_child(); child; child = child->next_sibling()) {
++        if (auto const* child_element = as_if<Element>(*child))
++            append_element_picker_highlight(read, *child_element, highlights);
++    }
++}
++
+ Optional<Painting::DisplayListRecording> Document::start_recording(Layout::BegunRead const& read, HTML::PaintConfig config, Painting::PaintCommandCacheMode cache_mode, Optional<Compositor::FlightPresentation>&& committed)
+ {
+     update_highlight_states_if_needed(read);
+@@ -11292,6 +11356,9 @@ Optional<Painting::DisplayListRecording> Document::start_recording(Layout::Begun
+         if (auto const* layout_node = grid_highlight.node ? grid_highlight.node->unsafe_layout_node(read) : nullptr; layout_node && Painting::has_committed_box(*layout_node))
+             overlay_inputs.grid_highlights.append({ layout_node, grid_highlight.options });
+     }
++    overlay_inputs.element_picker_is_active = m_shows_element_picker_highlights;
++    for (auto const& element : m_element_picker_highlights)
++        append_element_picker_highlight(read, *element, overlay_inputs.element_picker_highlights);
+     if (config.should_show_caret_hit_test_debug_overlay)
+         overlay_inputs.caret_debug_rect = m_caret_hit_test_debug_rect;
+ 
+diff --git a/Libraries/LibWeb/DOM/Document.h b/Libraries/LibWeb/DOM/Document.h
+index ff86a43754..56f2b306fd 100644
+--- a/Libraries/LibWeb/DOM/Document.h
++++ b/Libraries/LibWeb/DOM/Document.h
+@@ -511,6 +511,13 @@ public:
+     void set_grid_highlighted_node(GC::Ptr<Node>, Painting::GridInspectorOverlayOptions);
+     void clear_grid_highlighted_node(GC::Ptr<Node>);
+ 
++    // What the element picker shows on the document while it is open: the highlights of what its filter blocks, or, in a
++    // preview, the document with that blocked.
++    void show_element_picker_highlights(ReadonlySpan<GC::Ref<Element>>);
++    void show_element_picker_preview(Utf16String style_sheet);
++    void close_element_picker();
++    Utf16String const& element_picker_preview_style_sheet() const { return m_element_picker_preview_style_sheet; }
++
+     Element* document_element();
+     Element const* document_element() const;
+ 
+@@ -2023,6 +2030,11 @@ private:
+     Vector<FlexboxHighlight> m_flexbox_highlights;
+     Vector<GridHighlight> m_grid_highlights;
+ 
++    void set_element_picker_state(bool shows_highlights, ReadonlySpan<GC::Ref<Element>>, Utf16String preview_style_sheet);
++    bool m_shows_element_picker_highlights { false };
++    Vector<GC::Ref<Element>> m_element_picker_highlights;
++    Utf16String m_element_picker_preview_style_sheet;
++
+     Optional<Color> m_normal_link_color;
+     Optional<Color> m_active_link_color;
+     Optional<Color> m_visited_link_color;
+diff --git a/Libraries/LibWeb/Loader/ContentBlocker.cpp b/Libraries/LibWeb/Loader/ContentBlocker.cpp
+index 6b634caf30..e4a65ec5eb 100644
+--- a/Libraries/LibWeb/Loader/ContentBlocker.cpp
++++ b/Libraries/LibWeb/Loader/ContentBlocker.cpp
+@@ -354,6 +354,47 @@ ContentBlocker::ResourceType ContentBlocker::resource_type_from_fetch_metadata(O
+     return ResourceType::Other;
+ }
+ 
++OwnPtr<ContentBlockerRule> ContentBlockerRule::create(StringView rule)
++{
++    auto* engine = ContentBlocking::FFI::rust_content_blocker_create(rule.bytes());
++    if (!engine)
++        return {};
++    return adopt_own(*new ContentBlockerRule(engine, line_looks_like_supported_cosmetic_rule(rule)));
++}
++
++ContentBlockerRule::~ContentBlockerRule()
++{
++    ContentBlocking::FFI::rust_content_blocker_free(m_engine);
++}
++
++bool ContentBlockerRule::matches(URL::URL const& url, URL::URL const& source_url, ContentBlocker::ResourceType resource_type) const
++{
++    auto url_string = serialized_url_for_matching(url);
++    auto source_url_string = serialized_url_for_matching(ContentBlocker::source_url_for_matching(source_url));
++    auto request_type = resource_type_to_adblock_request_type(resource_type);
++    return ContentBlocking::FFI::rust_content_blocker_matches(
++        m_engine,
++        url_string.bytes(),
++        source_url_string.bytes(),
++        request_type.bytes());
++}
++
++String ContentBlockerRule::cosmetic_style_sheet_for_url(URL::URL const& url, ReadonlySpan<Utf16FlyString> classes, ReadonlySpan<Utf16FlyString> ids) const
++{
++    auto classes_string = join_lines(classes);
++    auto ids_string = join_lines(ids);
++    if (classes_string.is_error() || ids_string.is_error())
++        return {};
++
++    auto url_string = serialized_url(url);
++    return take_rust_utf16_string(ContentBlocking::FFI::rust_content_blocker_cosmetic_css(
++                                      m_engine,
++                                      url_string.bytes(),
++                                      classes_string.value().bytes_as_string_view().bytes(),
++                                      ids_string.value().bytes_as_string_view().bytes()))
++        .to_utf8();
++}
++
+ URL::URL ContentBlocker::source_url_for_matching(URL::URL const& source_url)
+ {
+     if (source_url.scheme() != "blob"sv)
+diff --git a/Libraries/LibWeb/Loader/ContentBlocker.h b/Libraries/LibWeb/Loader/ContentBlocker.h
+index 630535d0f1..66c9c146e5 100644
+--- a/Libraries/LibWeb/Loader/ContentBlocker.h
++++ b/Libraries/LibWeb/Loader/ContentBlocker.h
+@@ -9,6 +9,7 @@
+ 
+ #include <AK/Error.h>
+ #include <AK/Noncopyable.h>
++#include <AK/OwnPtr.h>
+ #include <AK/String.h>
+ #include <AK/Utf16FlyString.h>
+ #include <AK/Utf16String.h>
+@@ -70,4 +71,31 @@ private:
+     Atomic<void*> m_engine { nullptr };
+ };
+ 
++// A rule on its own, which tells what it would block if it were one of the content blocker's.
++class ContentBlockerRule {
++    AK_MAKE_NONCOPYABLE(ContentBlockerRule);
++    AK_MAKE_NONMOVABLE(ContentBlockerRule);
++
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    static OwnPtr<ContentBlockerRule> create(StringView rule);
++    ~ContentBlockerRule();
++
++    bool is_cosmetic() const { return m_is_cosmetic; }
++    bool matches(URL::URL const&, URL::URL const& source_url, ContentBlocker::ResourceType) const;
++    // Every rule of the style sheet is on a line of its own.
++    String cosmetic_style_sheet_for_url(URL::URL const&, ReadonlySpan<Utf16FlyString> classes, ReadonlySpan<Utf16FlyString> ids) const;
++
++private:
++    ContentBlockerRule(void* engine, bool is_cosmetic)
++        : m_engine(engine)
++        , m_is_cosmetic(is_cosmetic)
++    {
++    }
++
++    void* m_engine { nullptr };
++    bool m_is_cosmetic { false };
++};
++
+ }
+diff --git a/Libraries/LibWeb/Page/ElementPicker.cpp b/Libraries/LibWeb/Page/ElementPicker.cpp
+new file mode 100644
+index 0000000000..4f4df9690e
+--- /dev/null
++++ b/Libraries/LibWeb/Page/ElementPicker.cpp
+@@ -0,0 +1,617 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/HashTable.h>
++#include <AK/StringBuilder.h>
++#include <LibGC/RootVector.h>
++#include <LibURL/Host.h>
++#include <LibWeb/CSS/CSSStyleProperties.h>
++#include <LibWeb/CSS/Serialize.h>
++#include <LibWeb/DOM/Attr.h>
++#include <LibWeb/DOM/Document.h>
++#include <LibWeb/DOM/Element.h>
++#include <LibWeb/DOM/NodeList.h>
++#include <LibWeb/DOM/SelectorQuery.h>
++#include <LibWeb/DOM/ShadowRoot.h>
++#include <LibWeb/HTML/AttributeNames.h>
++#include <LibWeb/HTML/HTMLImageElement.h>
++#include <LibWeb/HTML/HTMLMediaElement.h>
++#include <LibWeb/HTML/LocalNavigable.h>
++#include <LibWeb/HTML/NavigableContainer.h>
++#include <LibWeb/HTML/TagNames.h>
++#include <LibWeb/HTML/Window.h>
++#include <LibWeb/Loader/ContentBlocker.h>
++#include <LibWeb/Namespace.h>
++#include <LibWeb/Page/Page.h>
++#include <LibWeb/SVG/TagNames.h>
++
++namespace Web {
++
++static constexpr size_t MAX_LEVELS = 64;
++static constexpr size_t MAX_CLASSES_IN_SELECTOR = 8;
++static constexpr size_t MAX_ATTRIBUTE_SELECTORS = 5;
++static constexpr size_t MAX_ATTRIBUTE_VALUE_LENGTH = 256;
++static constexpr size_t MAX_QUERY_LENGTH_IN_FILTER = 256;
++
++// The filters apply to the top-level document, where an element of a shadow tree is hidden with the host of the tree,
++// and what is in a frame with the frame. A page without its body is blank, so neither the body nor the root is picked.
++static GC::Ptr<DOM::Element> pickable_element(DOM::Document& document, GC::Ptr<DOM::Node> node)
++{
++    while (node) {
++        if (&node->document() != &document) {
++            auto navigable = node->document().navigable();
++            node = navigable ? GC::Ptr<DOM::Node> { navigable->container() } : nullptr;
++            continue;
++        }
++        auto* shadow_root = as_if<DOM::ShadowRoot>(node->root());
++        if (!shadow_root)
++            break;
++        node = shadow_root->host();
++    }
++
++    while (node && !is<DOM::Element>(*node))
++        node = node->parent();
++    if (!node || !node->is_connected())
++        return {};
++
++    auto& element = as<DOM::Element>(*node);
++    if (&element == document.document_element() || &element == document.body())
++        return {};
++    return element;
++}
++
++static String utf8(Utf16View string)
++{
++    return Utf16String::from_utf16(string).to_well_formed_utf8();
++}
++
++static String identifier(Utf16View string)
++{
++    return CSS::serialize_an_identifier(string);
++}
++
++static String tag_selector(DOM::Element const& element)
++{
++    return identifier(element.local_name().view());
++}
++
++static Optional<String> id_selector(DOM::Element const& element)
++{
++    auto const& id = element.id();
++    if (!id.has_value() || id->is_empty())
++        return {};
++    return MUST(String::formatted("#{}", identifier(id->view())));
++}
++
++static Vector<String> class_selectors(DOM::Element const& element)
++{
++    Vector<String> selectors;
++    for (auto const& class_name : element.class_names()) {
++        if (class_name.is_empty())
++            continue;
++        auto selector = MUST(String::formatted(".{}", identifier(class_name.view())));
++        if (!selectors.contains_slow(selector))
++            selectors.append(move(selector));
++        if (selectors.size() == MAX_CLASSES_IN_SELECTOR)
++            break;
++    }
++    return selectors;
++}
++
++static String joined(ReadonlySpan<String> strings)
++{
++    StringBuilder builder;
++    for (auto const& string : strings)
++        builder.append(string);
++    return MUST(builder.to_string());
++}
++
++static bool attribute_tells_element_apart(StringView name)
++{
++    return name.is_one_of("src"sv, "href"sv, "data"sv, "poster"sv, "alt"sv, "title"sv, "name"sv, "role"sv, "type"sv, "aria-label"sv, "target"sv)
++        || name.starts_with("data-"sv);
++}
++
++static Vector<String> attribute_selectors(DOM::Element const& element)
++{
++    Vector<String> selectors;
++    element.for_each_attribute([&](DOM::Attr const& attribute) {
++        if (selectors.size() == MAX_ATTRIBUTE_SELECTORS)
++            return;
++        auto name = utf8(attribute.name().view());
++        if (!attribute_tells_element_apart(name))
++            return;
++
++        auto full_value = attribute.value().to_well_formed_utf8();
++        auto value = full_value.bytes_as_string_view();
++        auto is_url = name.bytes_as_string_view().is_one_of("src"sv, "href"sv, "data"sv, "poster"sv);
++        if (is_url && (value.starts_with("data:"sv) || value.starts_with("blob:"sv) || value.starts_with("javascript:"sv)))
++            return;
++
++        // What follows the path of a URL tends to change from one load of the page to the next.
++        if (is_url) {
++            if (auto end_of_path = value.find_any_of("?#"sv); end_of_path.has_value())
++                value = value.substring_view(0, *end_of_path);
++        }
++        auto is_prefix = value.length() < full_value.bytes().size();
++        if ((is_url && value.is_empty()) || value.length() > MAX_ATTRIBUTE_VALUE_LENGTH)
++            return;
++
++        StringBuilder builder;
++        builder.append('[');
++        builder.append(identifier(attribute.name().view()));
++        if (!value.is_empty()) {
++            builder.append(is_prefix ? "^="sv : "="sv);
++            auto utf16_value = Utf16String::from_utf8(value);
++            CSS::serialize_a_string(builder, utf16_value);
++        }
++        builder.append(']');
++        selectors.append(MUST(builder.to_string()));
++    });
++    return selectors;
++}
++
++static String nth_of_type_selector(DOM::Element const& element)
++{
++    size_t index = 1;
++    for (auto const* sibling = element.previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
++        if (sibling->local_name() == element.local_name() && sibling->namespace_uri() == element.namespace_uri())
++            ++index;
++    }
++    return MUST(String::formatted("{}:nth-of-type({})", tag_selector(element), index));
++}
++
++// The shortest selector that says much about the element, for its children to be scoped by.
++static String scoping_selector(DOM::Element const& element)
++{
++    if (auto id = id_selector(element); id.has_value())
++        return id.release_value();
++    if (auto classes = class_selectors(element); !classes.is_empty())
++        return joined(classes);
++    return tag_selector(element);
++}
++
++// The way down to the element from the closest ancestor with an ID, or from the body.
++static String path_selector(DOM::Element const& element)
++{
++    Vector<String> steps { nth_of_type_selector(element) };
++    for (auto ancestor = element.parent_element(); ancestor; ancestor = ancestor->parent_element()) {
++        if (auto id = id_selector(*ancestor); id.has_value()) {
++            steps.append(id.release_value());
++            break;
++        }
++        if (ancestor.ptr() == element.document().body()) {
++            steps.append(tag_selector(*ancestor));
++            break;
++        }
++        steps.append(nth_of_type_selector(*ancestor));
++    }
++
++    StringBuilder builder;
++    for (size_t i = steps.size(); i > 0; --i) {
++        builder.append(steps[i - 1]);
++        if (i > 1)
++            builder.append(" > "sv);
++    }
++    return MUST(builder.to_string());
++}
++
++static ElementPickerLevel describe_level(DOM::Element const& element)
++{
++    ElementPickerLevel level;
++
++    auto tag = tag_selector(element);
++    auto id = id_selector(element);
++    auto classes = class_selectors(element);
++    auto all_classes = joined(classes);
++    auto attributes = attribute_selectors(element);
++
++    StringBuilder label;
++    label.append(tag);
++    if (id.has_value())
++        label.append(*id);
++    label.append(all_classes);
++    level.label = MUST(label.to_string());
++
++    auto append = [&](String selector) {
++        if (!level.selectors.contains_slow(selector))
++            level.selectors.append(move(selector));
++    };
++
++    append(tag);
++    if (classes.size() > 1) {
++        for (auto const& class_selector : classes)
++            append(class_selector);
++    }
++    if (!classes.is_empty()) {
++        append(all_classes);
++        append(MUST(String::formatted("{}{}", tag, all_classes)));
++    }
++    for (auto const& attribute : attributes)
++        append(MUST(String::formatted("{}{}", tag, attribute)));
++    if (!classes.is_empty() && !attributes.is_empty())
++        append(MUST(String::formatted("{}{}{}", tag, all_classes, attributes.first())));
++    if (id.has_value())
++        append(*id);
++    if (auto parent = element.parent_element()) {
++        auto scope = scoping_selector(*parent);
++        if (!classes.is_empty())
++            append(MUST(String::formatted("{} > {}{}", scope, tag, all_classes)));
++        append(MUST(String::formatted("{} > {}", scope, nth_of_type_selector(element))));
++    }
++    auto path = path_selector(element);
++    append(path);
++
++    auto default_selector = [&]() -> String {
++        if (id.has_value())
++            return *id;
++        if (!classes.is_empty())
++            return all_classes;
++        if (!attributes.is_empty())
++            return MUST(String::formatted("{}{}", tag, attributes.first()));
++        return path;
++    }();
++    level.default_selector_index = level.selectors.find_first_index(default_selector).value();
++    return level;
++}
++
++// The resources that the element itself asks for and that the content blocker can keep it from getting.
++template<typename Callback>
++static void for_each_resource(DOM::Element const& element, Callback const& callback)
++{
++    auto report = [&](Utf16View url_string, ContentBlocker::ResourceType type) {
++        if (url_string.is_empty())
++            return;
++        auto url = element.document().encoding_parse_url(url_string);
++        if (url.has_value() && url->scheme().is_one_of("http"sv, "https"sv) && url->host().has_value())
++            callback(*url, type);
++    };
++    auto report_attribute = [&](Utf16FlyString const& name, ContentBlocker::ResourceType type) {
++        if (auto value = element.get_attribute(name); value.has_value())
++            report(value->utf16_view(), type);
++    };
++
++    if (element.namespace_uri() == Namespace::SVG) {
++        if (element.local_name() == SVG::TagNames::image) {
++            if (element.has_attribute(HTML::AttributeNames::href))
++                report_attribute(HTML::AttributeNames::href, ContentBlocker::ResourceType::Image);
++            else if (auto href = element.get_attribute_ns(Namespace::XLink, HTML::AttributeNames::href); href.has_value())
++                report(href->utf16_view(), ContentBlocker::ResourceType::Image);
++        }
++        return;
++    }
++    if (element.namespace_uri() != Namespace::HTML)
++        return;
++
++    auto const& name = element.local_name();
++    if (auto const* image = as_if<HTML::HTMLImageElement>(element)) {
++        if (auto current_src = image->current_src(); !current_src.is_empty())
++            report(current_src.utf16_view(), ContentBlocker::ResourceType::Image);
++        else
++            report_attribute(HTML::AttributeNames::src, ContentBlocker::ResourceType::Image);
++    } else if (auto const* media = as_if<HTML::HTMLMediaElement>(element)) {
++        report(media->current_src().utf16_view(), ContentBlocker::ResourceType::Media);
++        if (name == HTML::TagNames::video)
++            report_attribute(HTML::AttributeNames::poster, ContentBlocker::ResourceType::Image);
++    } else if (name == HTML::TagNames::iframe || name == HTML::TagNames::frame) {
++        report_attribute(HTML::AttributeNames::src, ContentBlocker::ResourceType::Subdocument);
++    } else if (name == HTML::TagNames::embed) {
++        report_attribute(HTML::AttributeNames::src, ContentBlocker::ResourceType::Object);
++    } else if (name == HTML::TagNames::object) {
++        report_attribute(HTML::AttributeNames::data, ContentBlocker::ResourceType::Object);
++    } else if (name == HTML::TagNames::input) {
++        report_attribute(HTML::AttributeNames::src, ContentBlocker::ResourceType::Image);
++    }
++}
++
++template<typename Callback>
++static void for_each_background_image(DOM::Element& element, Callback const& callback)
++{
++    auto window = element.document().window();
++    if (!window)
++        return;
++    auto background_image = window->get_computed_style(element, {})->get_property_value("background-image"_utf16_fly_string).to_well_formed_utf8();
++
++    // NB: A computed URL is always serialized as a quoted string.
++    static constexpr auto URL_START = "url(\""sv;
++    auto remaining = background_image.bytes_as_string_view();
++    for (auto start = remaining.find(URL_START); start.has_value(); start = remaining.find(URL_START)) {
++        remaining = remaining.substring_view(*start + URL_START.length());
++        auto end = remaining.find('"');
++        if (!end.has_value())
++            return;
++        auto url_string = Utf16String::from_utf8(remaining.substring_view(0, *end));
++        auto url = element.document().encoding_parse_url(url_string);
++        if (url.has_value() && url->scheme().is_one_of("http"sv, "https"sv) && url->host().has_value())
++            callback(*url, ContentBlocker::ResourceType::Image);
++        remaining = remaining.substring_view(*end);
++    }
++}
++
++static bool is_from_another_site(URL::URL const& url, URL::URL const& page_url)
++{
++    if (!page_url.host().has_value())
++        return true;
++    auto site = url.host()->registrable_domain();
++    auto page_site = page_url.host()->registrable_domain();
++    if (site.has_value() && page_site.has_value())
++        return *site != *page_site;
++    return url.serialized_host() != page_url.serialized_host();
++}
++
++static StringView resource_type_option(ContentBlocker::ResourceType type)
++{
++    switch (type) {
++    case ContentBlocker::ResourceType::Image:
++        return "$image"sv;
++    case ContentBlocker::ResourceType::Media:
++        return "$media"sv;
++    case ContentBlocker::ResourceType::Object:
++        return "$object"sv;
++    case ContentBlocker::ResourceType::Subdocument:
++        return "$subdocument"sv;
++    default:
++        return {};
++    }
++}
++
++static void append_network_filters(Vector<String>& filters, URL::URL const& url, URL::URL const& page_url, ContentBlocker::ResourceType type)
++{
++    auto append = [&](String filter) {
++        if (!filters.contains_slow(filter))
++            filters.append(move(filter));
++    };
++
++    // NB: The "||" anchor stands for a host alone, so a URL with a port is anchored at its scheme instead.
++    StringBuilder anchor_builder;
++    if (auto port = url.port(); port.has_value())
++        anchor_builder.appendff("|{}://{}:{}", url.scheme(), url.serialized_host(), *port);
++    else
++        anchor_builder.appendff("||{}", url.serialized_host());
++    auto anchor = MUST(anchor_builder.to_string());
++
++    auto option = resource_type_option(type);
++    auto path = url.serialize_path();
++    append(MUST(String::formatted("{}{}{}", anchor, path, option)));
++    if (auto query = url.query(); query.has_value() && !query->is_empty() && query->length() <= MAX_QUERY_LENGTH_IN_FILTER)
++        append(MUST(String::formatted("{}{}?{}{}", anchor, path, *query, option)));
++    if (auto end_of_directory = path.find_last('/'); end_of_directory.has_value() && *end_of_directory > 0)
++        append(MUST(String::formatted("{}{}*{}", anchor, path.substring_view(0, *end_of_directory + 1), option)));
++    // The page's own site is never offered as a whole.
++    if (is_from_another_site(url, page_url))
++        append(MUST(String::formatted("{}^", anchor)));
++}
++
++static String hostname_for_cosmetic_filters(URL::URL const& url)
++{
++    if (!url.host().has_value())
++        return {};
++    auto host = url.serialized_host();
++    if (host.starts_with("www."sv) && host.length() > 4)
++        host = host.substring_view(4);
++    return MUST(String::from_utf8(host));
++}
++
++static ElementPickerSelection describe_selection(DOM::Element& picked_element)
++{
++    auto& document = picked_element.document();
++    ElementPickerSelection selection;
++    selection.hostname = hostname_for_cosmetic_filters(document.url());
++
++    for (GC::Ptr<DOM::Element> element = picked_element; element; element = element->parent_element()) {
++        if (element.ptr() == document.body() || element.ptr() == document.document_element() || selection.levels.size() == MAX_LEVELS)
++            break;
++        selection.levels.append(describe_level(*element));
++
++        auto append_filters = [&](URL::URL const& url, ContentBlocker::ResourceType type) {
++            append_network_filters(selection.network_filters, url, document.url(), type);
++        };
++        for_each_resource(*element, [&](URL::URL const& url, ContentBlocker::ResourceType type) {
++            if (element.ptr() == &picked_element && is_from_another_site(url, document.url()))
++                selection.prefers_network_filter = true;
++            append_filters(url, type);
++        });
++        for_each_background_image(*element, append_filters);
++    }
++    return selection;
++}
++
++static GC::RootVector<GC::Ref<DOM::Element>> elements_blocked_by_network_rule(DOM::Document& document, GC::Ptr<DOM::Element> picked_element, ContentBlockerRule const& rule)
++{
++    GC::RootVector<GC::Ref<DOM::Element>> elements;
++    HashTable<DOM::Element const*> seen;
++    auto append_if_blocked = [&](DOM::Element& element, auto const& for_each) {
++        bool is_blocked = false;
++        for_each(element, [&](URL::URL const& url, ContentBlocker::ResourceType type) {
++            is_blocked = is_blocked || rule.matches(url, document.url(), type);
++        });
++        if (is_blocked && seen.set(&element) == AK::HashSetResult::InsertedNewEntry)
++            elements.append(element);
++    };
++
++    document.for_each_in_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
++        append_if_blocked(element, [](auto& element, auto const& callback) { for_each_resource(element, callback); });
++        return TraversalDecision::Continue;
++    });
++
++    // OPTIMIZATION: The background of every element on the page would take the computed style of each, so only those
++    //               that filters were offered for are looked at.
++    for (auto element = picked_element; element && element->is_connected(); element = element->parent_element())
++        append_if_blocked(*element, [](auto& element, auto const& callback) { for_each_background_image(element, callback); });
++    return elements;
++}
++
++// The selectors of a style sheet that the content blocker made, which has one rule per line.
++static Vector<String> selectors_in_style_sheet(String const& style_sheet)
++{
++    Vector<String> selectors;
++    style_sheet.bytes_as_string_view().for_each_split_view('\n', SplitBehavior::Nothing, [&](StringView line) {
++        if (auto end_of_selector = line.find_last(" { "sv); end_of_selector.has_value())
++            selectors.append(MUST(String::from_utf8(line.substring_view(0, *end_of_selector))));
++    });
++    return selectors;
++}
++
++static StringView selector_of_cosmetic_filter(StringView filter)
++{
++    auto first_sharp = filter.find('#');
++    if (!first_sharp.has_value())
++        return {};
++    auto second_sharp = filter.find('#', *first_sharp + 1);
++    if (!second_sharp.has_value())
++        return {};
++    return filter.substring_view(*second_sharp + 1).trim_whitespace();
++}
++
++static String style_sheet_for_cosmetic_rule(DOM::Document& document, ContentBlockerRule const& rule)
++{
++    HashTable<Utf16FlyString> classes;
++    HashTable<Utf16FlyString> ids;
++    document.for_each_in_subtree_of_type<DOM::Element>([&](DOM::Element& element) {
++        if (auto const& id = element.id(); id.has_value() && !id->is_empty())
++            ids.set(*id);
++        for (auto const& class_name : element.class_names()) {
++            if (!class_name.is_empty())
++                classes.set(class_name);
++        }
++        return TraversalDecision::Continue;
++    });
++
++    Vector<Utf16FlyString> class_list;
++    class_list.ensure_capacity(classes.size());
++    for (auto const& class_name : classes)
++        class_list.unchecked_append(class_name);
++    Vector<Utf16FlyString> id_list;
++    id_list.ensure_capacity(ids.size());
++    for (auto const& id : ids)
++        id_list.unchecked_append(id);
++    return rule.cosmetic_style_sheet_for_url(document.fallback_base_url(), class_list, id_list);
++}
++
++GC::Ptr<DOM::Document> Page::element_picker_document(u64 session_id) const
++{
++    if (m_element_picker_session_id != session_id || !has_local_traversable())
++        return {};
++    auto document = local_traversable()->active_document();
++    if (!document || document != m_element_picker_document.ptr())
++        return {};
++    return document;
++}
++
++ElementPickerSelection Page::select_with_element_picker(DOM::Document& document, GC::Ptr<DOM::Node> node)
++{
++    auto element = pickable_element(document, node);
++    m_element_picker_element = element;
++    if (!element) {
++        document.show_element_picker_highlights({});
++        return {};
++    }
++    auto selection = describe_selection(*element);
++    document.show_element_picker_highlights(Array { GC::Ref { *element } });
++    return selection;
++}
++
++ElementPickerSelection Page::start_element_picker(u64 session_id, Optional<UniqueNodeID> node_id)
++{
++    stop_element_picker();
++    if (!has_local_traversable())
++        return {};
++    auto document = local_traversable()->active_document();
++    if (!document)
++        return {};
++
++    m_element_picker_session_id = session_id;
++    m_element_picker_document = *document;
++
++    GC::Ptr<DOM::Node> node = node_id.has_value() ? DOM::Node::from_unique_id(*node_id) : nullptr;
++    return select_with_element_picker(*document, node);
++}
++
++void Page::hover_element_picker(u64 session_id, DevicePixelPoint position)
++{
++    auto document = element_picker_document(session_id);
++    if (!document)
++        return;
++    if (auto element = pickable_element(*document, DOM::Node::from_unique_id(node_id_at_position(position))))
++        document->show_element_picker_highlights(Array { GC::Ref { *element } });
++    else
++        document->show_element_picker_highlights({});
++}
++
++ElementPickerSelection Page::pick_with_element_picker(u64 session_id, DevicePixelPoint position)
++{
++    auto document = element_picker_document(session_id);
++    if (!document)
++        return {};
++    return select_with_element_picker(*document, DOM::Node::from_unique_id(node_id_at_position(position)));
++}
++
++Optional<ElementPickerMatch> Page::set_element_picker_filter(u64 session_id, StringView filter, ElementPickerPreview preview)
++{
++    auto document = element_picker_document(session_id);
++    if (!document)
++        return {};
++
++    ElementPickerMatch match;
++    filter = filter.trim_whitespace();
++    auto rule = filter.is_empty() || filter.contains('\n') || filter.starts_with('!') || filter.starts_with('[')
++        ? nullptr
++        : ContentBlockerRule::create(filter);
++    if (!rule) {
++        document->show_element_picker_highlights({});
++        return match;
++    }
++
++    match.is_cosmetic = rule->is_cosmetic();
++    if (!match.is_cosmetic) {
++        auto elements = elements_blocked_by_network_rule(*document, m_element_picker_element.ptr(), *rule);
++        match.is_valid = !filter.contains(' ');
++        match.match_count = elements.size();
++        document->show_element_picker_highlights(elements.span());
++        return match;
++    }
++
++    // The content blocker itself says what it would hide on the page, so that what is shown is what the filter does.
++    auto style_sheet = style_sheet_for_cosmetic_rule(*document, *rule);
++    auto selectors = selectors_in_style_sheet(style_sheet);
++    if (selectors.is_empty()) {
++        auto selector = Utf16String::from_utf8(selector_of_cosmetic_filter(filter));
++        match.is_valid = !selector.is_empty() && document->selector_query_for(selector);
++    }
++
++    GC::RootVector<GC::Ref<DOM::Element>> elements;
++    HashTable<DOM::Element const*> seen;
++    for (auto const& selector : selectors) {
++        auto query = document->selector_query_for(Utf16String::from_utf8(selector));
++        if (!query)
++            continue;
++        match.is_valid = true;
++        auto nodes = query->query_all(*document);
++        for (u32 i = 0; i < nodes->length(); ++i) {
++            auto& element = const_cast<DOM::Element&>(as<DOM::Element>(*nodes->item(i)));
++            if (seen.set(&element) == AK::HashSetResult::InsertedNewEntry)
++                elements.append(element);
++        }
++    }
++    match.match_count = elements.size();
++
++    if (preview == ElementPickerPreview::Yes && match.is_valid)
++        document->show_element_picker_preview(Utf16String::from_utf8(style_sheet));
++    else
++        document->show_element_picker_highlights(elements.span());
++    return match;
++}
++
++void Page::stop_element_picker()
++{
++    if (auto document = m_element_picker_document.ptr())
++        document->close_element_picker();
++    m_element_picker_session_id.clear();
++    m_element_picker_document = nullptr;
++    m_element_picker_element = nullptr;
++}
++
++}
+diff --git a/Libraries/LibWeb/Page/Page.h b/Libraries/LibWeb/Page/Page.h
+index 19676464c7..e72d443ff3 100644
+--- a/Libraries/LibWeb/Page/Page.h
++++ b/Libraries/LibWeb/Page/Page.h
+@@ -89,6 +89,7 @@
+ #include <LibWebCommon/HTML/WorkerAgentForward.h>
+ #include <LibWebCommon/IndexedDB/TransactionChanges.h>
+ #include <LibWebCommon/Page/ContextMenuForInputEventsTarget.h>
++#include <LibWebCommon/Page/ElementPicker.h>
+ #include <LibWebCommon/Page/EventResult.h>
+ #include <LibWebCommon/Page/InputEvent.h>
+ #include <LibWebCommon/Page/InputTrace.h>
+@@ -221,6 +222,15 @@ public:
+     bool select_word_for_dictionary_lookup(DevicePixelPoint);
+ #endif
+     UniqueNodeID node_id_at_position(DevicePixelPoint);
++
++    // The element picker highlights the elements of the top-level document that a filter blocks, as the user makes the
++    // filter in the UI. Each time it opens is a session of its own, and what is left of an earlier one is ignored.
++    ElementPickerSelection start_element_picker(u64 session_id, Optional<UniqueNodeID>);
++    void hover_element_picker(u64 session_id, DevicePixelPoint);
++    ElementPickerSelection pick_with_element_picker(u64 session_id, DevicePixelPoint);
++    Optional<ElementPickerMatch> set_element_picker_filter(u64 session_id, StringView filter, ElementPickerPreview);
++    void stop_element_picker();
++
+     EventResult handle_mousewheel(DevicePixelPoint, DevicePixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, double wheel_delta_x, double wheel_delta_y, double wheel_tick_120ths_x, double wheel_tick_120ths_y, Web::WheelDeltaPrecision = Web::WheelDeltaPrecision::Discrete, Web::ScrollGesturePhase = Web::ScrollGesturePhase::None, bool async_scroll_performed_default_action = false, Optional<AsyncScrollOperation>* async_scroll_operation = nullptr);
+ 
+     EventResult handle_drag_and_drop_event(DragEvent::Type, DevicePixelPoint, DevicePixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, Vector<HTML::SelectedFile> files);
+@@ -666,6 +676,13 @@ private:
+     Vector<UniqueNodeID> m_media_elements;
+     Vector<UniqueNodeID> m_canvas_elements;
+     Vector<GC::Ref<HTML::OffscreenCanvas>> m_offscreen_canvases_pending_placeholder_commit;
++    GC::Ptr<DOM::Document> element_picker_document(u64 session_id) const;
++    ElementPickerSelection select_with_element_picker(DOM::Document&, GC::Ptr<DOM::Node>);
++
++    Optional<u64> m_element_picker_session_id;
++    GC::Weak<DOM::Document> m_element_picker_document;
++    GC::Weak<DOM::Element> m_element_picker_element;
++
+     Optional<UniqueNodeID> m_media_context_menu_element_id;
+ 
+     Optional<ContextMenuRequest> m_context_menu_request;
+diff --git a/Libraries/LibWeb/Painting/PaintingRustBridge.cpp b/Libraries/LibWeb/Painting/PaintingRustBridge.cpp
+index 971076fa24..450ed89edf 100644
+--- a/Libraries/LibWeb/Painting/PaintingRustBridge.cpp
++++ b/Libraries/LibWeb/Painting/PaintingRustBridge.cpp
+@@ -514,6 +514,13 @@ Optional<DisplayListRecording> start_rust_display_list_recording(Layout::BegunRe
+     }
+     inputs.flex_overlays = ffi_flex_overlays.data();
+     inputs.flex_overlay_count = ffi_flex_overlays.size();
++    Vector<Layout::RustFFI::FfiElementPickerHighlight> ffi_element_picker_highlights;
++    ffi_element_picker_highlights.ensure_capacity(overlay_inputs.element_picker_highlights.size());
++    for (auto const* layout_node : overlay_inputs.element_picker_highlights)
++        ffi_element_picker_highlights.append({ .paintable = committed_row_slot(*layout_node) });
++    inputs.element_picker_is_active = overlay_inputs.element_picker_is_active;
++    inputs.element_picker_highlights = ffi_element_picker_highlights.data();
++    inputs.element_picker_highlight_count = ffi_element_picker_highlights.size();
+     inputs.caret_debug_rect = overlay_inputs.caret_debug_rect;
+     ByteString inspector_highlight_label_text;
+     OverlayLabelFonts inspector_label_fonts;
+diff --git a/Libraries/LibWeb/Painting/PaintingRustBridge.h b/Libraries/LibWeb/Painting/PaintingRustBridge.h
+index 19ebd0681e..b052779c7b 100644
+--- a/Libraries/LibWeb/Painting/PaintingRustBridge.h
++++ b/Libraries/LibWeb/Painting/PaintingRustBridge.h
+@@ -54,6 +54,8 @@ struct InspectorOverlayInputs {
+     };
+     Vector<GridHighlight> grid_highlights;
+     Vector<FlexHighlight> flex_highlights;
++    bool element_picker_is_active { false };
++    Vector<Layout::Node const*> element_picker_highlights;
+     Optional<CSSPixelRect> caret_debug_rect;
+ };
+ 
+diff --git a/Libraries/LibWeb/Rust/src/painting/host/paint.rs b/Libraries/LibWeb/Rust/src/painting/host/paint.rs
+index a2e3a82e94..575745cc79 100644
+--- a/Libraries/LibWeb/Rust/src/painting/host/paint.rs
++++ b/Libraries/LibWeb/Rust/src/painting/host/paint.rs
+@@ -57,6 +57,9 @@ pub struct FfiRecordingInputs {
+     pub grid_overlay_count: usize,
+     pub flex_overlays: *const FfiFlexOverlayInput,
+     pub flex_overlay_count: usize,
++    pub element_picker_is_active: bool,
++    pub element_picker_highlights: *const FfiElementPickerHighlight,
++    pub element_picker_highlight_count: usize,
+     pub caret_debug_rect: used_values::OptionalCssPixelRect,
+     // Per-document facts the host resolves once per recording.
+     pub caret: FfiCaretPaint,
+@@ -132,10 +135,11 @@ impl FfiRecordingInputs {
+         };
+ 
+         // SAFETY: The caller lends these arrays and buffers for this call.
+-        let (grid_overlays, flex_overlays, text_fragment_indications) = unsafe {
++        let (grid_overlays, flex_overlays, element_picker_highlights, text_fragment_indications) = unsafe {
+             (
+                 ak::slice_from_raw_parts(self.grid_overlays, self.grid_overlay_count),
+                 ak::slice_from_raw_parts(self.flex_overlays, self.flex_overlay_count),
++                ak::slice_from_raw_parts(self.element_picker_highlights, self.element_picker_highlight_count),
+                 ak::slice_from_raw_parts(self.text_fragment_indications, self.text_fragment_indication_count),
+             )
+         };
+@@ -225,6 +229,7 @@ impl FfiRecordingInputs {
+                 fonts: unsafe { self.grid_label_fonts.retain() },
+             }),
+             flex_overlays: flex_overlays.into(),
++            element_picker_highlights: self.element_picker_is_active.then(|| element_picker_highlights.into()),
+             caret_debug_rect: self
+                 .caret_debug_rect
+                 .has_value
+@@ -349,6 +354,13 @@ pub struct FfiFlexOverlayInput {
+     pub color: Color,
+ }
+ 
++/// An element that the filter being made with the element picker blocks.
++#[derive(Clone, Copy, Debug)]
++#[repr(C)]
++pub struct FfiElementPickerHighlight {
++    pub paintable: crate::layout::node_data::NodeSlotId,
++}
++
+ #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+ #[repr(u8)]
+ #[expect(dead_code, reason = "C++ constructs the variants")]
+diff --git a/Libraries/LibWeb/Rust/src/painting/record/inputs.rs b/Libraries/LibWeb/Rust/src/painting/record/inputs.rs
+index c4e6b1b0d2..fc36b12a0e 100644
+--- a/Libraries/LibWeb/Rust/src/painting/record/inputs.rs
++++ b/Libraries/LibWeb/Rust/src/painting/record/inputs.rs
+@@ -8,7 +8,9 @@ use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
+ use crate::layout::node_data::NodeSlotId;
+ use crate::painting::ffi::FfiChromeMetrics;
+ use crate::painting::force_dark::ForceDarkSettings;
+-use crate::painting::host::{FfiFlexOverlayInput, FfiGridOverlayInput, RootBackgroundSource};
++use crate::painting::host::{
++    FfiElementPickerHighlight, FfiFlexOverlayInput, FfiGridOverlayInput, RootBackgroundSource,
++};
+ use libgfx_rust::font::FontHandle;
+ use libgfx_rust::{Color, IntRect, IntSize};
+ 
+@@ -98,6 +100,8 @@ pub(crate) struct RecordingInputs {
+     pub grid_overlays: Option<GridOverlays>,
+     // These array elements are already plain values without pointers or optional-value tags.
+     pub flex_overlays: Box<[FfiFlexOverlayInput]>,
++    // What the element picker highlights, while it is open on the document.
++    pub element_picker_highlights: Option<Box<[FfiElementPickerHighlight]>>,
+     pub caret_debug_rect: Option<CssPixelRect>,
+     pub caret: Option<CaretPaint>,
+     pub focused_text_control: Option<FocusedTextControlSelection>,
+diff --git a/Libraries/LibWeb/Rust/src/painting/record/paint/inspector_overlay.rs b/Libraries/LibWeb/Rust/src/painting/record/paint/inspector_overlay.rs
+index 24bf5829f5..398c00849c 100644
+--- a/Libraries/LibWeb/Rust/src/painting/record/paint/inspector_overlay.rs
++++ b/Libraries/LibWeb/Rust/src/painting/record/paint/inspector_overlay.rs
+@@ -15,7 +15,7 @@ use crate::layout::node_data::NodeSlotId;
+ use crate::painting::display_list::commands::{ContextRef, DisplayListGlyph, FontResourceId};
+ use crate::painting::display_list::recorder::GlyphRunForRecording;
+ use crate::painting::force_dark::ForceDarkRole;
+-use crate::painting::host::{FfiFlexOverlayInput, FfiGridOverlayInput};
++use crate::painting::host::{FfiElementPickerHighlight, FfiFlexOverlayInput, FfiGridOverlayInput};
+ use crate::painting::paintable_geometry;
+ use crate::painting::record::PaintRecorder;
+ use crate::painting::record::inputs::{InspectorHighlight, OverlayLabelFonts};
+@@ -24,6 +24,9 @@ use libgfx_rust::{Color, FloatPoint, IntPoint, IntRect, LineStyle, Orientation};
+ pub(crate) fn record_inspector_overlays<O: Observer>(recorder: &mut PaintRecorder<'_, O>) {
+     let inputs = recorder.inputs;
+     recorder.recorder.set_accumulated_visual_context(ContextRef::default());
++    if let Some(highlights) = &inputs.element_picker_highlights {
++        paint_element_picker_overlay(recorder, highlights);
++    }
+     if let Some(highlight) = &inputs.inspector_highlight {
+         with_highlight_context(recorder, highlight.paintable, |recorder, paintable| {
+             paint_box_model_highlight(recorder, paintable, highlight);
+@@ -110,6 +113,61 @@ fn paint_box_model_highlight<O: Observer>(
+     draw_label(recorder, &label, device_rect, inputs.tooltip_text_color);
+ }
+ 
++// The page is dimmed, so that what the filter being made blocks stands out on it.
++fn paint_element_picker_overlay<O: Observer>(
++    recorder: &mut PaintRecorder<'_, O>,
++    highlights: &[FfiElementPickerHighlight],
++) {
++    const BACKDROP_COLOR: Color = Color::from_rgba(0, 0, 0, 56);
++    const FILL_COLOR: Color = Color::from_rgba(255, 68, 68, 71);
++    const BORDER_COLOR: Color = Color::from_rgba(220, 38, 38, 230);
++    const BORDER_WIDTH: f64 = 1.5;
++
++    let viewport_rect = recorder.inputs.bitmap_rect;
++    recorder
++        .recorder
++        .fill_rect(viewport_rect, BACKDROP_COLOR, ForceDarkRole::None);
++
++    let border_width = ((BORDER_WIDTH * recorder.inputs.device_pixels_per_css_pixel).round() as i32).max(1);
++    let converter = recorder.converter;
++    for highlight in highlights {
++        with_highlight_context(recorder, highlight.paintable, |recorder, paintable| {
++            for css_rect in paintable_geometry::absolute_border_box_rects_of_fragments(recorder.source, paintable) {
++                let rect = converter.enclosing_device_rect(css_rect);
++                if rect.is_empty() {
++                    continue;
++                }
++                let mut fill =
++                    |rect: IntRect, color: Color| recorder.recorder.fill_rect(rect, color, ForceDarkRole::None);
++                // A border that would cover the whole rect is all there is to paint of it.
++                if rect.width <= 2 * border_width || rect.height <= 2 * border_width {
++                    fill(rect, BORDER_COLOR);
++                    continue;
++                }
++                let inner = IntRect::new(
++                    rect.x + border_width,
++                    rect.y + border_width,
++                    rect.width - 2 * border_width,
++                    rect.height - 2 * border_width,
++                );
++                let inner_right = inner.x + inner.width;
++                let inner_bottom = inner.y + inner.height;
++                fill(inner, FILL_COLOR);
++                fill(IntRect::new(rect.x, rect.y, rect.width, border_width), BORDER_COLOR);
++                fill(
++                    IntRect::new(rect.x, inner_bottom, rect.width, border_width),
++                    BORDER_COLOR,
++                );
++                fill(IntRect::new(rect.x, inner.y, border_width, inner.height), BORDER_COLOR);
++                fill(
++                    IntRect::new(inner_right, inner.y, border_width, inner.height),
++                    BORDER_COLOR,
++                );
++            }
++        });
++    }
++}
++
+ fn paint_flex_overlay<O: Observer>(
+     recorder: &mut PaintRecorder<'_, O>,
+     paintable: NodeSlotId,
+diff --git a/Libraries/LibWeb/Rust/src/painting/record/traversal.rs b/Libraries/LibWeb/Rust/src/painting/record/traversal.rs
+index 5314c95d9c..2acbb8be56 100644
+--- a/Libraries/LibWeb/Rust/src/painting/record/traversal.rs
++++ b/Libraries/LibWeb/Rust/src/painting/record/traversal.rs
+@@ -107,6 +107,7 @@ fn record_display_list_impl<O: Observer>(
+     let has_inspector_overlays = inputs.inspector_highlight.is_some()
+         || inputs.grid_overlays.is_some()
+         || !inputs.flex_overlays.is_empty()
++        || inputs.element_picker_highlights.is_some()
+         || inputs.caret_debug_rect.is_some();
+     let root_scope = PaintScope::stacking_context(viewport);
+     // Nothing was pushed and nothing records every frame: the published tape is this frame,
+diff --git a/Libraries/LibWebCommon/CMakeLists.txt b/Libraries/LibWebCommon/CMakeLists.txt
+index 9e437ef581..50cf605020 100644
+--- a/Libraries/LibWebCommon/CMakeLists.txt
++++ b/Libraries/LibWebCommon/CMakeLists.txt
+@@ -118,6 +118,7 @@ compile_ipc(ContentSecurityPolicy/RemoteViolationDirective.ipc ContentSecurityPo
+ compile_ipc(HTML/NavigationResponse.ipc HTML/NavigationResponseCodecs.h)
+ compile_ipc(MixedContent/ProhibitsMixedSecurityContexts.ipc MixedContent/ProhibitsMixedSecurityContextsCodecs.h)
+ compile_ipc(Page/AsyncScrollNodeStableID.ipc Page/AsyncScrollNodeStableIDCodecs.h)
++compile_ipc(Page/ElementPicker.ipc Page/ElementPickerCodecs.h)
+ compile_ipc(Page/InputEvent.ipc Page/InputEventCodecs.h)
+ compile_ipc(Page/InputRoutingDecision.ipc Page/InputRoutingDecisionCodecs.h)
+ compile_ipc(Page/InputTrace.ipc Page/InputTraceCodecs.h)
+diff --git a/Libraries/LibWebCommon/Forward.h b/Libraries/LibWebCommon/Forward.h
+index 5ff2f87b83..0beeb16bc5 100644
+--- a/Libraries/LibWebCommon/Forward.h
++++ b/Libraries/LibWebCommon/Forward.h
+@@ -19,6 +19,9 @@ enum class NavigationTarget : u8;
+ enum class ScrollGesturePhase : u8;
+ enum class WheelDeltaPrecision : u8;
+ 
++struct ElementPickerLevel;
++struct ElementPickerMatch;
++struct ElementPickerSelection;
+ struct InitiatorSourceSnapshot;
+ struct KeyEvent;
+ struct LoaderConfig;
+diff --git a/Libraries/LibWebCommon/Page/ElementPicker.h b/Libraries/LibWebCommon/Page/ElementPicker.h
+new file mode 100644
+index 0000000000..ed77b98d87
+--- /dev/null
++++ b/Libraries/LibWebCommon/Page/ElementPicker.h
+@@ -0,0 +1,51 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/String.h>
++#include <AK/Types.h>
++#include <AK/Vector.h>
++#include <LibWebCommon/Export.h>
++#include <LibWebCommon/Forward.h>
++
++namespace Web {
++
++// Whether the page is shown with what a filter blocks gone from it.
++enum class ElementPickerPreview : u8 {
++    No,
++    Yes,
++};
++
++// An element the user can block: the one picked on the page, or one of its ancestors.
++struct WEBCOMMON_API ElementPickerLevel {
++    String label;
++    // Selectors that match the element, from the one that matches the most to the one that matches the least.
++    Vector<String> selectors;
++    u32 default_selector_index { 0 };
++};
++
++// What the user picked on the page, and the filters that block it.
++struct WEBCOMMON_API ElementPickerSelection {
++    // The site that cosmetic filters are limited to.
++    String hostname;
++    Vector<String> network_filters;
++    // Whether the element is little more than a resource from another site, which a network filter blocks best.
++    bool prefers_network_filter { false };
++    // The picked element first, followed by its ancestors. This is empty where there is nothing to pick.
++    Vector<ElementPickerLevel> levels;
++};
++
++// What a filter blocks on the page as it is now.
++struct WEBCOMMON_API ElementPickerMatch {
++    bool is_valid { false };
++    bool is_cosmetic { false };
++    u32 match_count { 0 };
++};
++
++}
++
++#include <LibWebCommon/Page/ElementPickerCodecs.h>
+diff --git a/Libraries/LibWebCommon/Page/ElementPicker.ipc b/Libraries/LibWebCommon/Page/ElementPicker.ipc
+new file mode 100644
+index 0000000000..6f54c641b9
+--- /dev/null
++++ b/Libraries/LibWebCommon/Page/ElementPicker.ipc
+@@ -0,0 +1,36 @@
++// Copyright (c) 2026-present, the Hellbird developers.
++//
++// SPDX-License-Identifier: BSD-2-Clause
++
++// NB: The IPC compiler cannot check that each struct here lists every field of its C++ type. A field left out
++//     here does not cross IPC.
++
++#include <LibWebCommon/Page/ElementPicker.h>
++
++[ExistingCpp]
++enum Web::ElementPickerPreview : u8 {
++    No,
++    Yes,
++}
++
++[ExistingCpp]
++struct Web::ElementPickerLevel {
++    String label;
++    Vector<String> selectors;
++    u32 default_selector_index;
++}
++
++[ExistingCpp]
++struct Web::ElementPickerSelection {
++    String hostname;
++    Vector<String> network_filters;
++    bool prefers_network_filter;
++    Vector<Web::ElementPickerLevel> levels;
++}
++
++[ExistingCpp]
++struct Web::ElementPickerMatch {
++    bool is_valid;
++    bool is_cosmetic;
++    u32 match_count;
++}
+diff --git a/Libraries/LibWebView/ViewImplementation.cpp b/Libraries/LibWebView/ViewImplementation.cpp
+index 37263dfe61..a367e8d508 100644
+--- a/Libraries/LibWebView/ViewImplementation.cpp
++++ b/Libraries/LibWebView/ViewImplementation.cpp
+@@ -2094,12 +2094,70 @@ void ViewImplementation::did_receive_node_hit_test(u64 request_id, Web::UniqueNo
+         // The user chose Inspect Element before the hit test came back.
+         if (exchange(m_inspect_element_activated_before_hit_test, false) && m_inspect_element_node_id.has_value() && on_inspect_element_request)
+             on_inspect_element_request(*m_inspect_element_node_id);
++        // Nor does picking an element to block wait for the hit test.
++        if (auto session_id = exchange(m_element_picker_session_awaiting_hit_test, {}); session_id.has_value())
++            start_element_picker(*session_id, ElementPickerTarget::ContextMenuElement);
+         return;
+     }
+ 
+     did_receive_node_picker_hit_test(request_id, node_id);
+ }
+ 
++// NB: The page may be lost to a crash, or on its way to another process, while the picker is open.
++RefPtr<WebContentPage> ViewImplementation::page_for_element_picker() const
++{
++    if (!m_top_level_traversable || m_crash_state.has_value())
++        return {};
++    auto page = traversable().display_page();
++    if (!page || !page->is_open())
++        return {};
++    return page;
++}
++
++void ViewImplementation::start_element_picker(u64 session_id, ElementPickerTarget target)
++{
++    m_element_picker_session_awaiting_hit_test.clear();
++    if (target == ElementPickerTarget::ContextMenuElement && m_inspect_element_hit_test_request_id.has_value()) {
++        m_element_picker_session_awaiting_hit_test = session_id;
++        return;
++    }
++
++    Optional<Web::UniqueNodeID> node_id;
++    if (target == ElementPickerTarget::ContextMenuElement)
++        node_id = m_inspect_element_node_id;
++    if (auto page = page_for_element_picker())
++        page->async_element_picker_start(session_id, node_id);
++
++    // The page only answers for an element that it is asked to start with.
++    if (target == ElementPickerTarget::ContextMenuElement && !node_id.has_value() && on_element_picker_selection)
++        on_element_picker_selection(session_id, {});
++}
++
++void ViewImplementation::element_picker_hover(u64 session_id, Web::DevicePixelPoint position)
++{
++    if (auto page = page_for_element_picker())
++        page->async_element_picker_hover(session_id, position);
++}
++
++void ViewImplementation::element_picker_pick(u64 session_id, Web::DevicePixelPoint position)
++{
++    if (auto page = page_for_element_picker())
++        page->async_element_picker_pick(session_id, position);
++}
++
++void ViewImplementation::element_picker_set_filter(u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview preview)
++{
++    if (auto page = page_for_element_picker())
++        page->async_element_picker_set_filter(session_id, filter_id, move(filter), preview);
++}
++
++void ViewImplementation::stop_element_picker()
++{
++    m_element_picker_session_awaiting_hit_test.clear();
++    if (auto page = page_for_element_picker())
++        page->async_element_picker_stop();
++}
++
+ void ViewImplementation::did_receive_node_picker_hit_test(u64 request_id, Web::UniqueNodeID node_id)
+ {
+     auto request_type = m_pending_node_picker_requests.take(request_id);
+@@ -5150,6 +5208,12 @@ void ViewImplementation::reject_pending_selection_requests()
+ {
+     ++m_context_menu_request_id;
+ 
++    // The element that the context menu was opened on is one of the page that is going away.
++    m_inspect_element_node_id.clear();
++    m_inspect_element_hit_test_request_id.clear();
++    m_inspect_element_activated_before_hit_test = false;
++    m_element_picker_session_awaiting_hit_test.clear();
++
+     auto reject_requests = [](auto& requests) {
+         auto pending_requests = move(requests);
+         for (auto& request : pending_requests)
+@@ -5331,9 +5395,7 @@ void ViewImplementation::prepare_inspect_element(Gfx::IntPoint content_position)
+     m_inspect_element_node_id.clear();
+     m_inspect_element_hit_test_request_id.clear();
+     m_inspect_element_activated_before_hit_test = false;
+-
+-    if (!on_inspect_element_request)
+-        return;
++    m_element_picker_session_awaiting_hit_test.clear();
+ 
+     auto request_id = m_next_node_hit_test_request_id++;
+     m_inspect_element_hit_test_request_id = request_id;
+diff --git a/Libraries/LibWebView/ViewImplementation.h b/Libraries/LibWebView/ViewImplementation.h
+index 55f7571706..6c49d2121f 100644
+--- a/Libraries/LibWebView/ViewImplementation.h
++++ b/Libraries/LibWebView/ViewImplementation.h
+@@ -54,6 +54,7 @@
+ #include <LibWebCommon/HTML/Scripting/ScriptRegistryTypes.h>
+ #include <LibWebCommon/HTML/SelectItem.h>
+ #include <LibWebCommon/Page/DragEvent.h>
++#include <LibWebCommon/Page/ElementPicker.h>
+ #include <LibWebCommon/Page/EventResult.h>
+ #include <LibWebCommon/Page/InputEvent.h>
+ #include <LibWebCommon/Page/PageId.h>
+@@ -433,6 +434,18 @@ public:
+     void node_picker_preview(Web::DevicePixelPoint);
+     void node_picker_cancel();
+ 
++    // What the user blocks on the page is picked on it, and the application shows the filter being made. Each time the
++    // picker opens is a session of its own, which what comes back names.
++    enum class ElementPickerTarget : u8 {
++        None,
++        ContextMenuElement,
++    };
++    void start_element_picker(u64 session_id, ElementPickerTarget);
++    void element_picker_hover(u64 session_id, Web::DevicePixelPoint);
++    void element_picker_pick(u64 session_id, Web::DevicePixelPoint);
++    void element_picker_set_filter(u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview);
++    void stop_element_picker();
++
+     void inspect_dom_node(Web::UniqueNodeID node_id, DOMNodeProperties::Type, Optional<Web::CSS::PseudoElement> pseudo_element, JsonValue options = {});
+     void inspect_grid_layouts(Web::UniqueNodeID root_node_id);
+     void inspect_current_grid(Web::UniqueNodeID node_id);
+@@ -707,6 +720,8 @@ public:
+     Function<void(double milliseconds)> on_set_test_timeout;
+     Function<void(JsonValue)> on_reference_test_metadata;
+     Function<void(size_t current_match_index, Optional<size_t> const& total_match_count)> on_find_in_page;
++    Function<void(u64 session_id, Web::ElementPickerSelection const&)> on_element_picker_selection;
++    Function<void(u64 session_id, u64 filter_id, Web::ElementPickerMatch const&)> on_element_picker_match;
+     Function<void(Gfx::Color)> on_theme_color_change;
+     Function<void(Gfx::Color)> on_page_background_color_change;
+     Function<void(Web::ScreenWakeLockState)> on_screen_wake_lock_state_changed;
+@@ -981,6 +996,9 @@ protected:
+     Optional<u64> m_inspect_element_hit_test_request_id;
+     Optional<Web::UniqueNodeID> m_inspect_element_node_id;
+     bool m_inspect_element_activated_before_hit_test { false };
++    Optional<u64> m_element_picker_session_awaiting_hit_test;
++
++    RefPtr<WebContentPage> page_for_element_picker() const;
+ 
+     struct PendingInputEvent {
+         Web::InputEvent event;
+diff --git a/Libraries/LibWebView/WebContentPage.cpp b/Libraries/LibWebView/WebContentPage.cpp
+index c6673b5dec..f7733afed3 100644
+--- a/Libraries/LibWebView/WebContentPage.cpp
++++ b/Libraries/LibWebView/WebContentPage.cpp
+@@ -1225,6 +1225,22 @@ void WebContentPage::did_get_node_id_at_position(u64 request_id, Web::UniqueNode
+     }
+ }
+ 
++void WebContentPage::did_pick_element(u64 session_id, Web::ElementPickerSelection selection)
++{
++    if (displays_tab()) {
++        if (view().on_element_picker_selection)
++            view().on_element_picker_selection(session_id, selection);
++    }
++}
++
++void WebContentPage::did_match_element_picker_filter(u64 session_id, u64 filter_id, Web::ElementPickerMatch match)
++{
++    if (displays_tab()) {
++        if (view().on_element_picker_match)
++            view().on_element_picker_match(session_id, filter_id, match);
++    }
++}
++
+ void WebContentPage::did_list_style_sheets(Vector<Web::CSS::StyleSheetIdentifier> stylesheets)
+ {
+     if (displays_tab()) {
+diff --git a/Libraries/LibWebView/WebContentPage.h b/Libraries/LibWebView/WebContentPage.h
+index 2e73840cae..01fb6edb0b 100644
+--- a/Libraries/LibWebView/WebContentPage.h
++++ b/Libraries/LibWebView/WebContentPage.h
+@@ -238,6 +238,8 @@ private:
+     virtual void did_accessibility_focus_change(i64 focused_node_id) override;
+     virtual void did_get_hovered_node_id(Web::UniqueNodeID node_id) override;
+     virtual void did_get_node_id_at_position(u64 request_id, Web::UniqueNodeID node_id) override;
++    virtual void did_pick_element(u64 session_id, Web::ElementPickerSelection selection) override;
++    virtual void did_match_element_picker_filter(u64 session_id, u64 filter_id, Web::ElementPickerMatch match) override;
+     virtual void did_list_style_sheets(Vector<Web::CSS::StyleSheetIdentifier> stylesheets) override;
+     virtual void did_get_style_sheet_source(Web::CSS::StyleSheetIdentifier identifier, URL::URL base_url, Utf16String source) override;
+     virtual void did_list_devtools_sources(u64 request_id, Vector<Web::HTML::ScriptRegistryDescription> sources) override;
+diff --git a/Services/Hub/ConnectionFromUI.cpp b/Services/Hub/ConnectionFromUI.cpp
+index 039ead5d8e..2bf57a18ff 100644
+--- a/Services/Hub/ConnectionFromUI.cpp
++++ b/Services/Hub/ConnectionFromUI.cpp
+@@ -1322,6 +1322,36 @@ void ConnectionFromUI::view_node_picker_cancel(u64 view_id)
+     }
+ }
+ 
++void ConnectionFromUI::view_element_picker_start(u64 view_id, u64 session_id, WebView::ViewImplementation::ElementPickerTarget target)
++{
++    if (auto* view = find_view(view_id))
++        view->start_element_picker(session_id, target);
++}
++
++void ConnectionFromUI::view_element_picker_hover(u64 view_id, u64 session_id, Web::DevicePixelPoint position)
++{
++    if (auto* view = find_view(view_id))
++        view->element_picker_hover(session_id, position);
++}
++
++void ConnectionFromUI::view_element_picker_pick(u64 view_id, u64 session_id, Web::DevicePixelPoint position)
++{
++    if (auto* view = find_view(view_id))
++        view->element_picker_pick(session_id, position);
++}
++
++void ConnectionFromUI::view_element_picker_set_filter(u64 view_id, u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview preview)
++{
++    if (auto* view = find_view(view_id))
++        view->element_picker_set_filter(session_id, filter_id, move(filter), preview);
++}
++
++void ConnectionFromUI::view_element_picker_stop(u64 view_id)
++{
++    if (auto* view = find_view(view_id))
++        view->stop_element_picker();
++}
++
+ void ConnectionFromUI::view_alert_closed(u64 view_id)
+ {
+     if (auto* view = find_view(view_id)) {
+diff --git a/Services/Hub/ConnectionFromUI.h b/Services/Hub/ConnectionFromUI.h
+index 343a8beb11..716cf5eed3 100644
+--- a/Services/Hub/ConnectionFromUI.h
++++ b/Services/Hub/ConnectionFromUI.h
+@@ -213,6 +213,11 @@ private:
+     virtual void view_node_picker_pick(u64 view_id, Web::DevicePixelPoint position) override;
+     virtual void view_node_picker_preview(u64 view_id, Web::DevicePixelPoint position) override;
+     virtual void view_node_picker_cancel(u64 view_id) override;
++    virtual void view_element_picker_start(u64 view_id, u64 session_id, WebView::ViewImplementation::ElementPickerTarget target) override;
++    virtual void view_element_picker_hover(u64 view_id, u64 session_id, Web::DevicePixelPoint position) override;
++    virtual void view_element_picker_pick(u64 view_id, u64 session_id, Web::DevicePixelPoint position) override;
++    virtual void view_element_picker_set_filter(u64 view_id, u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview preview) override;
++    virtual void view_element_picker_stop(u64 view_id) override;
+     virtual void view_alert_closed(u64 view_id) override;
+     virtual void view_confirm_closed(u64 view_id, bool accepted) override;
+     virtual void view_prompt_closed(u64 view_id, Optional<Utf16String> response) override;
+diff --git a/Services/Hub/HubClient.ipc b/Services/Hub/HubClient.ipc
+index a786113356..e2c4fc25b5 100644
+--- a/Services/Hub/HubClient.ipc
++++ b/Services/Hub/HubClient.ipc
+@@ -16,6 +16,7 @@
+ #include <LibWebCommon/CSS/PreferredColorScheme.h>
+ #include <LibWebCommon/Loader/NavigatorCompatibilityMode.h>
+ #include <LibWebCommon/Gamepad/GamepadSnapshot.h>
++#include <LibWebCommon/Page/ElementPicker.h>
+ #include <LibWebCommon/Page/SpellingError.h>
+ #include <LibWebCommon/Page/Translation.h>
+ #include <LibWebCommon/Page/WritingSuggestion.h>
+@@ -386,6 +387,8 @@ endpoint HubClient
+     view_request_select_dropdown(u64 view_id, Gfx::IntPoint content_position, i32 minimum_width, Vector<Web::HTML::SelectItem> items) =|
+     view_picture_in_picture_control_activated(u64 view_id, Compositing::PictureInPictureControl control) =|
+     view_find_in_page(u64 view_id, size_t current_match_index, Optional<size_t> total_match_count) =|
++    view_element_picker_selection(u64 view_id, u64 session_id, Web::ElementPickerSelection selection) =|
++    view_element_picker_match(u64 view_id, u64 session_id, u64 filter_id, Web::ElementPickerMatch match) =|
+     view_page_background_color_change(u64 view_id, Gfx::Color color) =|
+     view_screen_wake_lock_state_changed(u64 view_id, Web::ScreenWakeLockState state) =|
+     view_web_content_crashed(u64 view_id, WebView::ViewImplementation::WebContentCrashReason reason) =|
+diff --git a/Services/Hub/HubServer.ipc b/Services/Hub/HubServer.ipc
+index 05eb0df766..dc6f9fe40d 100644
+--- a/Services/Hub/HubServer.ipc
++++ b/Services/Hub/HubServer.ipc
+@@ -19,6 +19,7 @@
+ #include <LibWebCommon/Loader/NavigatorCompatibilityMode.h>
+ #include <LibWebCommon/HTML/VisibilityState.h>
+ #include <LibWebCommon/Gamepad/GamepadSnapshot.h>
++#include <LibWebCommon/Page/ElementPicker.h>
+ #include <LibWebCommon/Page/SpellingError.h>
+ #include <LibWebCommon/Page/WritingSuggestion.h>
+ #include <LibWebCommon/Clipboard/SystemClipboard.h>
+@@ -284,6 +285,11 @@ endpoint HubServer
+     view_node_picker_pick(u64 view_id, Web::DevicePixelPoint position) =|
+     view_node_picker_preview(u64 view_id, Web::DevicePixelPoint position) =|
+     view_node_picker_cancel(u64 view_id) =|
++    view_element_picker_start(u64 view_id, u64 session_id, WebView::ViewImplementation::ElementPickerTarget target) =|
++    view_element_picker_hover(u64 view_id, u64 session_id, Web::DevicePixelPoint position) =|
++    view_element_picker_pick(u64 view_id, u64 session_id, Web::DevicePixelPoint position) =|
++    view_element_picker_set_filter(u64 view_id, u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview preview) =|
++    view_element_picker_stop(u64 view_id) =|
+     view_alert_closed(u64 view_id) =|
+     view_confirm_closed(u64 view_id, bool accepted) =|
+     view_prompt_closed(u64 view_id, Optional<Utf16String> response) =|
+diff --git a/Services/Hub/View.cpp b/Services/Hub/View.cpp
+index 058db09632..27ac758899 100644
+--- a/Services/Hub/View.cpp
++++ b/Services/Hub/View.cpp
+@@ -581,6 +581,20 @@ void View::forward_callbacks_to_ui(bool is_tab)
+         }
+     };
+ 
++    on_element_picker_selection = [this](auto const&... arguments) {
++        if (auto* ui = ConnectionFromUI::the()) {
++            push_state_to_ui();
++            ui->async_view_element_picker_selection(view_id(), arguments...);
++        }
++    };
++
++    on_element_picker_match = [this](auto const&... arguments) {
++        if (auto* ui = ConnectionFromUI::the()) {
++            push_state_to_ui();
++            ui->async_view_element_picker_match(view_id(), arguments...);
++        }
++    };
++
+     on_page_background_color_change = [this](auto const&... arguments) {
+         if (auto* ui = ConnectionFromUI::the()) {
+             push_state_to_ui();
+diff --git a/Services/WebContent/ConnectionFromClient.cpp b/Services/WebContent/ConnectionFromClient.cpp
+index 92964720d1..6cbcb1b669 100644
+--- a/Services/WebContent/ConnectionFromClient.cpp
++++ b/Services/WebContent/ConnectionFromClient.cpp
+@@ -2311,6 +2311,43 @@ void ConnectionFromClient::get_node_id_at_position(Web::PageId page_id, u64 requ
+     async_did_get_node_id_at_position(page_id, request_id, page->page().node_id_at_position(position));
+ }
+ 
++void ConnectionFromClient::element_picker_start(Web::PageId page_id, u64 session_id, Optional<Web::UniqueNodeID> node_id)
++{
++    auto page = this->page(page_id);
++    if (!page.has_value())
++        return;
++    auto selection = page->page().start_element_picker(session_id, node_id);
++    if (node_id.has_value())
++        async_did_pick_element(page_id, session_id, move(selection));
++}
++
++void ConnectionFromClient::element_picker_hover(Web::PageId page_id, u64 session_id, Web::DevicePixelPoint position)
++{
++    if (auto page = this->page(page_id); page.has_value())
++        page->page().hover_element_picker(session_id, position);
++}
++
++void ConnectionFromClient::element_picker_pick(Web::PageId page_id, u64 session_id, Web::DevicePixelPoint position)
++{
++    if (auto page = this->page(page_id); page.has_value())
++        async_did_pick_element(page_id, session_id, page->page().pick_with_element_picker(session_id, position));
++}
++
++void ConnectionFromClient::element_picker_set_filter(Web::PageId page_id, u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview preview)
++{
++    auto page = this->page(page_id);
++    if (!page.has_value())
++        return;
++    if (auto match = page->page().set_element_picker_filter(session_id, filter, preview); match.has_value())
++        async_did_match_element_picker_filter(page_id, session_id, filter_id, *match);
++}
++
++void ConnectionFromClient::element_picker_stop(Web::PageId page_id)
++{
++    if (auto page = this->page(page_id); page.has_value())
++        page->page().stop_element_picker();
++}
++
+ void ConnectionFromClient::list_style_sheets(Web::PageId page_id)
+ {
+     auto page = this->page(page_id);
+diff --git a/Services/WebContent/ConnectionFromClient.h b/Services/WebContent/ConnectionFromClient.h
+index a00347f5e9..3da378147f 100644
+--- a/Services/WebContent/ConnectionFromClient.h
++++ b/Services/WebContent/ConnectionFromClient.h
+@@ -213,6 +213,11 @@ private:
+         i32 offset_end, String text) override;
+     virtual void get_hovered_node_id(Web::PageId page_id) override;
+     virtual void get_node_id_at_position(Web::PageId page_id, u64 request_id, Web::DevicePixelPoint position) override;
++    virtual void element_picker_start(Web::PageId page_id, u64 session_id, Optional<Web::UniqueNodeID> node_id) override;
++    virtual void element_picker_hover(Web::PageId page_id, u64 session_id, Web::DevicePixelPoint position) override;
++    virtual void element_picker_pick(Web::PageId page_id, u64 session_id, Web::DevicePixelPoint position) override;
++    virtual void element_picker_set_filter(Web::PageId page_id, u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview preview) override;
++    virtual void element_picker_stop(Web::PageId page_id) override;
+ 
+     virtual void list_style_sheets(Web::PageId page_id) override;
+     virtual void request_style_sheet_source(Web::PageId page_id, Web::CSS::StyleSheetIdentifier identifier) override;
+diff --git a/Services/WebContent/WebContentClient.ipc b/Services/WebContent/WebContentClient.ipc
+index 7244b158f2..0b4e54d392 100644
+--- a/Services/WebContent/WebContentClient.ipc
++++ b/Services/WebContent/WebContentClient.ipc
+@@ -54,6 +54,7 @@
+ #include <LibWebCommon/HTML/WorkerAgentTypes.h>
+ #include <LibWebCommon/Page/CompositorContextId.h>
+ #include <LibWebCommon/Page/ContextMenuForInputEventsTarget.h>
++#include <LibWebCommon/Page/ElementPicker.h>
+ #include <LibWebCommon/Page/EventResult.h>
+ #include <LibWebCommon/Page/InputEvent.h>
+ #include <LibWebCommon/Page/MediaContextMenu.h>
+@@ -158,6 +159,8 @@ endpoint WebContentClient routed by Web::PageId page_id
+     did_accessibility_focus_change(Web::PageId page_id, i64 focused_node_id) =|
+     did_get_hovered_node_id(Web::PageId page_id, Web::UniqueNodeID node_id) =|
+     did_get_node_id_at_position(Web::PageId page_id, u64 request_id, Web::UniqueNodeID node_id) =|
++    did_pick_element(Web::PageId page_id, u64 session_id, Web::ElementPickerSelection selection) =|
++    did_match_element_picker_filter(Web::PageId page_id, u64 session_id, u64 filter_id, Web::ElementPickerMatch match) =|
+     did_finish_editing_dom_node(Web::PageId page_id, Optional<Web::UniqueNodeID> node_id) =|
+     did_mutate_dom(Web::PageId page_id, WebView::Mutation mutation) =|
+     did_get_dom_node_html(Web::PageId page_id, String html) =|
+diff --git a/Services/WebContent/WebContentServer.ipc b/Services/WebContent/WebContentServer.ipc
+index 4c4899a9c7..09075e0a8c 100644
+--- a/Services/WebContent/WebContentServer.ipc
++++ b/Services/WebContent/WebContentServer.ipc
+@@ -43,6 +43,7 @@
+ #include <LibWebCommon/HTML/WorkerTypes.h>
+ #include <LibWebCommon/Page/ContextMenuForInputEventsTarget.h>
+ #include <LibWebCommon/Page/DragEvent.h>
++#include <LibWebCommon/Page/ElementPicker.h>
+ #include <LibWebCommon/Page/InputEvent.h>
+ #include <LibWebCommon/Page/MediaContextMenu.h>
+ #include <LibWebCommon/Page/NavigationTarget.h>
+@@ -196,6 +197,12 @@ endpoint WebContentServer routed by Web::PageId page_id
+     get_hovered_node_id(Web::PageId page_id) =|
+     get_node_id_at_position(Web::PageId page_id, u64 request_id, Web::DevicePixelPoint position) =|
+ 
++    element_picker_start(Web::PageId page_id, u64 session_id, Optional<Web::UniqueNodeID> node_id) =|
++    element_picker_hover(Web::PageId page_id, u64 session_id, Web::DevicePixelPoint position) =|
++    element_picker_pick(Web::PageId page_id, u64 session_id, Web::DevicePixelPoint position) =|
++    element_picker_set_filter(Web::PageId page_id, u64 session_id, u64 filter_id, String filter, Web::ElementPickerPreview preview) =|
++    element_picker_stop(Web::PageId page_id) =|
++
+     js_console_input(Web::PageId page_id, String js_source) =|
+     complete_js_console_input(Web::PageId page_id, u64 request_id, String input) =|
+     run_javascript(Web::PageId page_id, String js_source) =|
+diff --git a/UI/Qt/Actions.h b/UI/Qt/Actions.h
+index 7ef3ba6d6a..37ac3343e4 100644
+--- a/UI/Qt/Actions.h
++++ b/UI/Qt/Actions.h
+@@ -81,6 +81,7 @@ enum class ActionID {
+     ToggleDevTools,
+     ViewSource,
+     InspectElement,
++    BlockElement,
+ 
+     OpenInNewTab,
+     OpenInNewWindow,
+diff --git a/UI/Qt/CMakeLists.txt b/UI/Qt/CMakeLists.txt
+index af81ebd894..cc747a4936 100644
+--- a/UI/Qt/CMakeLists.txt
++++ b/UI/Qt/CMakeLists.txt
+@@ -30,7 +30,9 @@ add_library(ladybird_impl STATIC
+     ChromeStyle.cpp
+     ContextMenus.cpp
+     CrashReportReviewWidget.cpp
++    CustomFilters.cpp
+     DevToolsBanner.cpp
++    ElementPickerWidget.cpp
+     ElidedLabel.cpp
+     EventLoopImplementationQt.cpp
+     EventLoopImplementationQtEventTarget.cpp
+diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
+index 46ba392456..0fc3ddf845 100644
+--- a/UI/Qt/ChromeStyle.cpp
++++ b/UI/Qt/ChromeStyle.cpp
+@@ -15,6 +15,7 @@
+ #include <QCursor>
+ #include <QElapsedTimer>
+ #include <QFont>
++#include <QFontDatabase>
+ #include <QGuiApplication>
+ #include <QImage>
+ #include <QMenu>
+@@ -2419,6 +2420,189 @@ QPushButton#LadybirdPageCardPrimaryButton:pressed {{
+         style_sheet_color(primary), style_sheet_color(primary.darker(110)), style_sheet_color(primary.darker(122)));
+ }
+ 
++QString element_picker_style_sheet()
++{
++    auto const& panel = Theme::panel();
++    auto primary = Theme::primary();
++    auto fixed_font_family = QFontDatabase::systemFont(QFontDatabase::FixedFont).family().remove(QLatin1Char('"'));
++    return qformatted(R"(
++QFrame#LadybirdElementPicker {{
++    color: {0};
++    background: {1};
++    border: 0;
++    border-radius: 12px;
++}}
++
++QFrame#LadybirdElementPicker QLabel {{
++    color: {0};
++    background: transparent;
++    font-size: 12px;
++}}
++
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerTitle {{
++    font-size: 13px;
++    font-weight: 600;
++}}
++
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerDetail,
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerHeading {{
++    color: {2};
++}}
++
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerHeading {{
++    font-size: 11px;
++    font-weight: 600;
++    padding: 4px 6px 2px 6px;
++}}
++
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerNote {{
++    color: {3};
++}}
++
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerStatus {{
++    color: #ffffff;
++    background: {7};
++    border-radius: 9px;
++    min-height: 18px;
++    max-height: 18px;
++    padding: 0 8px;
++    font-size: 11px;
++    font-weight: 600;
++}}
++
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerStatus[failed="true"] {{
++    color: {3};
++    background: {4};
++}}
++
++QPushButton#LadybirdElementPickerClose {{
++    background: transparent;
++    border: 0;
++    border-radius: 6px;
++}}
++
++QPushButton#LadybirdElementPickerClose:hover,
++QPushButton#LadybirdElementPickerClose:focus {{
++    background: {4};
++}}
++
++QPlainTextEdit#LadybirdElementPickerFilter {{
++    color: {0};
++    background: {6};
++    border: 1px solid {8};
++    border-radius: 7px;
++    padding: 2px;
++    font-family: "{10}";
++    font-size: 12px;
++}}
++
++QPlainTextEdit#LadybirdElementPickerFilter:focus {{
++    border-color: {9};
++}}
++
++QScrollArea#LadybirdElementPickerCandidates {{
++    background: {6};
++    border: 1px solid {8};
++    border-radius: 7px;
++}}
++
++QWidget#LadybirdElementPickerCandidateRows {{
++    background: transparent;
++}}
++
++QScrollArea#LadybirdElementPickerCandidates QScrollBar:vertical {{
++    background: transparent;
++    width: 8px;
++    margin: 0;
++}}
++
++QScrollArea#LadybirdElementPickerCandidates QScrollBar::handle:vertical {{
++    background: {5};
++    border-radius: 4px;
++    min-height: 20px;
++}}
++
++QScrollArea#LadybirdElementPickerCandidates QScrollBar::add-line:vertical,
++QScrollArea#LadybirdElementPickerCandidates QScrollBar::sub-line:vertical {{
++    height: 0;
++}}
++
++QScrollArea#LadybirdElementPickerCandidates QScrollBar::add-page:vertical,
++QScrollArea#LadybirdElementPickerCandidates QScrollBar::sub-page:vertical {{
++    background: transparent;
++}}
++
++QPushButton#LadybirdElementPickerCandidate {{
++    background: transparent;
++    border: 0;
++    border-radius: 5px;
++}}
++
++QFrame#LadybirdElementPicker QLabel#LadybirdElementPickerCandidateLabel {{
++    font-family: "{10}";
++    font-size: 11px;
++}}
++
++QPushButton#LadybirdElementPickerCandidate:hover,
++QPushButton#LadybirdElementPickerCandidate:focus,
++QPushButton#LadybirdElementPickerCandidate[current="true"] {{
++    background: {4};
++}}
++
++QPushButton#LadybirdElementPickerButton,
++QPushButton#LadybirdElementPickerPrimaryButton {{
++    color: {0};
++    background: {4};
++    border: 1px solid transparent;
++    border-radius: 7px;
++    min-height: 26px;
++    max-height: 26px;
++    padding: 0 12px;
++    font-size: 12px;
++    font-weight: 500;
++}}
++
++QPushButton#LadybirdElementPickerButton:hover,
++QPushButton#LadybirdElementPickerButton:pressed {{
++    background: {5};
++}}
++
++QPushButton#LadybirdElementPickerButton:checked {{
++    color: #ffffff;
++    background: {7};
++}}
++
++QPushButton#LadybirdElementPickerButton:focus,
++QPushButton#LadybirdElementPickerPrimaryButton:focus {{
++    border-color: {9};
++}}
++
++QPushButton#LadybirdElementPickerButton:disabled,
++QPushButton#LadybirdElementPickerPrimaryButton:disabled {{
++    color: {2};
++    background: {4};
++}}
++
++QPushButton#LadybirdElementPickerPrimaryButton:enabled {{
++    color: #ffffff;
++    background: {11};
++}}
++
++QPushButton#LadybirdElementPickerPrimaryButton:enabled:hover {{
++    background: {12};
++}}
++
++QPushButton#LadybirdElementPickerPrimaryButton:enabled:pressed {{
++    background: {13};
++}}
++)",
++               style_sheet_color(panel.text), style_sheet_color(panel.surface), style_sheet_color(panel.muted), style_sheet_color(panel.warning),
++               style_sheet_color(panel.control), style_sheet_color(panel.pressed), style_sheet_color(panel.page), style_sheet_color(Theme::accent_fill()),
++               style_sheet_color(panel.separator), style_sheet_color(Theme::focus_edge()), fixed_font_family,
++               style_sheet_color(primary), style_sheet_color(primary.darker(110)), style_sheet_color(primary.darker(122)))
++        + panel_text_selection_style_sheet({ "QPlainTextEdit#LadybirdElementPickerFilter" }, panel.text);
++}
++
+ static void paint_circular_control_frame(QPainter& painter, QRect const& rect, qreal device_pixel_ratio, QColor const& background, QColor const& border)
+ {
+     auto frame_rect = QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5);
+diff --git a/UI/Qt/ChromeStyle.h b/UI/Qt/ChromeStyle.h
+index 1c6086e6f7..a1bfa08e90 100644
+--- a/UI/Qt/ChromeStyle.h
++++ b/UI/Qt/ChromeStyle.h
+@@ -122,6 +122,7 @@ QString primary_button_style_sheet();
+ // Installs the application style, which keeps the platform's look but follows the design's timing.
+ void install_application_style();
+ QString page_card_style_sheet();
++QString element_picker_style_sheet();
+ QString screenshot_selection_style_sheet(QPalette const&);
+ QString screenshot_viewer_style_sheet();
+ 
+diff --git a/UI/Qt/ContextMenus.cpp b/UI/Qt/ContextMenus.cpp
+index 36e733278e..f8339c1496 100644
+--- a/UI/Qt/ContextMenus.cpp
++++ b/UI/Qt/ContextMenus.cpp
+@@ -191,11 +191,19 @@ static void add_copy_link_to_highlight_action(Menu& menu, RemoteView& view, Cont
+ 
+ // The element is the one under the cursor when the context menu opened, so a page that changes while the menu is open
+ // still has the element the user clicked on.
+-static void add_inspect_element_action(Menu& menu, u64 view_id, ContextMenuRequest const& request)
++static void add_element_actions(Menu& menu, RemoteView& view, ContextMenuRequest const& request)
+ {
++    auto view_id = view.view_id();
++    if (view.can_block_elements() || request.can_inspect_element)
++        menu.add_separator();
++    if (view.can_block_elements()) {
++        menu.add_action(Action::create("Block element…"sv, ActionID::BlockElement, on_view(view_id, [](RemoteView& view) {
++            if (view.on_request_element_picker)
++                view.on_request_element_picker(RemoteView::ElementPickerTarget::ContextMenuElement);
++        })));
++    }
+     if (!request.can_inspect_element)
+         return;
+-    menu.add_separator();
+     menu.add_action(Action::create("Inspect Element"sv, ActionID::InspectElement, [view_id]() {
+         HubConnection::the().async_view_inspect_context_menu_element(view_id);
+     }));
+@@ -242,7 +250,7 @@ static NonnullRefPtr<Menu> create_page_context_menu(RemoteView& view, ContextMen
+                 view.on_request_screenshot();
+         })));
+     }
+-    add_inspect_element_action(*menu, view_id, request);
++    add_element_actions(*menu, view, request);
+     return menu;
+ }
+ 
+@@ -258,7 +266,7 @@ static NonnullRefPtr<Menu> create_selected_text_link_context_menu(RemoteView& vi
+     menu->add_separator();
+     add_search_action(*menu, view_id, request.selected_text);
+     add_copy_link_to_highlight_action(*menu, view, request);
+-    add_inspect_element_action(*menu, view_id, request);
++    add_element_actions(*menu, view, request);
+     return menu;
+ }
+ 
+@@ -267,7 +275,7 @@ static NonnullRefPtr<Menu> create_link_context_menu(RemoteView& view, ContextMen
+     auto menu = Menu::create("Link Context Menu"sv);
+     add_link_actions(*menu, view, *request.link_navigation);
+     add_copy_link_to_highlight_action(*menu, view, request);
+-    add_inspect_element_action(*menu, view.view_id(), request);
++    add_element_actions(*menu, view, request);
+     return menu;
+ }
+ 
+@@ -304,7 +312,7 @@ static NonnullRefPtr<Menu> create_image_context_menu(RemoteView& view, ContextMe
+     menu->add_action(Action::create("Save Image As…"sv, ActionID::SaveImage, on_view(view_id, [url, image_mime_type = request.image_mime_type](RemoteView& view) {
+         view.download_url(url, RemoteView::PromptForPath::Yes, image_mime_type);
+     })));
+-    add_inspect_element_action(*menu, view_id, request);
++    add_element_actions(*menu, view, request);
+     return menu;
+ }
+ 
+@@ -355,7 +363,7 @@ static NonnullRefPtr<Menu> create_media_context_menu(RemoteView& view, ContextMe
+         }
+         menu->add_action(create_copy_url_action(media.is_video ? "Copy Video Address"sv : "Copy Audio Address"sv, url));
+     }
+-    add_inspect_element_action(*menu, view_id, request);
++    add_element_actions(*menu, view, request);
+     return menu;
+ }
+ 
+diff --git a/UI/Qt/CustomFilters.cpp b/UI/Qt/CustomFilters.cpp
+new file mode 100644
+index 0000000000..b9cf42462b
+--- /dev/null
++++ b/UI/Qt/CustomFilters.cpp
+@@ -0,0 +1,40 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/String.h>
++#include <AK/StringBuilder.h>
++#include <UI/Qt/CustomFilters.h>
++
++namespace Ladybird {
++
++// NB: The settings page, which edits the same filters, takes no more than this either.
++static constexpr size_t MAX_CUSTOM_FILTERS_SIZE = 4 * MiB;
++
++AddCustomFilterResult add_custom_filter(WebView::Settings& settings, StringView filter)
++{
++    filter = filter.trim_whitespace();
++    if (filter.is_empty())
++        return AddCustomFilterResult::Empty;
++
++    auto const& filters = settings.custom_content_blocker_filters();
++    for (auto line : filters.bytes_as_string_view().split_view('\n')) {
++        if (line.trim_whitespace() == filter)
++            return AddCustomFilterResult::AlreadyExists;
++    }
++
++    StringBuilder builder;
++    builder.append(filters);
++    if (!filters.is_empty() && !filters.bytes_as_string_view().ends_with('\n'))
++        builder.append('\n');
++    builder.append(filter);
++    if (builder.length() > MAX_CUSTOM_FILTERS_SIZE)
++        return AddCustomFilterResult::TooLarge;
++
++    settings.set_custom_content_blocker_filters(MUST(builder.to_string()));
++    return AddCustomFilterResult::Added;
++}
++
++}
+diff --git a/UI/Qt/CustomFilters.h b/UI/Qt/CustomFilters.h
+new file mode 100644
+index 0000000000..0930be1d67
+--- /dev/null
++++ b/UI/Qt/CustomFilters.h
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/StringView.h>
++#include <AK/Types.h>
++#include <LibWebView/Settings.h>
++
++namespace Ladybird {
++
++enum class AddCustomFilterResult : u8 {
++    Added,
++    Empty,
++    AlreadyExists,
++    TooLarge,
++};
++
++// Adds a filter to those the user wrote, unless it is already one of them.
++AddCustomFilterResult add_custom_filter(WebView::Settings&, StringView filter);
++
++}
+diff --git a/UI/Qt/ElementPickerWidget.cpp b/UI/Qt/ElementPickerWidget.cpp
+new file mode 100644
+index 0000000000..34e8b9418b
+--- /dev/null
++++ b/UI/Qt/ElementPickerWidget.cpp
+@@ -0,0 +1,774 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/StdLibExtras.h>
++#include <UI/Qt/Application.h>
++#include <UI/Qt/ChromeStyle.h>
++#include <UI/Qt/CustomFilters.h>
++#include <UI/Qt/ElementPickerWidget.h>
++#include <UI/Qt/ElidedLabel.h>
++#include <UI/Qt/Icon.h>
++#include <UI/Qt/Localization.h>
++#include <UI/Qt/Popover.h>
++#include <UI/Qt/StringUtils.h>
++#include <UI/Qt/Theme.h>
++#include <UI/Qt/WebContentView.h>
++#if defined(AK_OS_MACOS)
++#    include <UI/Qt/MacWindow.h>
++#endif
++
++#include <QApplication>
++#include <QFontDatabase>
++#include <QFrame>
++#include <QHBoxLayout>
++#include <QKeyEvent>
++#include <QLabel>
++#include <QMouseEvent>
++#include <QPainter>
++#include <QPlainTextEdit>
++#include <QPushButton>
++#include <QRegion>
++#include <QResizeEvent>
++#include <QScrollArea>
++#include <QtMath>
++#include <QScrollBar>
++#include <QSignalBlocker>
++#include <QSlider>
++#include <QStyle>
++#include <QTimer>
++#include <QVBoxLayout>
++#include <QVariant>
++#include <QWindow>
++
++namespace Ladybird {
++
++// The panel is a native child of the window, so it stacks above the native view of the page once it is raised above it,
++// while the keyboard stays within the browser window.
++static constexpr int PANEL_WIDTH = 400;
++static constexpr int PANEL_CORNER_RADIUS = 12;
++static constexpr int PANEL_PADDING = 12;
++static constexpr int PAGE_EDGE_INSET = 16;
++static constexpr int HEADER_ICON_SIZE = 18;
++static constexpr int EDITOR_HEIGHT = 58;
++static constexpr int CANDIDATE_HEIGHT = 24;
++static constexpr int CANDIDATE_LIST_MAX_HEIGHT = 150;
++// What the panel shows besides the candidates takes about this much of a low page's height.
++static constexpr int HEIGHT_BESIDES_CANDIDATES = 330;
++static constexpr int APPLY_DELAY_MS = 150;
++
++static QPushButton* create_button(QWidget& parent, QString const& text, char const* object_name)
++{
++    auto* button = new QPushButton(&parent);
++    button->setObjectName(QString::fromLatin1(object_name));
++    button->setAttribute(Qt::WA_LayoutUsesWidgetRect);
++    // NB: A click leaves the focus where it is, so that Esc and the filter's editor keep working.
++    button->setFocusPolicy(Qt::TabFocus);
++    bind_localized_text(*button, text);
++    return button;
++}
++
++static void set_style_property(QWidget& widget, char const* name, bool value)
++{
++    if (widget.property(name).toBool() == value)
++        return;
++    widget.setProperty(name, value);
++    widget.style()->unpolish(&widget);
++    widget.style()->polish(&widget);
++    widget.update();
++}
++
++ElementPickerWidget::ElementPickerWidget(QWidget* tab, WebContentView* view)
++    : QFrame(tab)
++    , m_view(view)
++{
++    setObjectName("LadybirdElementPicker");
++    setAccessibleName(tr_ui("Block element"));
++#if defined(AK_OS_MACOS) || defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    setAttribute(Qt::WA_DontCreateNativeAncestors);
++    setAttribute(Qt::WA_NativeWindow);
++#endif
++    cast_floating_shadow(*this, PANEL_CORNER_RADIUS);
++    setFixedWidth(PANEL_WIDTH);
++    setFocusPolicy(Qt::StrongFocus);
++
++    auto* layout = new QVBoxLayout(this);
++    layout->setContentsMargins(PANEL_PADDING, 0, PANEL_PADDING, PANEL_PADDING);
++    layout->setSpacing(8);
++
++    // The header, which the panel is dragged by.
++    m_header = new QWidget(this);
++    m_header->setCursor(Qt::SizeAllCursor);
++    auto* header_layout = new QHBoxLayout(m_header);
++    header_layout->setContentsMargins(0, 10, 0, 0);
++    header_layout->setSpacing(8);
++    m_icon = new QLabel(m_header);
++    m_icon->setFixedSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE);
++    header_layout->addWidget(m_icon);
++    auto* title = new QLabel(m_header);
++    title->setObjectName("LadybirdElementPickerTitle");
++    bind_localized_text(*title, QStringLiteral("Block element"));
++    header_layout->addWidget(title);
++    header_layout->addStretch(1);
++    m_status = new QLabel(m_header);
++    m_status->setObjectName("LadybirdElementPickerStatus");
++    m_status->setTextFormat(Qt::PlainText);
++    m_status->setAlignment(Qt::AlignCenter);
++    m_status->hide();
++    header_layout->addWidget(m_status);
++    m_close_button = new QPushButton(m_header);
++    m_close_button->setObjectName("LadybirdElementPickerClose");
++    m_close_button->setAttribute(Qt::WA_LayoutUsesWidgetRect);
++    m_close_button->setFixedSize(24, 24);
++    m_close_button->setIconSize({ 12, 12 });
++    m_close_button->setCursor(Qt::ArrowCursor);
++    m_close_button->setFocusPolicy(Qt::TabFocus);
++    bind_localized_tooltip(*m_close_button, QStringLiteral("Quit element picker"));
++    m_close_button->setAccessibleName(tr_ui("Quit element picker"));
++    QObject::connect(m_close_button, &QPushButton::clicked, this, [this] { quit(); });
++    header_layout->addWidget(m_close_button);
++    layout->addWidget(m_header);
++
++    m_hint = new QLabel(this);
++    m_hint->setObjectName("LadybirdElementPickerDetail");
++    m_hint->setWordWrap(true);
++    bind_localized_text(*m_hint, QStringLiteral("Click an element on the page to block it. Press Esc to cancel."));
++    layout->addWidget(m_hint);
++
++    m_body = new QWidget(this);
++    auto* body_layout = new QVBoxLayout(m_body);
++    body_layout->setContentsMargins(0, 0, 0, 0);
++    body_layout->setSpacing(8);
++
++    // The filter.
++    m_editor = new QPlainTextEdit(m_body);
++    m_editor->setObjectName("LadybirdElementPickerFilter");
++    m_editor->setAccessibleName(tr_ui("Filter"));
++    m_editor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
++    m_editor->setFixedHeight(EDITOR_HEIGHT);
++    m_editor->setFrameShape(QFrame::NoFrame);
++    m_editor->setTabChangesFocus(true);
++    m_editor->setLineWrapMode(QPlainTextEdit::WidgetWidth);
++    m_editor->setWordWrapMode(QTextOption::WrapAnywhere);
++    m_editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
++    m_editor->installEventFilter(this);
++    QObject::connect(m_editor, &QPlainTextEdit::textChanged, this, [this] {
++        m_create_button->setEnabled(false);
++        update_selected_candidate();
++        m_apply_timer->start();
++    });
++    body_layout->addWidget(m_editor);
++
++    // What the filter is made for, and how narrowly.
++    m_element_label = new ElidedLabel({}, Qt::ElideMiddle, m_body);
++    m_element_label->setObjectName("LadybirdElementPickerDetail");
++    body_layout->addWidget(m_element_label);
++    auto add_slider = [&](QString const& text) {
++        auto* row = new QHBoxLayout;
++        row->setContentsMargins(0, 0, 0, 0);
++        row->setSpacing(10);
++        auto* label = new QLabel(m_body);
++        label->setObjectName("LadybirdElementPickerDetail");
++        label->setFixedWidth(80);
++        bind_localized_text(*label, text);
++        row->addWidget(label);
++        auto* slider = new QSlider(Qt::Horizontal, m_body);
++        slider->setAccessibleName(tr_ui(text));
++        slider->setSingleStep(1);
++        slider->setPageStep(1);
++        row->addWidget(slider, 1);
++        body_layout->addLayout(row);
++        return slider;
++    };
++    m_depth_slider = add_slider(QStringLiteral("Depth"));
++    QObject::connect(m_depth_slider, &QSlider::valueChanged, this, [this] { depth_changed(); });
++    m_specificity_slider = add_slider(QStringLiteral("Specificity"));
++    QObject::connect(m_specificity_slider, &QSlider::valueChanged, this, [this] { specificity_changed(); });
++
++    // The filters to choose from.
++    m_candidate_scroll = new QScrollArea(m_body);
++    m_candidate_scroll->setObjectName("LadybirdElementPickerCandidates");
++    m_candidate_scroll->setFrameShape(QFrame::NoFrame);
++    m_candidate_scroll->setWidgetResizable(true);
++    m_candidate_scroll->setFocusPolicy(Qt::NoFocus);
++    m_candidate_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
++    auto* rows = new QWidget(m_candidate_scroll);
++    rows->setObjectName("LadybirdElementPickerCandidateRows");
++    m_candidates = new QVBoxLayout(rows);
++    m_candidates->setContentsMargins(4, 4, 4, 4);
++    m_candidates->setSpacing(0);
++    m_candidates->setAlignment(Qt::AlignTop);
++    m_candidate_scroll->setWidget(rows);
++    body_layout->addWidget(m_candidate_scroll);
++
++    m_note = new QLabel(m_body);
++    m_note->setObjectName("LadybirdElementPickerNote");
++    m_note->setTextFormat(Qt::PlainText);
++    m_note->setWordWrap(true);
++    m_note->hide();
++    body_layout->addWidget(m_note);
++    layout->addWidget(m_body);
++
++    // The actions.
++    auto* actions = new QHBoxLayout;
++    actions->setContentsMargins(0, 0, 0, 0);
++    actions->setSpacing(6);
++    m_pick_button = create_button(*this, QStringLiteral("Pick"), "LadybirdElementPickerButton");
++    QObject::connect(m_pick_button, &QPushButton::clicked, this, [this] { pick_another(); });
++    actions->addWidget(m_pick_button);
++    m_preview_button = create_button(*this, QStringLiteral("Preview"), "LadybirdElementPickerButton");
++    m_preview_button->setCheckable(true);
++    QObject::connect(m_preview_button, &QPushButton::toggled, this, [this] { apply_filter(); });
++    actions->addWidget(m_preview_button);
++    actions->addStretch(1);
++    auto* quit_button = create_button(*this, QStringLiteral("Quit"), "LadybirdElementPickerButton");
++    QObject::connect(quit_button, &QPushButton::clicked, this, [this] { quit(); });
++    actions->addWidget(quit_button);
++    m_create_button = create_button(*this, QStringLiteral("Create"), "LadybirdElementPickerPrimaryButton");
++    QObject::connect(m_create_button, &QPushButton::clicked, this, [this] { create_filter(); });
++    actions->addWidget(m_create_button);
++    layout->addLayout(actions);
++
++    m_apply_timer = new QTimer(this);
++    m_apply_timer->setSingleShot(true);
++    m_apply_timer->setInterval(APPLY_DELAY_MS);
++    QObject::connect(m_apply_timer, &QTimer::timeout, this, [this] { apply_filter(); });
++
++    m_view->on_element_picker_hover = [this](Web::DevicePixelPoint position) {
++        if (m_mode == Mode::Pick)
++            m_view->element_picker_hover(position);
++    };
++    m_view->on_element_picker_click = [this](Web::DevicePixelPoint position) { clicked_on_page(position); };
++    m_view->on_element_picker_cancel = [this] { quit(); };
++    m_view->on_element_picker_selection = [this](u64 session_id, Web::ElementPickerSelection const& selection) {
++        if (m_view->element_picker_session() == session_id)
++            did_pick(selection);
++    };
++    m_view->on_element_picker_match = [this](u64 session_id, u64 filter_id, Web::ElementPickerMatch const& match) {
++        if (m_view->element_picker_session() == session_id && filter_id == m_filter_id)
++            did_match(match);
++    };
++
++    update_chrome_style();
++    update_icons();
++    hide();
++}
++
++void ElementPickerWidget::start(RemoteView::ElementPickerTarget target)
++{
++    // NB: The page may answer an earlier session after it is over, so sessions are told apart across all tabs.
++    static u64 s_next_session_id { 1 };
++
++    if (!m_view->element_picker_session().has_value())
++        m_page_cursor = m_view->cursor();
++    else
++        m_view->stop_element_picker();
++
++    m_user_position.clear();
++    m_drag_offset.clear();
++    m_session_id = s_next_session_id++;
++    m_view->start_element_picker(m_session_id, target);
++    set_mode(target == RemoteView::ElementPickerTarget::ContextMenuElement ? Mode::Awaiting : Mode::Pick);
++    show();
++    reposition();
++}
++
++// Nothing of the picker stays on the page: what it highlighted, hid or kept from the page is as it was.
++void ElementPickerWidget::quit()
++{
++    m_apply_timer->stop();
++    ++m_filter_id;
++    if (m_view->element_picker_session().has_value()) {
++        m_view->stop_element_picker();
++        m_view->setCursor(m_page_cursor);
++    }
++    if (!isVisible())
++        return;
++    auto had_focus = isAncestorOf(QApplication::focusWidget()) || hasFocus();
++    hide();
++    if (had_focus)
++        m_view->setFocus();
++}
++
++void ElementPickerWidget::set_mode(Mode mode)
++{
++    m_mode = mode;
++    auto adjusting = mode == Mode::Adjust;
++    m_apply_timer->stop();
++    ++m_filter_id;
++    {
++        QSignalBlocker blocker(m_preview_button);
++        m_preview_button->setChecked(false);
++    }
++    m_hint->setVisible(mode == Mode::Pick);
++    m_body->setVisible(adjusting);
++    m_pick_button->setVisible(adjusting);
++    m_preview_button->setVisible(adjusting);
++    m_create_button->setVisible(adjusting);
++    m_status->setVisible(false);
++    m_create_button->setEnabled(false);
++    m_preview_button->setEnabled(false);
++    m_view->setCursor(mode == Mode::Pick ? Qt::CrossCursor : Qt::ArrowCursor);
++    if (mode == Mode::Pick)
++        m_view->setFocus();
++    fit_to_contents();
++}
++
++void ElementPickerWidget::pick_another()
++{
++    if (!m_view->element_picker_session().has_value())
++        return;
++    // A session without a target highlights nothing, until the pointer is over an element.
++    m_view->start_element_picker(m_session_id, RemoteView::ElementPickerTarget::None);
++    set_mode(Mode::Pick);
++}
++
++// A click beside the panel goes back to picking, other than in a preview, where the page is looked at and not picked on.
++void ElementPickerWidget::clicked_on_page(Web::DevicePixelPoint position)
++{
++    switch (m_mode) {
++    case Mode::Pick:
++        m_mode = Mode::Awaiting;
++        m_view->element_picker_pick(position);
++        return;
++    case Mode::Awaiting:
++        return;
++    case Mode::Adjust:
++        if (!m_preview_button->isChecked())
++            pick_another();
++        return;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++void ElementPickerWidget::did_pick(Web::ElementPickerSelection const& selection)
++{
++    // NB: What comes back for a start without a target is not picked by the user.
++    if (m_mode != Mode::Awaiting)
++        return;
++    if (selection.levels.is_empty()) {
++        set_mode(Mode::Pick);
++        return;
++    }
++
++    m_selection = selection;
++    {
++        QSignalBlocker blocker(m_depth_slider);
++        m_depth_slider->setRange(0, static_cast<int>(m_selection.levels.size()) - 1);
++        m_depth_slider->setValue(0);
++        m_depth_slider->setEnabled(m_selection.levels.size() > 1);
++    }
++    set_mode(Mode::Adjust);
++    depth_changed();
++    if (m_selection.prefers_network_filter && !m_selection.network_filters.is_empty())
++        set_filter(qstring_from_ak_string(m_selection.network_filters.first()));
++    reposition();
++    m_editor->setFocus();
++}
++
++void ElementPickerWidget::did_match(Web::ElementPickerMatch const& match)
++{
++    if (m_mode != Mode::Adjust)
++        return;
++
++    if (!match.is_valid)
++        show_status(tr_ui("Invalid filter"), Tone::Failure);
++    else if (match.match_count == 1)
++        show_status(tr_ui("1 match"), Tone::Normal);
++    else
++        show_status(tr_ui(QStringLiteral("%1 matches").arg(match.match_count)), match.match_count == 0 ? Tone::Failure : Tone::Normal);
++
++    m_create_button->setEnabled(match.is_valid);
++
++    // What a network filter blocks is kept from loading, so there is nothing to hide for it.
++    auto can_preview = match.is_valid && match.is_cosmetic && match.match_count > 0;
++    m_preview_button->setEnabled(can_preview);
++    if (!can_preview && m_preview_button->isChecked())
++        m_preview_button->setChecked(false);
++}
++
++size_t ElementPickerWidget::level_index() const
++{
++    return min(static_cast<size_t>(max(m_depth_slider->value(), 0)), m_selection.levels.size() - 1);
++}
++
++QString ElementPickerWidget::cosmetic_filter(QString const& selector) const
++{
++    return qstring_from_ak_string(m_selection.hostname) + QStringLiteral("##") + selector;
++}
++
++// A filter is one line, however it was pasted.
++QString ElementPickerWidget::filter() const
++{
++    return m_editor->toPlainText().remove(QLatin1Char('\r')).remove(QLatin1Char('\n')).trimmed();
++}
++
++void ElementPickerWidget::set_filter(QString const& filter)
++{
++    {
++        QSignalBlocker blocker(m_editor);
++        m_editor->setPlainText(filter);
++    }
++    update_selected_candidate();
++    apply_filter();
++}
++
++void ElementPickerWidget::depth_changed()
++{
++    if (m_selection.levels.is_empty())
++        return;
++    auto const& level = m_selection.levels[level_index()];
++    m_element_label->setText(qstring_from_ak_string(level.label));
++    m_element_label->setToolTip(qstring_from_ak_string(level.label));
++    {
++        QSignalBlocker blocker(m_specificity_slider);
++        m_specificity_slider->setRange(0, static_cast<int>(level.selectors.size()) - 1);
++        m_specificity_slider->setValue(static_cast<int>(level.default_selector_index));
++        m_specificity_slider->setEnabled(level.selectors.size() > 1);
++    }
++    update_candidates();
++    specificity_changed();
++}
++
++void ElementPickerWidget::specificity_changed()
++{
++    if (m_selection.levels.is_empty())
++        return;
++    auto const& selectors = m_selection.levels[level_index()].selectors;
++    if (selectors.is_empty())
++        return;
++    auto index = min(static_cast<size_t>(max(m_specificity_slider->value(), 0)), selectors.size() - 1);
++    set_filter(cosmetic_filter(qstring_from_ak_string(selectors[index])));
++}
++
++void ElementPickerWidget::apply_filter()
++{
++    m_apply_timer->stop();
++    if (m_mode != Mode::Adjust)
++        return;
++    show_note(protection_note());
++    m_create_button->setEnabled(false);
++    auto preview = m_preview_button->isChecked() ? Web::ElementPickerPreview::Yes : Web::ElementPickerPreview::No;
++    m_view->element_picker_set_filter(++m_filter_id, ak_string_from_qstring(filter()), preview);
++}
++
++void ElementPickerWidget::create_filter()
++{
++    if (!m_create_button->isEnabled())
++        return;
++    switch (add_custom_filter(Application::settings(), ak_string_from_qstring(filter()))) {
++    case AddCustomFilterResult::Added:
++        quit();
++        return;
++    case AddCustomFilterResult::Empty:
++        return;
++    case AddCustomFilterResult::AlreadyExists:
++        show_note(tr_ui("Rule already exists"));
++        return;
++    case AddCustomFilterResult::TooLarge:
++        show_note(tr_ui("Custom filters are full"));
++        return;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++// NB: A layout leaves out a widget that is yet to be shown, so what the list is made of is shown right away, for the list
++//     to be fitted to it.
++void ElementPickerWidget::add_candidate_heading(QString const& text)
++{
++    auto* heading = new QLabel(m_candidate_scroll->widget());
++    heading->setObjectName("LadybirdElementPickerHeading");
++    heading->setText(tr_ui(text));
++    m_candidates->addWidget(heading);
++    heading->show();
++}
++
++void ElementPickerWidget::add_candidate(QString const& filter)
++{
++    auto* row = new QPushButton(m_candidate_scroll->widget());
++    row->setObjectName("LadybirdElementPickerCandidate");
++    row->setFixedHeight(CANDIDATE_HEIGHT);
++    row->setAttribute(Qt::WA_LayoutUsesWidgetRect);
++    row->setFocusPolicy(Qt::TabFocus);
++    row->setAccessibleName(filter);
++    row->setToolTip(filter);
++    row->setProperty("filter", filter);
++    auto* row_layout = new QHBoxLayout(row);
++    row_layout->setContentsMargins(6, 0, 6, 0);
++    auto* label = new ElidedLabel(filter, Qt::ElideMiddle, row);
++    label->setObjectName("LadybirdElementPickerCandidateLabel");
++    label->setTextFormat(Qt::PlainText);
++    label->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
++    label->setAttribute(Qt::WA_TransparentForMouseEvents);
++    row_layout->addWidget(label);
++    QObject::connect(row, &QPushButton::clicked, this, [this, filter] {
++        // The slider follows, where it has the filter.
++        if (!m_selection.levels.is_empty()) {
++            auto const& selectors = m_selection.levels[level_index()].selectors;
++            for (size_t i = 0; i < selectors.size(); ++i) {
++                if (cosmetic_filter(qstring_from_ak_string(selectors[i])) == filter) {
++                    QSignalBlocker blocker(m_specificity_slider);
++                    m_specificity_slider->setValue(static_cast<int>(i));
++                }
++            }
++        }
++        set_filter(filter);
++    });
++    m_candidates->addWidget(row);
++    row->show();
++}
++
++void ElementPickerWidget::update_candidates()
++{
++    // The rows go once the event loop is back, as one of them may be handling a press.
++    while (auto* item = m_candidates->takeAt(0)) {
++        if (auto* widget = item->widget()) {
++            widget->hide();
++            widget->setObjectName({});
++            widget->deleteLater();
++        }
++        delete item;
++    }
++
++    if (!m_selection.network_filters.is_empty()) {
++        add_candidate_heading(QStringLiteral("Network filters"));
++        for (auto const& network_filter : m_selection.network_filters)
++            add_candidate(qstring_from_ak_string(network_filter));
++    }
++    add_candidate_heading(QStringLiteral("Cosmetic filters"));
++    for (auto const& selector : m_selection.levels[level_index()].selectors)
++        add_candidate(cosmetic_filter(qstring_from_ak_string(selector)));
++
++    m_candidate_scroll->verticalScrollBar()->setValue(0);
++    fit_to_contents();
++}
++
++void ElementPickerWidget::update_selected_candidate()
++{
++    auto current = filter();
++    for (int i = 0; i < m_candidates->count(); ++i) {
++        auto* row = qobject_cast<QPushButton*>(m_candidates->itemAt(i)->widget());
++        if (!row)
++            continue;
++        auto is_current = row->property("filter").toString() == current;
++        set_style_property(*row, "current", is_current);
++        if (is_current)
++            m_candidate_scroll->ensureWidgetVisible(row, 0, CANDIDATE_HEIGHT);
++    }
++}
++
++void ElementPickerWidget::show_status(QString const& text, Tone tone)
++{
++    m_status->setText(text);
++    set_style_property(*m_status, "failed", tone == Tone::Failure);
++    m_status->show();
++}
++
++// A filter that is made while nothing is blocked on the site is kept for when something is again.
++QString ElementPickerWidget::protection_note() const
++{
++    switch (m_view->content_blocking_snapshot().state) {
++    case WebView::ContentBlockingState::Disabled:
++        return tr_ui("Protection is off. The filter takes effect once it is turned on.");
++    case WebView::ContentBlockingState::SiteDisabled:
++        return tr_ui("Protection is paused on this site. The filter takes effect once it is resumed.");
++    case WebView::ContentBlockingState::Unavailable:
++    case WebView::ContentBlockingState::Enabled:
++    case WebView::ContentBlockingState::NoRules:
++        return {};
++    }
++    VERIFY_NOT_REACHED();
++}
++
++void ElementPickerWidget::show_note(QString const& text)
++{
++    if (m_note->text() == text)
++        return;
++    m_note->setText(text);
++    m_note->setVisible(!text.isEmpty());
++    fit_to_contents();
++}
++
++void ElementPickerWidget::fit_to_contents()
++{
++    auto max_height = clamp(m_view->height() - HEIGHT_BESIDES_CANDIDATES, 2 * CANDIDATE_HEIGHT, CANDIDATE_LIST_MAX_HEIGHT);
++    m_candidates->activate();
++    m_candidate_scroll->setFixedHeight(min(m_candidates->sizeHint().height(), max_height));
++    if (m_body->layout())
++        m_body->layout()->activate();
++    layout()->activate();
++    adjustSize();
++    reposition();
++}
++
++void ElementPickerWidget::reposition()
++{
++    auto* tab = parentWidget();
++    if (!tab)
++        return;
++    QRect page(m_view->mapTo(tab, QPoint(0, 0)), m_view->size());
++    QPoint position(page.right() + 1 - PAGE_EDGE_INSET - width(), page.bottom() + 1 - PAGE_EDGE_INSET - height());
++    if (m_user_position.has_value())
++        position = *m_user_position;
++    // NB: The top left corner has the header that the panel is dragged by, so it stays on the page even where the panel
++    //     does not fit.
++    position.setX(max(page.left(), min(position.x(), page.right() + 1 - width())));
++    position.setY(max(page.top(), min(position.y(), page.bottom() + 1 - height())));
++    if (pos() != position)
++        move(position);
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    if (auto* handle = windowHandle()) {
++        handle->setPosition(mapTo(window(), QPoint {}));
++        if (isVisible())
++            handle->raise();
++    }
++#endif
++}
++
++bool ElementPickerWidget::event(QEvent* event)
++{
++    if (event->type() == QEvent::PaletteChange) {
++        update_chrome_style();
++        update_icons();
++    }
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    else if (event->type() == QEvent::DevicePixelRatioChange) {
++        clearMask();
++        update_native_rounded_mask();
++    }
++#endif
++    return QFrame::event(event);
++}
++
++bool ElementPickerWidget::eventFilter(QObject* watched, QEvent* event)
++{
++    if (watched == m_editor && event->type() == QEvent::KeyPress) {
++        auto* key_event = static_cast<QKeyEvent*>(event);
++        if (key_event->key() == Qt::Key_Return || key_event->key() == Qt::Key_Enter) {
++            create_filter();
++            return true;
++        }
++        if (key_event->key() == Qt::Key_Escape) {
++            quit();
++            return true;
++        }
++    }
++    return QFrame::eventFilter(watched, event);
++}
++
++void ElementPickerWidget::keyPressEvent(QKeyEvent* event)
++{
++    if (event->key() == Qt::Key_Escape) {
++        quit();
++        event->accept();
++        return;
++    }
++    QFrame::keyPressEvent(event);
++}
++
++void ElementPickerWidget::mousePressEvent(QMouseEvent* event)
++{
++    if (event->button() == Qt::LeftButton && m_header->geometry().contains(event->position().toPoint()))
++        m_drag_offset = event->globalPosition().toPoint() - mapToGlobal(QPoint(0, 0));
++    // NB: The page is behind the panel, and is not to be picked on through it.
++    event->accept();
++}
++
++void ElementPickerWidget::mouseMoveEvent(QMouseEvent* event)
++{
++    if (m_drag_offset.has_value() && parentWidget()) {
++        m_user_position = parentWidget()->mapFromGlobal(event->globalPosition().toPoint() - *m_drag_offset);
++        reposition();
++        m_user_position = pos();
++    }
++    event->accept();
++}
++
++void ElementPickerWidget::mouseReleaseEvent(QMouseEvent* event)
++{
++    if (event->button() == Qt::LeftButton)
++        m_drag_offset.clear();
++    event->accept();
++}
++
++void ElementPickerWidget::showEvent(QShowEvent* event)
++{
++    QFrame::showEvent(event);
++    raise();
++#if defined(AK_OS_MACOS)
++    round_appkit_view_corners(*this, PANEL_CORNER_RADIUS, Theme::panel().edge);
++#elif defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    update_native_rounded_mask();
++    if (auto* handle = windowHandle()) {
++        handle->setPosition(mapTo(window(), QPoint {}));
++        handle->raise();
++    }
++#endif
++}
++
++void ElementPickerWidget::resizeEvent(QResizeEvent* event)
++{
++    QFrame::resizeEvent(event);
++    update_native_rounded_mask();
++}
++
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++void ElementPickerWidget::paintEvent(QPaintEvent* event)
++{
++    // Fill every pixel inside the native HWND so masked rounded corners never expose unpainted black pixels, and draw
++    // a crisp 1 px border since the alien FloatingShadow cannot paint above the native WebContentView.
++    {
++        QPainter bg_painter(this);
++        bg_painter.fillRect(rect(), Theme::panel().surface);
++    }
++    QFrame::paintEvent(event);
++    QPainter border_painter(this);
++    border_painter.setRenderHint(QPainter::Antialiasing);
++    border_painter.setBrush(Qt::NoBrush);
++    border_painter.setPen(QPen(Theme::panel().edge, 1));
++    auto radius = static_cast<qreal>(PANEL_CORNER_RADIUS) - 0.5;
++    border_painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
++}
++#endif
++
++void ElementPickerWidget::update_native_rounded_mask()
++{
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    auto bounds = rect();
++    if (bounds.isEmpty())
++        return;
++    auto r = min(PANEL_CORNER_RADIUS, min(bounds.width(), bounds.height()) / 2);
++    if (r <= 0) {
++        setMask(QRegion(bounds));
++        return;
++    }
++    QRegion region(bounds.adjusted(0, r, 0, -r));
++    for (int y = 0; y < r; ++y) {
++        auto dy = r - (y + 0.5);
++        auto inset = qFloor(r - qSqrt((r * r) - (dy * dy)));
++        auto w = bounds.width() - (2 * inset);
++        region += QRect(bounds.left() + inset, bounds.top() + y, w, 1);
++        region += QRect(bounds.left() + inset, bounds.bottom() - y, w, 1);
++    }
++    setMask(region);
++#endif
++}
++
++void ElementPickerWidget::update_chrome_style()
++{
++    if (m_is_updating_chrome_style)
++        return;
++    m_is_updating_chrome_style = true;
++    setStyleSheet(ChromeStyle::element_picker_style_sheet());
++    m_is_updating_chrome_style = false;
++}
++
++void ElementPickerWidget::update_icons()
++{
++    m_icon->setPixmap(create_chrome_icon(ChromeIcon::ContentBlocking, Theme::accent()).pixmap(QSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE), devicePixelRatioF()));
++    m_close_button->setIcon(create_chrome_icon(ChromeIcon::Close, Theme::panel().body));
++}
++
++}
+diff --git a/UI/Qt/ElementPickerWidget.h b/UI/Qt/ElementPickerWidget.h
+new file mode 100644
+index 0000000000..1ea69eea4e
+--- /dev/null
++++ b/UI/Qt/ElementPickerWidget.h
+@@ -0,0 +1,131 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/Optional.h>
++#include <AK/Types.h>
++#include <AK/kmalloc.h>
++#include <LibWebCommon/Page/ElementPicker.h>
++#include <UI/Qt/RemoteView.h>
++
++#include <QCursor>
++#include <QFrame>
++#include <QPoint>
++#include <QString>
++
++class QLabel;
++class QPlainTextEdit;
++class QPushButton;
++class QScrollArea;
++class QSlider;
++class QTimer;
++class QVBoxLayout;
++
++namespace Ladybird {
++
++class ElidedLabel;
++class WebContentView;
++
++// The panel that the user makes a filter in for something on the page. While it is open, either the element under the
++// pointer is highlighted, for the user to pick one, or everything that the filter in the panel blocks.
++class ElementPickerWidget final : public QFrame {
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    ElementPickerWidget(QWidget* tab, WebContentView* view);
++
++    void start(RemoteView::ElementPickerTarget);
++    void quit();
++    void reposition();
++
++private:
++    enum class Mode : u8 {
++        // The user is to pick an element on the page.
++        Pick,
++        // The page has yet to say what was picked.
++        Awaiting,
++        // The user is making a filter for what was picked.
++        Adjust,
++    };
++
++    enum class Tone : u8 {
++        Normal,
++        Failure,
++    };
++
++    virtual bool event(QEvent*) override;
++    virtual bool eventFilter(QObject*, QEvent*) override;
++    virtual void keyPressEvent(QKeyEvent*) override;
++    virtual void mousePressEvent(QMouseEvent*) override;
++    virtual void mouseMoveEvent(QMouseEvent*) override;
++    virtual void mouseReleaseEvent(QMouseEvent*) override;
++    virtual void showEvent(QShowEvent*) override;
++    virtual void resizeEvent(QResizeEvent*) override;
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    virtual void paintEvent(QPaintEvent*) override;
++#endif
++
++    void set_mode(Mode);
++    void pick_another();
++    void clicked_on_page(Web::DevicePixelPoint);
++    void did_pick(Web::ElementPickerSelection const&);
++    void did_match(Web::ElementPickerMatch const&);
++
++    size_t level_index() const;
++    QString cosmetic_filter(QString const& selector) const;
++    QString filter() const;
++    void set_filter(QString const&);
++    void depth_changed();
++    void specificity_changed();
++    void apply_filter();
++    void create_filter();
++
++    void add_candidate_heading(QString const& text);
++    void add_candidate(QString const& filter);
++    void update_candidates();
++    void update_selected_candidate();
++    QString protection_note() const;
++    void show_status(QString const& text, Tone);
++    void show_note(QString const& text);
++    void fit_to_contents();
++
++    void update_chrome_style();
++    void update_icons();
++    void update_native_rounded_mask();
++
++    WebContentView* m_view { nullptr };
++    Mode m_mode { Mode::Pick };
++    u64 m_session_id { 0 };
++    u64 m_filter_id { 0 };
++    Web::ElementPickerSelection m_selection;
++
++    QWidget* m_header { nullptr };
++    QLabel* m_icon { nullptr };
++    QLabel* m_status { nullptr };
++    QPushButton* m_close_button { nullptr };
++    QLabel* m_hint { nullptr };
++    QWidget* m_body { nullptr };
++    QPlainTextEdit* m_editor { nullptr };
++    ElidedLabel* m_element_label { nullptr };
++    QSlider* m_depth_slider { nullptr };
++    QSlider* m_specificity_slider { nullptr };
++    QScrollArea* m_candidate_scroll { nullptr };
++    QVBoxLayout* m_candidates { nullptr };
++    QLabel* m_note { nullptr };
++    QPushButton* m_pick_button { nullptr };
++    QPushButton* m_preview_button { nullptr };
++    QPushButton* m_create_button { nullptr };
++    QTimer* m_apply_timer { nullptr };
++
++    // Where the user dragged the panel to, if they did, and what they grabbed it by.
++    Optional<QPoint> m_user_position;
++    Optional<QPoint> m_drag_offset;
++    QCursor m_page_cursor;
++    bool m_is_updating_chrome_style { false };
++};
++
++}
+diff --git a/UI/Qt/HubConnection.cpp b/UI/Qt/HubConnection.cpp
+index 28da7b6b37..48ce10e21c 100644
+--- a/UI/Qt/HubConnection.cpp
++++ b/UI/Qt/HubConnection.cpp
+@@ -1131,6 +1131,18 @@ void HubConnection::view_find_in_page(u64 view_id, size_t current_match_index, O
+         view->on_find_in_page(move(current_match_index), move(total_match_count));
+ }
+ 
++void HubConnection::view_element_picker_selection(u64 view_id, u64 session_id, Web::ElementPickerSelection selection)
++{
++    if (auto* view = RemoteView::find(view_id); view && view->on_element_picker_selection)
++        view->on_element_picker_selection(session_id, selection);
++}
++
++void HubConnection::view_element_picker_match(u64 view_id, u64 session_id, u64 filter_id, Web::ElementPickerMatch match)
++{
++    if (auto* view = RemoteView::find(view_id); view && view->on_element_picker_match)
++        view->on_element_picker_match(session_id, filter_id, match);
++}
++
+ void HubConnection::view_page_background_color_change(u64 view_id, Gfx::Color color)
+ {
+     if (auto* view = RemoteView::find(view_id); view && view->on_page_background_color_change)
+diff --git a/UI/Qt/HubConnection.h b/UI/Qt/HubConnection.h
+index 9142d5de4e..4941be2ea8 100644
+--- a/UI/Qt/HubConnection.h
++++ b/UI/Qt/HubConnection.h
+@@ -226,6 +226,8 @@ private:
+     virtual void view_request_select_dropdown(u64 view_id, Gfx::IntPoint content_position, i32 minimum_width, Vector<Web::HTML::SelectItem> items) override;
+     virtual void view_picture_in_picture_control_activated(u64 view_id, Compositing::PictureInPictureControl control) override;
+     virtual void view_find_in_page(u64 view_id, size_t current_match_index, Optional<size_t> total_match_count) override;
++    virtual void view_element_picker_selection(u64 view_id, u64 session_id, Web::ElementPickerSelection selection) override;
++    virtual void view_element_picker_match(u64 view_id, u64 session_id, u64 filter_id, Web::ElementPickerMatch match) override;
+     virtual void view_page_background_color_change(u64 view_id, Gfx::Color color) override;
+     virtual void view_screen_wake_lock_state_changed(u64 view_id, Web::ScreenWakeLockState state) override;
+     virtual void view_web_content_crashed(u64 view_id, WebView::ViewImplementation::WebContentCrashReason reason) override;
+diff --git a/UI/Qt/Localization.cpp b/UI/Qt/Localization.cpp
+index 381219e205..09bbf28e38 100644
+--- a/UI/Qt/Localization.cpp
++++ b/UI/Qt/Localization.cpp
+@@ -207,6 +207,24 @@ QHash<QString, QString> const& polish_table()
+         { QStringLiteral("Full Screen"), QStringLiteral("Pełny ekran") },
+         { QStringLiteral("Exit Full Screen"), QStringLiteral("Opuść pełny ekran") },
+         { QStringLiteral("Inspect Element"), QStringLiteral("Zbadaj element") },
++        { QStringLiteral("Block element\u2026"), QStringLiteral("Zablokuj element\u2026") },
++        { QStringLiteral("Block element"), QStringLiteral("Zablokuj element") },
++        { QStringLiteral("Pick an element on the page to block"), QStringLiteral("Wybierz na stronie element do zablokowania") },
++        { QStringLiteral("Click an element on the page to block it. Press Esc to cancel."), QStringLiteral("Kliknij element na stronie, aby go zablokować. Naciśnij Esc, aby anulować.") },
++        { QStringLiteral("Quit element picker"), QStringLiteral("Zamknij wybieranie elementu") },
++        { QStringLiteral("Filter"), QStringLiteral("Filtr") },
++        { QStringLiteral("Depth"), QStringLiteral("Głębokość") },
++        { QStringLiteral("Specificity"), QStringLiteral("Dokładność") },
++        { QStringLiteral("Network filters"), QStringLiteral("Filtry sieciowe") },
++        { QStringLiteral("Cosmetic filters"), QStringLiteral("Filtry kosmetyczne") },
++        { QStringLiteral("Pick"), QStringLiteral("Wybierz") },
++        { QStringLiteral("Preview"), QStringLiteral("Podgląd") },
++        { QStringLiteral("Create"), QStringLiteral("Utwórz") },
++        { QStringLiteral("Quit"), QStringLiteral("Zakończ") },
++        { QStringLiteral("1 match"), QStringLiteral("1 dopasowanie") },
++        { QStringLiteral("Invalid filter"), QStringLiteral("Nieprawidłowy filtr") },
++        { QStringLiteral("Protection is off. The filter takes effect once it is turned on."), QStringLiteral("Ochrona jest wyłączona. Filtr zacznie działać po jej włączeniu.") },
++        { QStringLiteral("Protection is paused on this site. The filter takes effect once it is resumed."), QStringLiteral("Ochrona na tej stronie jest wstrzymana. Filtr zacznie działać po jej wznowieniu.") },
+         { QStringLiteral("Take Screenshot..."), QStringLiteral("Zrób zrzut ekranu…") },
+         { QStringLiteral("Take Screenshot\u2026"), QStringLiteral("Zrób zrzut ekranu\u2026") },
+         { QStringLiteral("Look Up"), QStringLiteral("Sprawdź w słowniku") },
+@@ -436,6 +454,24 @@ QHash<QString, QString> const& german_table()
+         { QStringLiteral("Full Screen"), QStringLiteral("Vollbild") },
+         { QStringLiteral("Exit Full Screen"), QStringLiteral("Vollbild beenden") },
+         { QStringLiteral("Inspect Element"), QStringLiteral("Element untersuchen") },
++        { QStringLiteral("Block element\u2026"), QStringLiteral("Element blockieren\u2026") },
++        { QStringLiteral("Block element"), QStringLiteral("Element blockieren") },
++        { QStringLiteral("Pick an element on the page to block"), QStringLiteral("Ein Element auf der Seite zum Blockieren auswählen") },
++        { QStringLiteral("Click an element on the page to block it. Press Esc to cancel."), QStringLiteral("Klicke auf ein Element der Seite, um es zu blockieren. Esc bricht ab.") },
++        { QStringLiteral("Quit element picker"), QStringLiteral("Elementauswahl beenden") },
++        { QStringLiteral("Filter"), QStringLiteral("Filter") },
++        { QStringLiteral("Depth"), QStringLiteral("Tiefe") },
++        { QStringLiteral("Specificity"), QStringLiteral("Genauigkeit") },
++        { QStringLiteral("Network filters"), QStringLiteral("Netzwerkfilter") },
++        { QStringLiteral("Cosmetic filters"), QStringLiteral("Kosmetische Filter") },
++        { QStringLiteral("Pick"), QStringLiteral("Auswählen") },
++        { QStringLiteral("Preview"), QStringLiteral("Vorschau") },
++        { QStringLiteral("Create"), QStringLiteral("Erstellen") },
++        { QStringLiteral("Quit"), QStringLiteral("Beenden") },
++        { QStringLiteral("1 match"), QStringLiteral("1 Treffer") },
++        { QStringLiteral("Invalid filter"), QStringLiteral("Ungültiger Filter") },
++        { QStringLiteral("Protection is off. The filter takes effect once it is turned on."), QStringLiteral("Der Schutz ist aus. Der Filter wirkt, sobald er eingeschaltet wird.") },
++        { QStringLiteral("Protection is paused on this site. The filter takes effect once it is resumed."), QStringLiteral("Der Schutz ist auf dieser Website pausiert. Der Filter wirkt, sobald er fortgesetzt wird.") },
+         { QStringLiteral("Take Screenshot..."), QStringLiteral("Screenshot erstellen…") },
+         { QStringLiteral("Take Screenshot\u2026"), QStringLiteral("Screenshot erstellen\u2026") },
+         { QStringLiteral("Look Up"), QStringLiteral("Nachschlagen") },
+@@ -579,6 +615,16 @@ Optional<QString> translate_pattern(QString const& text, WebView::InterfaceLangu
+     if (auto m = find_of_re.match(text); m.hasMatch())
+         return (is_pl ? QStringLiteral("%1 z %2") : QStringLiteral("%1 von %2")).arg(m.captured(1), m.captured(2));
+ 
++    static QRegularExpression const matches_re(QStringLiteral("^(\\d+) matches$"));
++    if (auto m = matches_re.match(text); m.hasMatch()) {
++        if (!is_pl)
++            return QStringLiteral("%1 Treffer").arg(m.captured(1));
++        // Polish counts two to four differently from the rest, other than twelve to fourteen.
++        auto count = m.captured(1).toULongLong();
++        auto is_few = count % 10 >= 2 && count % 10 <= 4 && !(count % 100 >= 12 && count % 100 <= 14);
++        return (is_few ? QStringLiteral("%1 dopasowania") : QStringLiteral("%1 dopasowań")).arg(m.captured(1));
++    }
++
+     static QRegularExpression const open_all_tabs_re(QStringLiteral("^Open All in Tabs \\((\\d+)\\)$"));
+     if (auto m = open_all_tabs_re.match(text); m.hasMatch())
+         return (is_pl ? QStringLiteral("Otwórz wszystkie w kartach (%1)") : QStringLiteral("Alle in Tabs öffnen (%1)")).arg(m.captured(1));
+diff --git a/UI/Qt/RemoteView.h b/UI/Qt/RemoteView.h
+index 5ca39f06d6..c0c99889bb 100644
+--- a/UI/Qt/RemoteView.h
++++ b/UI/Qt/RemoteView.h
+@@ -23,6 +23,7 @@ namespace Ladybird {
+ // the rest of the UI the calls and callbacks that it takes to use the view.
+ class RemoteView : public BookmarkStoreObserver {
+ public:
++    using ElementPickerTarget = WebView::ViewImplementation::ElementPickerTarget;
+     using InputMethodState = WebView::ViewImplementation::InputMethodState;
+     using NavigationListener = WebView::ViewImplementation::NavigationListener;
+     using ScreenRects = WebView::ViewImplementation::ScreenRects;
+@@ -184,6 +185,38 @@ public:
+     void node_picker_pick(Web::DevicePixelPoint device_pixel_point) { HubConnection::the().async_view_node_picker_pick(view_id(), move(device_pixel_point)); }
+     void node_picker_preview(Web::DevicePixelPoint device_pixel_point) { HubConnection::the().async_view_node_picker_preview(view_id(), move(device_pixel_point)); }
+     void node_picker_cancel() { HubConnection::the().async_view_node_picker_cancel(view_id()); }
++    // The session the element picker is open in on the view, if it is open. While it is, the page itself is not given the
++    // user's input, other than to scroll it.
++    Optional<u64> element_picker_session() const { return m_element_picker_session; }
++    void start_element_picker(u64 session_id, ElementPickerTarget target)
++    {
++        m_element_picker_session = session_id;
++        HubConnection::the().async_view_element_picker_start(view_id(), session_id, target);
++    }
++    void element_picker_hover(Web::DevicePixelPoint position)
++    {
++        if (m_element_picker_session.has_value())
++            HubConnection::the().async_view_element_picker_hover(view_id(), *m_element_picker_session, position);
++    }
++    void element_picker_pick(Web::DevicePixelPoint position)
++    {
++        if (m_element_picker_session.has_value())
++            HubConnection::the().async_view_element_picker_pick(view_id(), *m_element_picker_session, position);
++    }
++    void element_picker_set_filter(u64 filter_id, String filter, Web::ElementPickerPreview preview)
++    {
++        if (m_element_picker_session.has_value())
++            HubConnection::the().async_view_element_picker_set_filter(view_id(), *m_element_picker_session, filter_id, move(filter), preview);
++    }
++    void stop_element_picker()
++    {
++        if (!m_element_picker_session.has_value())
++            return;
++        m_element_picker_session.clear();
++        HubConnection::the().async_view_element_picker_stop(view_id());
++    }
++    // Only a page of a website has anything that the content blocker can be told to block.
++    bool can_block_elements() const { return on_request_element_picker && m_state.content_blocking_snapshot.site.has_value() && !m_state.crash_overlay_active; }
+     WebView::ContentBlockingSnapshot content_blocking_snapshot() const { return m_state.content_blocking_snapshot; }
+     void alert_closed() { HubConnection::the().async_view_alert_closed(view_id()); }
+     void confirm_closed(bool accepted) { HubConnection::the().async_view_confirm_closed(view_id(), accepted); }
+@@ -327,6 +360,7 @@ private:
+     HashMap<u64, Function<void(bool)>> m_pending_close_preflights;
+     HashMap<u64, NonnullRefPtr<Core::Promise<String>>> m_pending_page_dumps;
+     HashMap<u64, Function<void(Optional<Gfx::ShareableBitmap>)>> m_pending_frame_snapshots;
++    Optional<u64> m_element_picker_session;
+     u64 m_next_request_id { 1 };
+     u64 m_next_navigation_listener_id { 1 };
+     WebView::PageBackingStores m_backing_stores;
+@@ -393,6 +427,12 @@ public:
+     decltype(Hub::View::on_picture_in_picture_control_activated) on_picture_in_picture_control_activated;
+     decltype(Hub::View::on_finish_handling_drag_event) on_finish_handling_drag_event;
+     decltype(Hub::View::on_find_in_page) on_find_in_page;
++    decltype(Hub::View::on_element_picker_selection) on_element_picker_selection;
++    decltype(Hub::View::on_element_picker_match) on_element_picker_match;
++    Function<void(ElementPickerTarget)> on_request_element_picker;
++    Function<void(Web::DevicePixelPoint)> on_element_picker_hover;
++    Function<void(Web::DevicePixelPoint)> on_element_picker_click;
++    Function<void()> on_element_picker_cancel;
+     decltype(Hub::View::on_page_background_color_change) on_page_background_color_change;
+     decltype(Hub::View::on_screen_wake_lock_state_changed) on_screen_wake_lock_state_changed;
+     decltype(Hub::View::on_web_content_crashed) on_web_content_crashed;
+diff --git a/UI/Qt/ShieldPopover.cpp b/UI/Qt/ShieldPopover.cpp
+index f3d4d6dc39..43d85a369e 100644
+--- a/UI/Qt/ShieldPopover.cpp
++++ b/UI/Qt/ShieldPopover.cpp
+@@ -8,13 +8,15 @@
+ #include <AK/QuickSort.h>
+ #include <AK/StdLibExtras.h>
+ #include <AK/String.h>
+-#include <AK/StringBuilder.h>
++#include <UI/Qt/BrowserWindow.h>
+ #include <UI/Qt/ChromeStyle.h>
++#include <UI/Qt/CustomFilters.h>
+ #include <UI/Qt/ElidedLabel.h>
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/Localization.h>
+ #include <UI/Qt/ShieldPopover.h>
+ #include <UI/Qt/StringUtils.h>
++#include <UI/Qt/Tab.h>
+ #include <UI/Qt/Theme.h>
+ 
+ #include <QFrame>
+@@ -42,10 +44,8 @@ static constexpr int BLOCKED_HOST_ROW_HEIGHT = 28;
+ static constexpr int BLOCKED_LIST_MAX_HEIGHT = 180;
+ static constexpr int BLOCKED_LIST_MIN_HEIGHT = 2 * BLOCKED_HOST_ROW_HEIGHT;
+ // What the popover shows besides the list of blocked domains takes about this much of a low screen's height.
+-static constexpr int HEIGHT_BESIDES_BLOCKED_LIST = 480;
++static constexpr int HEIGHT_BESIDES_BLOCKED_LIST = 516;
+ static constexpr int FILTER_FEEDBACK_DURATION_MS = 2500;
+-// NB: The settings page, which edits the same filters, takes no more than this either.
+-static constexpr size_t MAX_CUSTOM_FILTERS_SIZE = 4 * MiB;
+ 
+ // The round button that pauses and resumes protection on the site: a power symbol on the accent while the site is
+ // protected, and on a quiet surface while it is not.
+@@ -307,6 +307,16 @@ ShieldPopover::ShieldPopover(QWidget* parent, WebView::Settings& settings)
+     filter_row->addWidget(add_button);
+     layout->addLayout(filter_row);
+ 
++    m_block_element_button = new QPushButton(&card());
++    bind_localized_text(*m_block_element_button, QStringLiteral("Block element\u2026"));
++    bind_localized_tooltip(*m_block_element_button, QStringLiteral("Pick an element on the page to block"));
++    m_block_element_button->setObjectName("LadybirdShieldAdd");
++    m_block_element_button->setAttribute(Qt::WA_LayoutUsesWidgetRect);
++    m_block_element_button->setFocusPolicy(Qt::TabFocus);
++    QObject::connect(m_block_element_button, &QPushButton::clicked, this, [this] { pick_element_to_block(); });
++    layout->addSpacing(6);
++    layout->addWidget(m_block_element_button);
++
+     m_filter_feedback_timer = new QTimer(this);
+     m_filter_feedback_timer->setSingleShot(true);
+     m_filter_feedback_timer->setInterval(FILTER_FEEDBACK_DURATION_MS);
+@@ -406,6 +416,9 @@ void ShieldPopover::set_page(WebView::ContentBlockingSnapshot const& blocking, b
+         m_global_switch->setChecked(m_settings.content_blocker_enabled());
+     }
+ 
++    // Only a website has elements to block.
++    m_block_element_button->setEnabled(blocking.site.has_value());
++
+     // What was blocked is only listed while content blocking is on.
+     Vector<BlockedHost> blocked_hosts;
+     size_t blocked_count = 0;
+@@ -527,31 +540,32 @@ void ShieldPopover::fit_to_contents()
+ 
+ void ShieldPopover::add_custom_filter()
+ {
+-    auto filter = ak_string_from_qstring(m_filter_field->text().trimmed());
+-    if (filter.is_empty())
++    switch (Ladybird::add_custom_filter(m_settings, ak_string_from_qstring(m_filter_field->text()))) {
++    case AddCustomFilterResult::Added:
++        m_filter_field->clear();
++        show_filter_feedback(QStringLiteral("Rule added"), FeedbackTone::Success);
+         return;
+-
+-    auto const& filters = m_settings.custom_content_blocker_filters();
+-    for (auto line : filters.bytes_as_string_view().split_view('\n')) {
+-        if (line.trim_whitespace() == filter.bytes_as_string_view()) {
+-            show_filter_feedback(QStringLiteral("Rule already exists"), FeedbackTone::Failure);
+-            return;
+-        }
+-    }
+-
+-    StringBuilder builder;
+-    builder.append(filters);
+-    if (!filters.is_empty() && !filters.bytes_as_string_view().ends_with('\n'))
+-        builder.append('\n');
+-    builder.append(filter);
+-    if (builder.length() > MAX_CUSTOM_FILTERS_SIZE) {
++    case AddCustomFilterResult::Empty:
++        return;
++    case AddCustomFilterResult::AlreadyExists:
++        show_filter_feedback(QStringLiteral("Rule already exists"), FeedbackTone::Failure);
++        return;
++    case AddCustomFilterResult::TooLarge:
+         show_filter_feedback(QStringLiteral("Custom filters are full"), FeedbackTone::Failure);
+         return;
+     }
++    VERIFY_NOT_REACHED();
++}
+ 
+-    m_settings.set_custom_content_blocker_filters(MUST(builder.to_string()));
+-    m_filter_field->clear();
+-    show_filter_feedback(QStringLiteral("Rule added"), FeedbackTone::Success);
++// The picker opens on the tab that the popover is about, once the popover no longer has the mouse and the keyboard.
++void ShieldPopover::pick_element_to_block()
++{
++    auto* window = parentWidget() ? qobject_cast<BrowserWindow*>(parentWidget()->window()) : nullptr;
++    close();
++    auto* tab = window ? window->current_tab() : nullptr;
++    if (!tab || !tab->is_loaded())
++        return;
++    QTimer::singleShot(0, tab, [tab] { tab->start_element_picker(); });
+ }
+ 
+ void ShieldPopover::show_filter_feedback(QString const& text, FeedbackTone tone)
+diff --git a/UI/Qt/ShieldPopover.h b/UI/Qt/ShieldPopover.h
+index c0f2627d71..81b6b69f76 100644
+--- a/UI/Qt/ShieldPopover.h
++++ b/UI/Qt/ShieldPopover.h
+@@ -65,6 +65,7 @@ private:
+     void set_blocked_hosts(Vector<BlockedHost>);
+     void fit_blocked_list();
+     void add_custom_filter();
++    void pick_element_to_block();
+     void show_filter_feedback(QString const&, FeedbackTone);
+     void update_icons();
+ 
+@@ -83,6 +84,7 @@ private:
+     QScrollArea* m_blocked_scroll { nullptr };
+     QVBoxLayout* m_blocked_rows { nullptr };
+     QLineEdit* m_filter_field { nullptr };
++    QPushButton* m_block_element_button { nullptr };
+     QLabel* m_filter_feedback { nullptr };
+     QTimer* m_filter_feedback_timer { nullptr };
+     PopoverSwitch* m_global_switch { nullptr };
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index ee5388202b..91b3debcad 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -24,6 +24,7 @@
+ #include <UI/Qt/BookmarkPopover.h>
+ #include <UI/Qt/BrowserWindow.h>
+ #include <UI/Qt/ChromeStyle.h>
++#include <UI/Qt/ElementPickerWidget.h>
+ #include <UI/Qt/HubConnection.h>
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/JavaScriptDialog.h>
+@@ -223,6 +224,12 @@ void Tab::initialize(Optional<u64> hub_view_id)
+     m_find_in_page = new FindInPageWidget(this, m_view);
+     m_view->add_floating_surface(*m_find_in_page);
+     m_find_in_page->setVisible(false);
++    m_element_picker = new ElementPickerWidget(this, m_view);
++    m_view->add_floating_surface(*m_element_picker);
++    view().on_request_element_picker = [this](auto target) {
++        if (view().can_block_elements())
++            m_element_picker->start(target);
++    };
+ 
+     // The window's toolbar holds the address field while it shows this tab.
+     m_location_edit = new LocationEdit(this, Application::settings(), make<SuggestionProvider>(m_window->is_private()));
+@@ -352,6 +359,8 @@ void Tab::initialize(Optional<u64> hub_view_id)
+     };
+ 
+     view().on_top_level_navigation_commit = [this] {
++        // What was picked is of the page that went away.
++        m_element_picker->quit();
+         m_is_waiting_for_response = false;
+         m_suppress_javascript_dialogs_until_navigation = false;
+         m_javascript_dialogs_shown_by_document = 0;
+@@ -494,6 +503,7 @@ void Tab::initialize(Optional<u64> hub_view_id)
+     };
+ 
+     view().on_web_content_crashed = [this](auto) {
++        m_element_picker->quit();
+         m_suppress_javascript_dialogs_until_navigation = false;
+         m_javascript_dialog->reset();
+ 
+@@ -1468,6 +1478,8 @@ bool Tab::eventFilter(QObject* watched, QEvent* event)
+     if (watched == m_view && (event->type() == QEvent::Resize || event->type() == QEvent::Move)) {
+         if (m_find_in_page->isVisible())
+             m_find_in_page->reposition();
++        if (m_element_picker->isVisible())
++            m_element_picker->reposition();
+         m_window->reposition_page_cards();
+     }
+     if (watched == m_location_edit && event->type() == QEvent::DynamicPropertyChange && static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "autocompleteOpen")
+@@ -1713,6 +1725,12 @@ void Tab::find_next()
+     m_find_in_page->find_next();
+ }
+ 
++void Tab::start_element_picker()
++{
++    if (is_loaded() && view().on_request_element_picker)
++        view().on_request_element_picker(RemoteView::ElementPickerTarget::None);
++}
++
+ void Tab::request_close()
+ {
+     m_window->cancel_window_close_preflight();
+diff --git a/UI/Qt/Tab.h b/UI/Qt/Tab.h
+index a9f7324bd1..9c7ed02619 100644
+--- a/UI/Qt/Tab.h
++++ b/UI/Qt/Tab.h
+@@ -47,6 +47,7 @@ namespace Ladybird {
+ class BookmarkPopover;
+ class BrowserWindow;
+ enum class ChromeIcon;
++class ElementPickerWidget;
+ class JavaScriptDialog;
+ class MessagePopover;
+ 
+@@ -119,6 +120,9 @@ public:
+     void find_previous();
+     void find_next();
+ 
++    // Has the user pick an element on the page to block, if the page is a website's.
++    void start_element_picker();
++
+     void request_close();
+     void request_window_close_preflight(Function<void(bool)> on_complete);
+     void cancel_window_close_preflight();
+@@ -230,6 +234,7 @@ private:
+     QPointer<LocationEdit> m_location_edit;
+     WebContentView* m_view { nullptr };
+     FindInPageWidget* m_find_in_page { nullptr };
++    ElementPickerWidget* m_element_picker { nullptr };
+     Optional<WakeLock::DisplaySleepInhibitor> m_screen_display_sleep_inhibitor;
+     BrowserWindow* m_window { nullptr };
+     QString m_title;
+diff --git a/UI/Qt/WebContentView.cpp b/UI/Qt/WebContentView.cpp
+index a38d197c4e..c5e19f6948 100644
+--- a/UI/Qt/WebContentView.cpp
++++ b/UI/Qt/WebContentView.cpp
+@@ -324,6 +324,9 @@ WebContentView::WebContentView(QWidget* window, Optional<u64> hub_view_id, WebCo
+     };
+ 
+     on_cursor_change = [this](auto cursor) {
++        // The element picker has a cursor of its own.
++        if (is_element_picker_open())
++            return;
+         update_cursor(cursor);
+     };
+ 
+@@ -825,6 +828,12 @@ void WebContentView::keyPressEvent(QKeyEvent* event)
+         event->accept();
+         return;
+     }
++    if (is_element_picker_open()) {
++        if (event->key() == Qt::Key_Escape && on_element_picker_cancel)
++            on_element_picker_cancel();
++        event->accept();
++        return;
++    }
+ 
+     if (event->key() == Qt::Key_Escape && event->modifiers() == Qt::NoModifier && is_loading()) {
+         stop_loading();
+@@ -839,7 +848,7 @@ void WebContentView::keyPressEvent(QKeyEvent* event)
+ 
+ void WebContentView::keyReleaseEvent(QKeyEvent* event)
+ {
+-    if (is_node_picker_active()) {
++    if (is_node_picker_active() || is_element_picker_open()) {
+         event->accept();
+         return;
+     }
+@@ -849,7 +858,7 @@ void WebContentView::keyReleaseEvent(QKeyEvent* event)
+ 
+ void WebContentView::inputMethodEvent(QInputMethodEvent* event)
+ {
+-    if (is_node_picker_active()) {
++    if (is_node_picker_active() || is_element_picker_open()) {
+         event->accept();
+         return;
+     }
+@@ -880,6 +889,9 @@ void WebContentView::handle_pointer_leave()
+         clear_node_picker();
+         return;
+     }
++    // NB: What the page shows on hover, such as a menu, stays for the user to pick.
++    if (is_element_picker_open())
++        return;
+ 
+     static QMouseEvent mouse_event { QEvent::Type::Leave, {}, {}, Qt::MouseButton::NoButton, Qt::MouseButton::NoButton, Qt::KeyboardModifier::NoModifier };
+     enqueue_native_event(Web::MouseEvent::Type::MouseLeave, mouse_event);
+@@ -898,6 +910,12 @@ void WebContentView::mouseMoveEvent(QMouseEvent* event)
+         event->accept();
+         return;
+     }
++    if (is_element_picker_open()) {
++        if (on_element_picker_hover)
++            on_element_picker_hover(node_picker_position_for(*event));
++        event->accept();
++        return;
++    }
+ 
+     hide_tooltip();
+     m_tooltip_hover_timer.start(600);
+@@ -919,6 +937,12 @@ void WebContentView::mousePressEvent(QMouseEvent* event)
+         event->accept();
+         return;
+     }
++    if (is_element_picker_open()) {
++        if (event->button() == Qt::MouseButton::LeftButton && on_element_picker_click)
++            on_element_picker_click(node_picker_position_for(*event));
++        event->accept();
++        return;
++    }
+ 
+     auto elapsed = event->timestamp() - m_last_click_timestamp;
+     auto distance = (event->position() - m_last_click_position).manhattanLength();
+@@ -938,7 +962,7 @@ void WebContentView::mousePressEvent(QMouseEvent* event)
+ 
+ void WebContentView::mouseReleaseEvent(QMouseEvent* event)
+ {
+-    if (is_node_picker_active()) {
++    if (is_node_picker_active() || is_element_picker_open()) {
+         event->accept();
+         return;
+     }
+@@ -1006,7 +1030,7 @@ void WebContentView::mouseDoubleClickEvent(QMouseEvent* event)
+ 
+ void WebContentView::dragEnterEvent(QDragEnterEvent* event)
+ {
+-    if (is_node_picker_active()) {
++    if (is_node_picker_active() || is_element_picker_open()) {
+         event->ignore();
+         return;
+     }
+@@ -1020,7 +1044,7 @@ void WebContentView::dragEnterEvent(QDragEnterEvent* event)
+ 
+ void WebContentView::dragMoveEvent(QDragMoveEvent* event)
+ {
+-    if (is_node_picker_active()) {
++    if (is_node_picker_active() || is_element_picker_open()) {
+         event->ignore();
+         return;
+     }
+@@ -1031,7 +1055,7 @@ void WebContentView::dragMoveEvent(QDragMoveEvent* event)
+ 
+ void WebContentView::dragLeaveEvent(QDragLeaveEvent*)
+ {
+-    if (is_node_picker_active())
++    if (is_node_picker_active() || is_element_picker_open())
+         return;
+ 
+     // QDragLeaveEvent does not contain any mouse position or button information.
+@@ -1043,7 +1067,7 @@ void WebContentView::dragLeaveEvent(QDragLeaveEvent*)
+ 
+ void WebContentView::dropEvent(QDropEvent* event)
+ {
+-    if (is_node_picker_active()) {
++    if (is_node_picker_active() || is_element_picker_open()) {
+         event->ignore();
+         return;
+     }
+diff --git a/UI/Qt/WebContentView.h b/UI/Qt/WebContentView.h
+index 949a015d62..a755725340 100644
+--- a/UI/Qt/WebContentView.h
++++ b/UI/Qt/WebContentView.h
+@@ -260,6 +260,7 @@ private:
+     void schedule_frame_damage_repaint();
+ #endif
+     Web::DevicePixelPoint node_picker_position_for(QSinglePointEvent const&) const;
++    bool is_element_picker_open() const { return element_picker_session().has_value(); }
+ 
+     // The platform may report a phase of a wheel event's gesture that Qt does not pass on.
+     void enqueue_native_event(Web::MouseEvent::Type, QSinglePointEvent const& event, Optional<Web::ScrollGesturePhase> scroll_gesture_phase_the_platform_reports = {});

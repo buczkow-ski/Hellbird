@@ -10,7 +10,7 @@ How Helium's ideas map onto Ladybird `2026.47.7` (`4e9acf4c02ca23239fe32224a303d
 | Global Privacy Control (`Sec-GPC: 1`) | Off | On | `privacy/0001` |
 | Content blocking | Off | On, with EasyList and EasyPrivacy chosen | `privacy/0001` |
 | Filter list downloads | On the welcome page's switch | Only after finishing the welcome page with blocking on, or from settings | `privacy/0001` |
-| Remote search suggestions | Off, but on once an engine is picked on the welcome page | Off until switched on | `privacy/0001` |
+| Remote search suggestions | Off, but on once an engine is picked on the welcome page | On by default in normal windows (off in private windows) | `ui/0013` |
 | Crash reports | Kept, and asks | Never kept or sent | `privacy/0001` |
 | Feedback button | Shown | Hidden | `privacy/0001` |
 | Report server | `reports.app.ladybird.org` | None, unless `LADYBIRD_REPORTS_ENDPOINT` is set | `privacy/0002` |
