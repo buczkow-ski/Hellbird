@@ -61,6 +61,13 @@ jobs:
       - name: Checkout Hellbird
         uses: actions/checkout@v4
 
+      - name: Install bootstrap tools (Ubuntu 24.04 bare container)
+        if: ${{ env.TARGET_DISTRO == 'ubuntu-24.04' }}
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -o APT::Update::Error-Mode=any
+          apt-get install -y --no-install-recommends ca-certificates ccache curl git python3 xz-utils
+
       - name: Configure git safe directories and container workspace paths
         run: |
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
@@ -68,17 +75,12 @@ jobs:
           echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache" >> "$GITHUB_ENV"
           mkdir -p "${GITHUB_WORKSPACE}/.ccache" "${GITHUB_WORKSPACE}/upstream/ladybird/Build/caches/vcpkg-binary-cache"
 
-      - name: Install build dependencies (Ubuntu 24.04 container)
-        if: ${{ env.TARGET_DISTRO == 'ubuntu-24.04' }}
-        run: |
-          apt-get update -o APT::Update::Error-Mode=any
-          apt-get install -y --no-install-recommends ca-certificates curl git python3 xz-utils
-          python3 tools/hellbird.py prepare --upstream upstream/ladybird
-          ./upstream/ladybird/Meta/Docker/ci/install-build-dependencies.sh
-
-      - name: Prepare patched Ladybird source tree (Ubuntu 26.04 CI image)
-        if: ${{ env.TARGET_DISTRO != 'ubuntu-24.04' }}
+      - name: Prepare patched Ladybird source tree
         run: python3 tools/hellbird.py prepare --upstream upstream/ladybird
+
+      - name: Install full build dependencies (Ubuntu 24.04 container)
+        if: ${{ env.TARGET_DISTRO == 'ubuntu-24.04' }}
+        run: ./upstream/ladybird/Meta/Docker/ci/install-build-dependencies.sh
 
       - name: Restore ccache, vcpkg, and cargo caches
         id: cache-restore
@@ -122,7 +124,7 @@ jobs:
             "${EXTRA_ARGS[@]}"
 
       - name: Save caches (even if build fails or times out early)
-        if: always()
+        if: always() && steps.cache-restore.outputs.cache-primary-key != ''
         uses: actions/cache/save@v4
         with:
           path: |

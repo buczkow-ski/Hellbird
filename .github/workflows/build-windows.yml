@@ -47,16 +47,52 @@ jobs:
         shell: pwsh
         run: python tools/hellbird.py prepare --upstream upstream/ladybird
 
-      - name: Install Windows build tooling (ccache, sccache, LLVM, wasm-tools)
+      - name: Install Windows build tooling (ccache, sccache, Clang >= 22, wasm-tools)
         shell: bash
         run: |
           choco install -y ccache sccache --no-progress
-          if ! where clang-cl > /dev/null 2>&1 ; then
-            choco install -y llvm --no-progress --version=20.1.8
-            echo "C:/Program Files/LLVM/bin" >> "${GITHUB_PATH}"
-            export PATH="/c/Program Files/LLVM/bin:${PATH}"
+
+          # MSVC 14.52+ (Visual Studio 2026 on windows-2025) requires Clang 22 or newer for STL headers.
+          # Prefer Visual Studio's bundled LLVM if >= 22, otherwise upgrade Chocolatey LLVM to >= 22.
+          clang_major() {
+            local bin="$1"
+            if [ -x "${bin}" ]; then
+              "${bin}" --version 2>/dev/null | sed -n 's/.*clang version \([0-9][0-9]*\).*/\1/p' | head -n1
+            fi
+          }
+
+          CHOSEN_LLVM_DIR=""
+          VS_INSTALL="$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>/dev/null | tr -d '\r')"
+          if [ -n "${VS_INSTALL}" ]; then
+            VS_LLVM_WIN="${VS_INSTALL}\\VC\\Tools\\Llvm\\x64\\bin"
+            VS_LLVM_POSIX="$(cygpath -u "${VS_LLVM_WIN}")"
+            VS_VER="$(clang_major "${VS_LLVM_POSIX}/clang-cl.exe")"
+            echo "VS bundled clang-cl version: ${VS_VER:-none} (${VS_LLVM_WIN})"
+            if [ -n "${VS_VER}" ] && [ "${VS_VER}" -ge 22 ]; then
+              CHOSEN_LLVM_DIR="${VS_LLVM_WIN}"
+            fi
           fi
+
+          if [ -z "${CHOSEN_LLVM_DIR}" ]; then
+            CUR_VER="$(clang_major "/c/Program Files/LLVM/bin/clang-cl.exe")"
+            echo "Preinstalled LLVM clang-cl version: ${CUR_VER:-none}"
+            if [ -z "${CUR_VER}" ] || [ "${CUR_VER}" -lt 22 ]; then
+              choco upgrade -y llvm --no-progress
+            fi
+            CHOSEN_LLVM_DIR="C:\\Program Files\\LLVM\\bin"
+          fi
+
+          CHOSEN_LLVM_POSIX="$(cygpath -u "${CHOSEN_LLVM_DIR}")"
+          echo "${CHOSEN_LLVM_DIR}" >> "${GITHUB_PATH}"
+          echo "HELLBIRD_LLVM_BIN=${CHOSEN_LLVM_DIR}" >> "${GITHUB_ENV}"
+          export PATH="${CHOSEN_LLVM_POSIX}:${PATH}"
+          which clang-cl
           clang-cl --version
+          FINAL_VER="$(clang_major "${CHOSEN_LLVM_POSIX}/clang-cl.exe")"
+          if [ -z "${FINAL_VER}" ] || [ "${FINAL_VER}" -lt 22 ]; then
+            echo "ERROR: Expected Clang >= 22 for VS 2026 STL headers, got '${FINAL_VER}'" >&2
+            exit 1
+          fi
 
           WASM_TOOLS_VER=1.243.0
           WASM_NAME="wasm-tools-${WASM_TOOLS_VER}-x86_64-windows"
@@ -117,12 +153,15 @@ jobs:
             exit /b 1
           )
           call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
+          set "PATH=%HELLBIRD_LLVM_BIN%;%PATH%"
+          where clang-cl
+          clang-cl --version
           python tools\hellbird.py build --upstream upstream\ladybird --preset %PRESET% --no-tests --target ladybird
           if errorlevel 1 exit /b 1
           python tools\hellbird.py package --upstream upstream\ladybird --preset %PRESET% --out dist
 
       - name: Save caches (even if build fails or times out early)
-        if: always()
+        if: always() && steps.cache-restore.outputs.cache-primary-key != ''
         uses: actions/cache/save@v4
         with:
           path: |
