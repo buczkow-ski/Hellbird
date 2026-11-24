@@ -51,6 +51,34 @@ SVG_PRIVATE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" f
 """
 
 WINDOWS_RC = """IDI_ICON1 ICON DISCARDABLE "hellbird.ico"
+
+1 VERSIONINFO
+ FILEVERSION 0,1,0,1
+ PRODUCTVERSION 0,1,0,1
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x2L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Hellbird Project"
+            VALUE "FileDescription", "Hellbird Web Browser"
+            VALUE "FileVersion", "0.1.0-alpha.1"
+            VALUE "InternalName", "Hellbird"
+            VALUE "OriginalFilename", "Hellbird.exe"
+            VALUE "ProductName", "Hellbird"
+            VALUE "ProductVersion", "0.1.0-alpha.1"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
 """
 
 

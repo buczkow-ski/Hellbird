@@ -14,7 +14,7 @@ index f56f070f1d..e6dcef988d 100644
  
  if (ANDROID OR IOS)
 diff --git a/Meta/CMake/cmake_options.cmake b/Meta/CMake/cmake_options.cmake
-index 7032bfc765..22787f480b 100644
+index 7032bfc765..2122b276d9 100644
 --- a/Meta/CMake/cmake_options.cmake
 +++ b/Meta/CMake/cmake_options.cmake
 @@ -37,7 +37,7 @@ option(LADYBIRD_BUILD_QT "Build and bundle Qt with vcpkg on Linux" OFF)
@@ -26,12 +26,14 @@ index 7032bfc765..22787f480b 100644
  option(LADYBIRD_ENABLE_SPARKLE "Update the macOS app with Sparkle" ON)
  if (NOT LADYBIRD_ENABLE_UPDATE_CHECK)
      # Sparkle only installs the releases that the update check finds.
-@@ -63,7 +63,7 @@ endif()
+@@ -63,7 +63,9 @@ endif()
  set(LADYBIRD_RELEASE_STAGE "Alpha")
  
  # Like other browsers, our Linux packages keep Ladybird in a directory of its own.
 -set(LADYBIRD_PACKAGE_INSTALL_PREFIX "/opt/ladybird")
 +set(LADYBIRD_PACKAGE_INSTALL_PREFIX "/opt/hellbird")
++set(HELLBIRD_FULL_VERSION "" CACHE STRING "Full Hellbird release version for archives, e.g. 0.1.0-alpha.1")
++set(HELLBIRD_PACKAGE_VERSION "" CACHE STRING "Package manager version for Hellbird, e.g. 0.1.0~alpha.1")
  
  option(ENABLE_ADDRESS_SANITIZER "Enable address sanitizer testing in gcc/clang" OFF)
  option(ENABLE_MEMORY_SANITIZER "Enable memory sanitizer testing in gcc/clang" OFF)
@@ -48,20 +50,25 @@ index 372e56cb0e..c5f6898afd 100644
  endif()
 diff --git a/Meta/CMake/freedesktop/org.hellbird.Hellbird.desktop b/Meta/CMake/freedesktop/org.hellbird.Hellbird.desktop
 new file mode 100644
-index 0000000000..e2d165f302
+index 0000000000..aeed6103bb
 --- /dev/null
 +++ b/Meta/CMake/freedesktop/org.hellbird.Hellbird.desktop
-@@ -0,0 +1,18 @@
+@@ -0,0 +1,28 @@
 +[Desktop Entry]
 +Name=Hellbird
 +GenericName=Web Browser
++GenericName[eo]=Retumilo
++GenericName[fr]=Navigateur Web
++GenericName[pl]=Przeglądarka internetowa
++GenericName[ru]=Веб-браузер
++GenericName[sv]=Webbläsare
 +Comment=Privacy-first minimalist web browser powered by Ladybird
 +Exec=Hellbird %U
 +Icon=org.hellbird.Hellbird
 +DBusActivatable=false
 +Type=Application
 +Categories=Network;WebBrowser;
-+Keywords=Web;Browser;Privacy;Helium;Ladybird;
++Keywords=Web;Browser;Privacy;Qt;
 +StartupNotify=false
 +MimeType=text/html;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
 +Actions=new-window;
@@ -69,10 +76,15 @@ index 0000000000..e2d165f302
 +
 +[Desktop Action new-window]
 +Name=New Window
++Name[eo]=Nova fenestro
++Name[fr]=Nouvelle Fenêtre
++Name[pl]=Nowe okno
++Name[ru]=Новое окно
++Name[sv]=Nytt fönster
 +Exec=Hellbird --new-window
 diff --git a/Meta/CMake/freedesktop/org.hellbird.Hellbird.metainfo.xml.in b/Meta/CMake/freedesktop/org.hellbird.Hellbird.metainfo.xml.in
 new file mode 100644
-index 0000000000..d3069c2311
+index 0000000000..fcafa4dd7a
 --- /dev/null
 +++ b/Meta/CMake/freedesktop/org.hellbird.Hellbird.metainfo.xml.in
 @@ -0,0 +1,50 @@
@@ -97,7 +109,7 @@ index 0000000000..d3069c2311
 +
 +  <description>
 +    <p>
-+      Hellbird combines Helium's privacy-first philosophy, native !bangs, and minimalist UI/UX
++      Hellbird combines a privacy-first minimalist interface, native !bangs, and ergonomic controls
 +      with the independent Ladybird web engine.
 +    </p>
 +  </description>
@@ -136,32 +148,44 @@ index 0000000000..a123ca828f
 +Name=org.hellbird.Hellbird
 +Exec=Hellbird
 diff --git a/Meta/CMake/packaging.cmake b/Meta/CMake/packaging.cmake
-index 17c6e2756a..aee01ed440 100644
+index 17c6e2756a..ed6cb2d4a9 100644
 --- a/Meta/CMake/packaging.cmake
 +++ b/Meta/CMake/packaging.cmake
-@@ -19,15 +19,15 @@ set(CPACK_ARCHIVE_JS_FILE_NAME "ladybird-js-${CPACK_SYSTEM_NAME}")
+@@ -18,16 +18,25 @@ endif()
+ set(CPACK_ARCHIVE_JS_FILE_NAME "ladybird-js-${CPACK_SYSTEM_NAME}")
  set(CPACK_ARCHIVE_WASM_FILE_NAME "ladybird-wasm-${CPACK_SYSTEM_NAME}")
  
- string(JOIN "-" ladybird_package_name ${LADYBIRD_VERSION} ${CPACK_SYSTEM_NAME})
+-string(JOIN "-" ladybird_package_name ${LADYBIRD_VERSION} ${CPACK_SYSTEM_NAME})
 -set(CPACK_PACKAGE_FILE_NAME "ladybird-${ladybird_package_name}")
 -set(CPACK_ARCHIVE_LADYBIRD_RUNTIME_FILE_NAME "ladybird-${ladybird_package_name}")
 -set(CPACK_ARCHIVE_LADYBIRD_SYMBOLS_FILE_NAME "ladybird-symbols-${ladybird_package_name}")
++set(_hellbird_archive_version "${LADYBIRD_VERSION}")
++if (NOT HELLBIRD_FULL_VERSION STREQUAL "")
++    set(_hellbird_archive_version "${HELLBIRD_FULL_VERSION}")
++endif()
++set(_hellbird_pkg_version "${LADYBIRD_BROWSER_VERSION}")
++if (NOT HELLBIRD_PACKAGE_VERSION STREQUAL "")
++    set(_hellbird_pkg_version "${HELLBIRD_PACKAGE_VERSION}")
++endif()
++
++string(JOIN "-" ladybird_package_name ${_hellbird_archive_version} ${CPACK_SYSTEM_NAME})
 +set(CPACK_PACKAGE_FILE_NAME "hellbird-${ladybird_package_name}")
 +set(CPACK_ARCHIVE_LADYBIRD_RUNTIME_FILE_NAME "hellbird-${ladybird_package_name}")
 +set(CPACK_ARCHIVE_LADYBIRD_SYMBOLS_FILE_NAME "hellbird-symbols-${ladybird_package_name}")
  
- set(CPACK_PACKAGE_VERSION "${LADYBIRD_BROWSER_VERSION}")
+-set(CPACK_PACKAGE_VERSION "${LADYBIRD_BROWSER_VERSION}")
 -set(CPACK_PACKAGE_VENDOR "Ladybird Browser Initiative")
 -set(CPACK_PACKAGE_CONTACT "Ladybird Browser Initiative <contact@ladybird.org>")
++set(CPACK_PACKAGE_VERSION "${_hellbird_pkg_version}")
 +set(CPACK_PACKAGE_VENDOR "Hellbird Project")
-+set(CPACK_PACKAGE_CONTACT "Hellbird Maintainers <https://github.com/buczkow-ski/Hellbird>")
++set(CPACK_PACKAGE_CONTACT "Hellbird Maintainers <maintainers@hellbird.dev>")
  set(CPACK_PACKAGE_DESCRIPTION
 -    "Ladybird is a truly independent web browser, using a novel engine based on web standards.")
 +    "Hellbird is a privacy-first minimalist web browser combining Helium UX with the Ladybird web engine.")
  set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_CURRENT_LIST_DIR}/cpack_project_config.cmake")
  set(CPACK_LADYBIRD_PACKAGE_INSTALL_PREFIX "${LADYBIRD_PACKAGE_INSTALL_PREFIX}")
  set(CPACK_LADYBIRD_RESOURCE_DIRECTORY "${CMAKE_INSTALL_DATADIR}/Lagom")
-@@ -38,28 +38,28 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+@@ -38,28 +47,28 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
  set(CPACK_DEBIAN_COMPRESSION_TYPE xz)
  set(CPACK_DEBIAN_COMPRESSION_LEVEL 9)
  set(CPACK_DEBIAN_PACKAGE_SECTION web)
@@ -199,27 +223,31 @@ index 17c6e2756a..aee01ed440 100644
  # The binaries are stripped and their debug symbols laid out by CPack already, so keep rpmbuild from doing it again.
  # rpmbuild compresses on a single thread by default, which takes many minutes for packages of our size.
 diff --git a/UI/CMakeLists.txt b/UI/CMakeLists.txt
-index 1f8f475c07..5237656a08 100644
+index 1f8f475c07..0e376a6503 100644
 --- a/UI/CMakeLists.txt
 +++ b/UI/CMakeLists.txt
-@@ -45,16 +45,20 @@ endif()
+@@ -44,8 +44,12 @@ if (APPLE AND LADYBIRD_ENABLE_SPARKLE)
+ endif()
  
  function(create_ladybird_bundle target_name)
++    set(_hellbird_output_name "Hellbird")
++    if (APPLE)
++        set(_hellbird_output_name "Ladybird")
++    endif()
      set_target_properties(${target_name} PROPERTIES
 -        OUTPUT_NAME "Ladybird"
--        MACOSX_BUNDLE_GUI_IDENTIFIER org.ladybird.Ladybird
-+        OUTPUT_NAME "Hellbird"
-+        MACOSX_BUNDLE_GUI_IDENTIFIER org.hellbird.Hellbird
++        OUTPUT_NAME "${_hellbird_output_name}"
+         MACOSX_BUNDLE_GUI_IDENTIFIER org.ladybird.Ladybird
          MACOSX_BUNDLE_BUNDLE_VERSION ${LADYBIRD_BROWSER_VERSION}
          MACOSX_BUNDLE_SHORT_VERSION_STRING ${LADYBIRD_BROWSER_VERSION}
-         MACOSX_BUNDLE_INFO_PLIST "${LADYBIRD_SOURCE_DIR}/UI/Info.plist"
-         MACOSX_BUNDLE TRUE
-         WIN32_EXECUTABLE TRUE
--        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.ladybird.Ladybird
-+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.hellbird.Hellbird
+@@ -55,6 +59,13 @@ function(create_ladybird_bundle target_name)
+         XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.ladybird.Ladybird
      )
  
-+    if (WIN32 AND EXISTS "${LADYBIRD_SOURCE_DIR}/UI/Icons/hellbird.rc")
++    if (WIN32)
++        if (NOT EXISTS "${LADYBIRD_SOURCE_DIR}/UI/Icons/hellbird.rc")
++            message(FATAL_ERROR "Missing Hellbird Windows icon resource: ${LADYBIRD_SOURCE_DIR}/UI/Icons/hellbird.rc (run tools/hellbird.py prepare)")
++        endif()
 +        target_sources(${target_name} PRIVATE "${LADYBIRD_SOURCE_DIR}/UI/Icons/hellbird.rc")
 +    endif()
 +
@@ -227,10 +255,10 @@ index 1f8f475c07..5237656a08 100644
          set(bundle_dir "$<TARGET_BUNDLE_DIR:${target_name}>")
  
 diff --git a/UI/cmake/InstallRules.cmake b/UI/cmake/InstallRules.cmake
-index a8b2bc483e..61c880ce27 100644
+index a8b2bc483e..e3ff68273c 100644
 --- a/UI/cmake/InstallRules.cmake
 +++ b/UI/cmake/InstallRules.cmake
-@@ -320,68 +320,68 @@ if (ENABLE_INSTALL_FREEDESKTOP_FILES OR LINUX)
+@@ -320,68 +320,71 @@ if (ENABLE_INSTALL_FREEDESKTOP_FILES OR LINUX)
          set(METAINFO_RELEASE_TYPE "development")
          set(METAINFO_RELEASE_DESCRIPTION "${LADYBIRD_RELEASE_STAGE} release.")
      endif()
@@ -271,6 +299,9 @@ index a8b2bc483e..61c880ce27 100644
 +# Linux packages install Hellbird into LADYBIRD_PACKAGE_INSTALL_PREFIX, and only add a command, the desktop integration
  # and the debug symbols to the rest of the system.
  if (LINUX)
++    if (NOT EXISTS "${FREEDESKTOP_RESOURCE_DIR}/org.hellbird.Hellbird.svg")
++        message(FATAL_ERROR "Missing Hellbird Freedesktop SVG icon: ${FREEDESKTOP_RESOURCE_DIR}/org.hellbird.Hellbird.svg (run tools/hellbird.py prepare)")
++    endif()
      set(system_integration_dir "${CMAKE_CURRENT_BINARY_DIR}/system_integration")
 -    set(packaged_ladybird "${LADYBIRD_PACKAGE_INSTALL_PREFIX}/bin/Ladybird")
 -    foreach (file IN ITEMS org.ladybird.Ladybird.desktop org.ladybird.Ladybird.service)

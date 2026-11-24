@@ -1,17 +1,17 @@
 diff --git a/Meta/CMake/cmake_options.cmake b/Meta/CMake/cmake_options.cmake
-index 22787f480b..74ba98ba2a 100644
+index 2122b276d9..1ef0a8ee1c 100644
 --- a/Meta/CMake/cmake_options.cmake
 +++ b/Meta/CMake/cmake_options.cmake
 @@ -49,6 +49,7 @@ if (LADYBIRD_GENERATE_SYMBOL_FILES AND MSVC)
      message(FATAL_ERROR "LADYBIRD_GENERATE_SYMBOL_FILES is not supported with MSVC-style toolchains")
  endif()
  option(LADYBIRD_BASELINE_CPU_TARGET "Use a common CPU baseline for portable binaries and ccache sharing" OFF)
-+option(HELLBIRD_WINDOWS_HIDE_CONSOLE "Launch Hellbird on Windows without attaching a console window" OFF)
++option(HELLBIRD_WINDOWS_HIDE_CONSOLE "Launch Hellbird and its helper processes on Windows without console windows" OFF)
  
  set(LADYBIRD_VERSION "" CACHE STRING "Version of a release, such as 2026.46.0")
  set(LADYBIRD_BROWSER_VERSION "${PROJECT_VERSION}")
 diff --git a/Meta/CMake/presets/CMakeWindowsPresets.json b/Meta/CMake/presets/CMakeWindowsPresets.json
-index 4392b562e1..88a535449a 100644
+index 4392b562e1..71af2e72dd 100644
 --- a/Meta/CMake/presets/CMakeWindowsPresets.json
 +++ b/Meta/CMake/presets/CMakeWindowsPresets.json
 @@ -37,6 +37,23 @@
@@ -25,7 +25,7 @@ index 4392b562e1..88a535449a 100644
 +        "Release_base"
 +      ],
 +      "displayName": "Hellbird Windows Distribution Config",
-+      "description": "Optimized Windows Release build for Hellbird portable packaging without a console window",
++      "description": "Optimized Windows Release build for Hellbird portable packaging without console windows",
 +      "binaryDir": "$env{LADYBIRD_SOURCE_DIR}/Build/distribution",
 +      "cacheVariables": {
 +        "CMAKE_BUILD_TYPE": "Release",
@@ -39,15 +39,17 @@ index 4392b562e1..88a535449a 100644
        "name": "Debug",
        "inherits": [
 diff --git a/Meta/CMake/targets.cmake b/Meta/CMake/targets.cmake
-index 534d055484..4fdd084302 100644
+index 534d055484..4a85343197 100644
 --- a/Meta/CMake/targets.cmake
 +++ b/Meta/CMake/targets.cmake
-@@ -111,7 +111,7 @@ endfunction()
+@@ -111,7 +111,9 @@ endfunction()
  function(ladybird_windows_bin target_name)
      cmake_parse_arguments(LAGOM_WINDOWS_BIN "CONSOLE" "" "" ${ARGN})
      ladybird_copy_runtime_dlls(${target_name})
 -    if (NOT LAGOM_WINDOWS_BIN_CONSOLE)
-+    if (NOT LAGOM_WINDOWS_BIN_CONSOLE OR (target_name STREQUAL "ladybird" AND HELLBIRD_WINDOWS_HIDE_CONSOLE))
++    if (NOT LAGOM_WINDOWS_BIN_CONSOLE
++        OR (HELLBIRD_WINDOWS_HIDE_CONSOLE
++            AND (target_name STREQUAL "ladybird" OR target_name IN_LIST ladybird_helper_processes)))
          ladybird_subsystem_windows(${target_name})
      else()
          set_target_properties(${target_name} PROPERTIES

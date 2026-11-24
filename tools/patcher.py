@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -45,9 +46,10 @@ def load_stage_series(patches_root: Path, stage: str) -> list[PatchEntry]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        # Allow inline comments separated by whitespace + '#'
-        if " #" in line:
-            line = line.split(" #", 1)[0].strip()
+        # Strip inline comments preceded by whitespace (spaces or tabs)
+        line = re.split(r"\s+#", line, maxsplit=1)[0].strip()
+        if not line:
+            continue
 
         patch_path = (stage_dir / line).resolve()
         try:
@@ -90,14 +92,29 @@ def find_unlisted_patches(patches_root: Path, stages: tuple[str, ...] = PATCH_ST
     return unlisted
 
 
-def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run_git(
+    args: list[str],
+    cwd: Path,
+    *,
+    input_bytes: bytes | None = None,
+    text: bool = True,
+) -> subprocess.CompletedProcess:
+    cmd = ["git", "-c", "core.longpaths=true", *args]
+    if text:
+        return subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
     return subprocess.run(
-        ["git", *args],
+        cmd,
         cwd=str(cwd),
-        text=True,
+        input=input_bytes,
         capture_output=True,
-        encoding="utf-8",
-        errors="replace",
         check=False,
     )
 
@@ -110,13 +127,7 @@ def apply_patches(
     reverse: bool = False,
     verbose: bool = True,
 ) -> list[PatchEntry]:
-    """Apply (or dry-run check) patches against a Ladybird source tree.
-
-    Note: In check_only mode, multiple patches that touch overlapping files cannot be
-    validated purely with sequential `--check` without actually applying them, so
-    callers verifying a full stack should apply into a clean throwaway worktree/copy
-    or use `verify_patches_in_worktree`.
-    """
+    """Apply (or dry-run check) patches against a Ladybird source tree."""
     ordered = list(reversed(patches)) if reverse else list(patches)
     applied: list[PatchEntry] = []
 
@@ -144,15 +155,75 @@ def apply_patches(
     return applied
 
 
-def _extract_touched_paths(patches: list[PatchEntry]) -> set[str]:
-    """Extract all repo-relative file paths referenced by unified diffs."""
+def _unquote_git_path(raw: str) -> str:
+    raw = raw.strip()
+    if len(raw) >= 2 and raw[0] == '"' and raw[-1] == '"':
+        # Decode C-style git quoted paths (octal escapes, \", \\)
+        inner = raw[1:-1]
+        out = bytearray()
+        i = 0
+        while i < len(inner):
+            ch = inner[i]
+            if ch == "\\" and i + 1 < len(inner):
+                nxt = inner[i + 1]
+                if nxt in "01234567" and i + 3 < len(inner):
+                    out.append(int(inner[i + 1 : i + 4], 8))
+                    i += 4
+                    continue
+                escapes = {"n": 10, "r": 13, "t": 9, "\\": 92, '"': 34}
+                if nxt in escapes:
+                    out.append(escapes[nxt])
+                    i += 2
+                    continue
+            out.extend(ch.encode("utf-8"))
+            i += 1
+        return out.decode("utf-8", errors="surrogateescape")
+    return raw
+
+
+def extract_touched_paths(patches: list[PatchEntry], git_cwd: Path) -> set[str]:
+    """Extract all touched paths from patches (modifications, additions, deletions,
+    pure renames, copies, mode changes, binary diffs, and quoted paths)."""
     touched: set[str] = set()
     for entry in patches:
+        proc = _run_git(["apply", "--numstat", "-z", str(entry.absolute_path)], cwd=git_cwd, text=False)
+        if proc.returncode != 0:
+            stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+            raise PatchError(f"Failed to parse patch metadata for {entry.label}:\n{stderr}")
+
+        parts = proc.stdout.split(b"\x00")
+        i = 0
+        while i < len(parts):
+            token = parts[i]
+            if not token:
+                i += 1
+                continue
+            tab_fields = token.split(b"\t", 2)
+            if len(tab_fields) == 3:
+                if tab_fields[2]:
+                    touched.add(tab_fields[2].decode("utf-8", errors="surrogateescape"))
+                    i += 1
+                else:
+                    if i + 2 < len(parts):
+                        for raw_p in (parts[i + 1], parts[i + 2]):
+                            if raw_p:
+                                touched.add(raw_p.decode("utf-8", errors="surrogateescape"))
+                    i += 3
+            else:
+                i += 1
+
+        # Also parse git diff headers to capture rename/copy source paths (`git apply --numstat`
+        # omits the source path for pure 100% renames).
         for line in entry.absolute_path.read_text(encoding="utf-8", errors="replace").splitlines():
-            if line.startswith("--- a/"):
-                touched.add(line[6:].split("\t", 1)[0])
-            elif line.startswith("+++ b/"):
-                touched.add(line[6:].split("\t", 1)[0])
+            for prefix in ("rename from ", "rename to ", "copy from ", "copy to "):
+                if line.startswith(prefix):
+                    touched.add(_unquote_git_path(line[len(prefix) :]))
+                    break
+            else:
+                if line.startswith("--- a/"):
+                    touched.add(_unquote_git_path(line[6:].split("\t", 1)[0]))
+                elif line.startswith("+++ b/"):
+                    touched.add(_unquote_git_path(line[6:].split("\t", 1)[0]))
     return touched
 
 
@@ -181,28 +252,51 @@ def verify_patches_in_worktree(
         )
 
     try:
-        touched = sorted(_extract_touched_paths(patches))
+        touched = sorted(extract_touched_paths(patches, upstream_repo))
         existing_in_rev: list[str] = []
         if touched:
-            ls_proc = _run_git(["ls-tree", "-r", "--name-only", revision, "--", *touched], cwd=worktree_dir)
-            if ls_proc.returncode == 0:
-                existing_in_rev = [p for p in ls_proc.stdout.splitlines() if p.strip()]
+            # Query all existing paths in revision using null-terminated output
+            ls_proc = _run_git(["ls-tree", "-r", "-z", "--name-only", revision], cwd=worktree_dir, text=False)
+            if ls_proc.returncode != 0:
+                stderr = ls_proc.stderr.decode("utf-8", errors="replace").strip()
+                raise PatchError(f"Failed to list tree at {revision}:\n{stderr}")
+            rev_files = {
+                raw.decode("utf-8", errors="surrogateescape")
+                for raw in ls_proc.stdout.split(b"\x00")
+                if raw
+            }
+            existing_in_rev = [p for p in touched if p in rev_files]
+
         if existing_in_rev:
-            co_proc = _run_git(["checkout", revision, "--", *existing_in_rev], cwd=worktree_dir)
+            pathspec_payload = b"\x00".join(p.encode("utf-8", errors="surrogateescape") for p in existing_in_rev) + b"\x00"
+            co_proc = _run_git(
+                ["checkout", revision, "--pathspec-from-file=-", "--pathspec-file-nul"],
+                cwd=worktree_dir,
+                input_bytes=pathspec_payload,
+                text=False,
+            )
             if co_proc.returncode != 0:
-                raise PatchError(
-                    f"Could not materialize patched files at {revision}:\n{co_proc.stderr.strip()}"
-                )
+                stderr = co_proc.stderr.decode("utf-8", errors="replace").strip()
+                raise PatchError(f"Could not materialize patched files at {revision}:\n{stderr}")
 
         apply_patches(worktree_dir, patches, check_only=False, reverse=False, verbose=verbose)
-        # Verify reverse-apply cleanliness as a round-trip sanity check
         apply_patches(worktree_dir, patches, check_only=False, reverse=True, verbose=False)
-        diff_proc = _run_git(["diff", "--", *existing_in_rev] if existing_in_rev else ["diff"], cwd=worktree_dir)
-        if diff_proc.stdout.strip():
-            raise PatchError(
-                "Modified files were not restored cleanly after reverse-applying all patches:\n"
-                + diff_proc.stdout.strip()
+
+        if existing_in_rev:
+            pathspec_payload = b"\x00".join(p.encode("utf-8", errors="surrogateescape") for p in existing_in_rev) + b"\x00"
+            diff_proc = _run_git(
+                ["diff", "--pathspec-from-file=-", "--pathspec-file-nul"],
+                cwd=worktree_dir,
+                input_bytes=pathspec_payload,
+                text=False,
             )
+            diff_out = diff_proc.stdout.decode("utf-8", errors="replace").strip()
+            if diff_out:
+                raise PatchError(
+                    "Modified files were not restored cleanly after reverse-applying all patches:\n"
+                    + diff_out
+                )
+
         untracked = _run_git(["ls-files", "--others", "--exclude-standard"], cwd=worktree_dir)
         if untracked.stdout.strip():
             raise PatchError(
@@ -216,3 +310,4 @@ def verify_patches_in_worktree(
                 f"Warning: failed to remove temporary worktree {worktree_dir}: {rm_proc.stderr.strip()}",
                 file=sys.stderr,
             )
+            _run_git(["worktree", "prune"], cwd=upstream_repo)

@@ -60,20 +60,24 @@ This checks out Ladybird `2026.47.7` (`4e9acf4c02ca`), applies all patch stages 
 
 > **Hardware note:** Compiling Ladybird from source requires a C++23 compiler (Clang 22 / GCC 16 on Linux, Clang-CL + Visual Studio 2022 on Windows), Rust, CMake 3.30+, Ninja, and at least 16 GB RAM recommended (or use `--link-pool-size 1` on lower-RAM machines). For machines without a local C++/Rust toolchain, push to GitHub and trigger the included **Build Linux (x64)** / **Build Windows (x64)** GitHub Actions workflows!
 
-#### Linux (x86_64)
+#### Linux (x86_64 — Ubuntu 24.04 LTS with bundled Qt 6.10, or Ubuntu 26.04)
 ```bash
-# Inside Ubuntu 24.04/26.04 or ghcr.io/ladybirdbrowser/ladybird-ci:2026.11.21
+# Ubuntu 24.04 (bundles Qt 6.10 via vcpkg):
 python3 tools/hellbird.py prepare
-python3 tools/hellbird.py build --preset Distribution
+python3 tools/hellbird.py bootstrap-vcpkg --preset Distribution
+python3 tools/hellbird.py build --preset Distribution --build-qt --link-pool-size 1 --no-tests
 python3 tools/hellbird.py package --preset Distribution --format all --out dist
+
+# Ubuntu 26.04 / ghcr.io/ladybirdbrowser/ladybird-ci:2026.11.21 (system Qt 6.10):
+python3 tools/hellbird.py build --preset Distribution --link-pool-size 1 --no-tests
 ```
 
 #### Windows (x86_64 — Visual Studio x64 Developer Command Prompt)
 ```bat
 python tools\hellbird.py prepare
-cd upstream\ladybird && python Meta\ladybird.py vcpkg --preset Release && cd ..\..
-python tools\hellbird.py build --preset Release --target ladybird
-python tools\hellbird.py package --preset Release --out dist
+python tools\hellbird.py bootstrap-vcpkg --preset Distribution
+python tools\hellbird.py build --preset Distribution --no-tests --target ladybird
+python tools\hellbird.py package --preset Distribution --out dist
 ```
 
 Output portable archive: `dist/hellbird-0.1.0-alpha.1-Windows-x86_64.zip`

@@ -24,9 +24,12 @@ jobs:
   build-windows:
     name: Windows x64 (${{ inputs.preset || 'Distribution' }}, ClangCL)
     runs-on: windows-2025
+    timeout-minutes: 300
 
     env:
       PRESET: ${{ inputs.preset || 'Distribution' }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_COMPILERCHECK: "%compiler% -v"
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
       SCCACHE_CACHE_SIZE: 4G
       SCCACHE_IDLE_TIMEOUT: 0
@@ -44,20 +47,30 @@ jobs:
         shell: pwsh
         run: python tools/hellbird.py prepare --upstream upstream/ladybird
 
-      - name: Install Windows build tooling (sccache, pkgconfiglite, LLVM, wasm-tools)
+      - name: Install Windows build tooling (ccache, sccache, LLVM, wasm-tools)
         shell: bash
         run: |
-          choco install -y sccache pkgconfiglite --no-progress
+          choco install -y ccache sccache --no-progress
           if ! where clang-cl > /dev/null 2>&1 ; then
             choco install -y llvm --no-progress --version=20.1.8
             echo "C:/Program Files/LLVM/bin" >> "${GITHUB_PATH}"
+            export PATH="/c/Program Files/LLVM/bin:${PATH}"
           fi
           clang-cl --version
 
           WASM_TOOLS_VER=1.243.0
           WASM_NAME="wasm-tools-${WASM_TOOLS_VER}-x86_64-windows"
-          curl --fail --location --output "${WASM_NAME}.zip" \
-            "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VER}/${WASM_NAME}.zip"
+          URL="https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VER}/${WASM_NAME}.zip"
+          delays=(5 15 45)
+          attempt=1
+          until curl --fail --location --output "${WASM_NAME}.zip" "${URL}"; do
+            if (( attempt > ${#delays[@]} )); then
+              echo "wasm-tools download failed after retries" >&2
+              exit 1
+            fi
+            sleep "${delays[attempt-1]}"
+            attempt=$(( attempt + 1 ))
+          done
           unzip -q "${WASM_NAME}.zip"
           rm "${WASM_NAME}.zip"
           mv "${WASM_NAME}" "${GITHUB_WORKSPACE}/wasm-tools"
@@ -76,24 +89,26 @@ jobs:
             fi
           done
 
-      - name: Restore sccache and vcpkg caches
-        uses: actions/cache@v4
+      - name: Restore ccache, sccache, vcpkg, and cargo caches
+        id: cache-restore
+        uses: actions/cache/restore@v4
         with:
           path: |
-            ${{ github.workspace }}/.sccache
-            ${{ github.workspace }}/upstream/ladybird/Build/caches/vcpkg-binary-cache
+            .ccache
+            .sccache
+            upstream/ladybird/Build/caches/vcpkg-binary-cache
             ~/.cargo/registry
-          key: hellbird-windows-x64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**') }}
+          key: hellbird-windows-x64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**', 'resources/**', 'tools/**') }}-${{ github.run_id }}
           restore-keys: |
+            hellbird-windows-x64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**', 'resources/**', 'tools/**') }}-
             hellbird-windows-x64-${{ env.PRESET }}-
             hellbird-windows-x64-
 
-      - name: Bootstrap vcpkg
-        working-directory: ${{ github.workspace }}/upstream/ladybird
-        shell: bash
-        run: python Meta/ladybird.py vcpkg --preset "${PRESET}"
+      - name: Bootstrap pinned vcpkg matching preset
+        shell: pwsh
+        run: python tools/hellbird.py bootstrap-vcpkg --upstream upstream/ladybird --preset $env:PRESET
 
-      - name: Initialize Visual Studio x64 Developer Environment & Build Hellbird
+      - name: Initialize Visual Studio x64 Developer Environment, Build & Package Hellbird
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALLDIR=%%i"
@@ -102,15 +117,20 @@ jobs:
             exit /b 1
           )
           call "%VSINSTALLDIR%\VC\Auxiliary\Build\vcvars64.bat"
-          python tools\hellbird.py build --upstream upstream\ladybird --preset %PRESET% --target ladybird
+          python tools\hellbird.py build --upstream upstream\ladybird --preset %PRESET% --no-tests --target ladybird
+          if errorlevel 1 exit /b 1
+          python tools\hellbird.py package --upstream upstream\ladybird --preset %PRESET% --out dist
 
-      - name: Package Windows portable archive (.zip)
-        shell: pwsh
-        run: |
-          python tools/hellbird.py package `
-            --upstream upstream/ladybird `
-            --preset $env:PRESET `
-            --out dist
+      - name: Save caches (even if build fails or times out early)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .ccache
+            .sccache
+            upstream/ladybird/Build/caches/vcpkg-binary-cache
+            ~/.cargo/registry
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
 
       - name: Upload Windows portable build
         uses: actions/upload-artifact@v4

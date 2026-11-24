@@ -18,6 +18,13 @@ on:
           - all
           - txz
           - deb
+      target_distro:
+        description: 'Target Ubuntu release (24.04 bundles Qt 6.10 via vcpkg; 26.04 uses CI image Qt)'
+        type: choice
+        default: 'ubuntu-24.04'
+        options:
+          - ubuntu-24.04
+          - ubuntu-26.04
   workflow_call:
     inputs:
       preset:
@@ -26,67 +33,104 @@ on:
       package_format:
         type: string
         default: 'all'
+      target_distro:
+        type: string
+        default: 'ubuntu-24.04'
 
 permissions:
   contents: read
 
 jobs:
   build-linux:
-    name: Linux x64 (${{ inputs.preset || 'Distribution' }})
+    name: Linux x64 (${{ inputs.target_distro || 'ubuntu-24.04' }}, ${{ inputs.preset || 'Distribution' }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 300
     container:
-      image: ghcr.io/ladybirdbrowser/ladybird-ci:2026.11.21
+      image: ${{ (inputs.target_distro || 'ubuntu-24.04') == 'ubuntu-24.04' && 'docker.io/library/ubuntu:24.04' || 'ghcr.io/ladybirdbrowser/ladybird-ci:2026.11.21' }}
       options: --ulimit core=1
 
     env:
       PRESET: ${{ inputs.preset || 'Distribution' }}
       PKG_FORMAT: ${{ inputs.package_format || 'all' }}
+      TARGET_DISTRO: ${{ inputs.target_distro || 'ubuntu-24.04' }}
       CC: clang
       CXX: clang++
-      CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_COMPILERCHECK: "%compiler% -v"
 
     steps:
       - name: Checkout Hellbird
         uses: actions/checkout@v4
 
-      - name: Configure git safe directories
+      - name: Configure git safe directories and container workspace paths
         run: |
           git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           git config --global --add safe.directory "${GITHUB_WORKSPACE}/upstream/ladybird"
+          echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache" >> "$GITHUB_ENV"
+          mkdir -p "${GITHUB_WORKSPACE}/.ccache" "${GITHUB_WORKSPACE}/upstream/ladybird/Build/caches/vcpkg-binary-cache"
 
-      - name: Prepare patched Ladybird source tree
+      - name: Install build dependencies (Ubuntu 24.04 container)
+        if: ${{ env.TARGET_DISTRO == 'ubuntu-24.04' }}
+        run: |
+          apt-get update -o APT::Update::Error-Mode=any
+          apt-get install -y --no-install-recommends ca-certificates curl git python3 xz-utils
+          python3 tools/hellbird.py prepare --upstream upstream/ladybird
+          ./upstream/ladybird/Meta/Docker/ci/install-build-dependencies.sh
+
+      - name: Prepare patched Ladybird source tree (Ubuntu 26.04 CI image)
+        if: ${{ env.TARGET_DISTRO != 'ubuntu-24.04' }}
         run: python3 tools/hellbird.py prepare --upstream upstream/ladybird
 
-      - name: Restore ccache and vcpkg caches
-        uses: actions/cache@v4
+      - name: Restore ccache, vcpkg, and cargo caches
+        id: cache-restore
+        uses: actions/cache/restore@v4
         with:
           path: |
-            ${{ github.workspace }}/.ccache
-            ${{ github.workspace }}/upstream/ladybird/Build/caches/vcpkg-binary-cache
+            .ccache
+            upstream/ladybird/Build/caches/vcpkg-binary-cache
             ~/.cargo/registry
-          key: hellbird-linux-x64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**') }}
+            /opt/cargo/registry
+          key: hellbird-linux-${{ env.TARGET_DISTRO }}-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**', 'resources/**', 'tools/**') }}-${{ github.run_id }}
           restore-keys: |
-            hellbird-linux-x64-${{ env.PRESET }}-
-            hellbird-linux-x64-
+            hellbird-linux-${{ env.TARGET_DISTRO }}-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**', 'resources/**', 'tools/**') }}-
+            hellbird-linux-${{ env.TARGET_DISTRO }}-${{ env.PRESET }}-
+            hellbird-linux-${{ env.TARGET_DISTRO }}-
 
       - name: Warm up Rust dependencies & vcpkg
-        working-directory: ${{ github.workspace }}/upstream/ladybird
         run: |
-          for manifest in Cargo.toml Libraries/LibJS/Flap/Cargo.toml; do
+          for manifest in upstream/ladybird/Cargo.toml upstream/ladybird/Libraries/LibJS/Flap/Cargo.toml; do
             if [ -f "${manifest}" ]; then
               cargo fetch --locked --manifest-path "${manifest}"
             fi
           done
-          ./Meta/ladybird.py vcpkg --preset "${PRESET}"
+          python3 tools/hellbird.py bootstrap-vcpkg --upstream upstream/ladybird --preset "${PRESET}"
 
       - name: Configure & Build Hellbird
         run: |
+          EXTRA_ARGS=(
+            "--extra-cmake-arg=-DCMAKE_C_COMPILER=clang"
+            "--extra-cmake-arg=-DCMAKE_CXX_COMPILER=clang++"
+            "--extra-cmake-arg=-DLADYBIRD_ENABLE_LTO=OFF"
+          )
+          if [ "${TARGET_DISTRO}" = "ubuntu-24.04" ]; then
+            EXTRA_ARGS+=("--build-qt")
+          fi
           python3 tools/hellbird.py build \
             --upstream upstream/ladybird \
             --preset "${PRESET}" \
-            --extra-cmake-arg="-DCMAKE_C_COMPILER=clang" \
-            --extra-cmake-arg="-DCMAKE_CXX_COMPILER=clang++"
+            --link-pool-size 1 \
+            --no-tests \
+            "${EXTRA_ARGS[@]}"
+
+      - name: Save caches (even if build fails or times out early)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .ccache
+            upstream/ladybird/Build/caches/vcpkg-binary-cache
+            ~/.cargo/registry
+            /opt/cargo/registry
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
 
       - name: Package Linux archives and Debian package
         run: |
@@ -99,7 +143,7 @@ jobs:
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hellbird-linux-x64-${{ env.PRESET }}
+          name: hellbird-linux-x64-${{ env.TARGET_DISTRO }}-${{ env.PRESET }}
           path: |
             dist/*.tar.xz
             dist/*.deb

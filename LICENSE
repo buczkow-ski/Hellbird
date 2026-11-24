@@ -1,0 +1,19 @@
+# Hellbird Licensing Notice
+
+SPDX-License-Identifier: BSD-2-Clause
+
+Copyright (c) 2026 Hellbird Maintainers.
+
+All original Hellbird patches, tooling scripts, branding assets, and configuration
+in this repository are licensed under the BSD 2-Clause License. See the standard
+SPDX BSD-2-Clause text at https://spdx.org/licenses/BSD-2-Clause.html.
+
+## Upstream Attributions
+
+- **Ladybird Web Browser Engine** (`https://github.com/ladybirdbrowser/ladybird`):
+  Licensed under the BSD 2-Clause License, plus third-party libraries documented
+  in the generated `LICENSES.txt` shipped with each release build.
+- **Helium Browser** (`https://github.com/imputnet/helium`):
+  Design inspiration for Hellbird's privacy-first defaults, native !bangs, and
+  minimalist browser chrome. Hellbird's patches are original implementations
+  written for Ladybird's C++/Qt codebase.
