@@ -9,7 +9,7 @@
       "dest": "UI/Icons/ladybird-private.png"
     },
     {
-      "src": "branding/hellbird-48.png",
+      "src": "branding/hellbird-128.png",
       "dest": "Base/res/icons/48x48/app-browser.png"
     },
     {

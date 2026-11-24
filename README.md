@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="resources/branding/hellbird.svg" alt="Hellbird Logo" width="112" />
+  <img src="resources/branding/hellbird-256.png" alt="Hellbird Logo" width="128" />
   <h1>Hellbird</h1>
   <p><strong>Helium's privacy, consent, and minimalist UX — powered by the independent Ladybird web engine.</strong></p>
 </div>
