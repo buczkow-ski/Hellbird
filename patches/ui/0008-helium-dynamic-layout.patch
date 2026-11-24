@@ -1,0 +1,770 @@
+diff --git a/Base/res/ladybird/about-pages/settings.html b/Base/res/ladybird/about-pages/settings.html
+index 47a15786e4..409eafae19 100644
+--- a/Base/res/ladybird/about-pages/settings.html
++++ b/Base/res/ladybird/about-pages/settings.html
+@@ -1066,13 +1066,21 @@
+                         <div id="tab-layout-group" class="card-group">
+                             <span id="tab-layout-title">Layout</span>
+                             <div class="tab-options" role="radiogroup" aria-labelledby="tab-layout-title">
++                                <label class="tab-option choice-card">
++                                    <input type="radio" name="tab-layout" value="dynamic" />
++                                    <span class="tab-preview horizontal-preview" aria-hidden="true">
++                                        <span class="preview-toolbar"><i></i></span>
++                                        <span class="preview-strip"><i class="active"></i><i></i><i></i></span>
++                                    </span>
++                                    <span class="tab-option-label">Dynamic</span>
++                                </label>
+                                 <label class="tab-option choice-card">
+                                     <input type="radio" name="tab-layout" value="horizontal" />
+                                     <span class="tab-preview horizontal-preview" aria-hidden="true">
+                                         <span class="preview-strip"><i class="active"></i><i></i><i></i></span>
+                                         <span class="preview-toolbar"><i></i></span>
+                                     </span>
+-                                    <span class="tab-option-label">Tabs on top</span>
++                                    <span class="tab-option-label">Classic</span>
+                                 </label>
+                                 <label class="tab-option choice-card">
+                                     <input type="radio" name="tab-layout" value="vertical" />
+@@ -1094,6 +1102,14 @@
+                                 </label>
+                             </div>
+                         </div>
++                        <div class="card-group inline-container control-row">
++                            <label for="centered-address-bar">Centered address bar</label>
++                            <input id="centered-address-bar" type="checkbox" switch />
++                        </div>
++                        <div class="card-group inline-container control-row">
++                            <label for="rounded-content-frame">Show subtle frame around web pages</label>
++                            <input id="rounded-content-frame" type="checkbox" switch />
++                        </div>
+                         <div class="card-group inline-container control-row hidden">
+                             <label for="vertical-tabs-expand-on-hover">
+                                 Expand vertical tabs on hover when collapsed
+diff --git a/Base/res/ladybird/about-pages/settings/tabs.js b/Base/res/ladybird/about-pages/settings/tabs.js
+index 79a1e6837b..8e22a27f89 100644
+--- a/Base/res/ladybird/about-pages/settings/tabs.js
++++ b/Base/res/ladybird/about-pages/settings/tabs.js
+@@ -1,5 +1,7 @@
+ const tabLayoutGroup = document.querySelector("#tab-layout-group");
+ const tabLayoutInputs = tabLayoutGroup.querySelectorAll('input[name="tab-layout"]');
++const centeredAddressBar = document.querySelector("#centered-address-bar");
++const roundedContentFrame = document.querySelector("#rounded-content-frame");
+ const verticalTabsExpandOnHover = document.querySelector("#vertical-tabs-expand-on-hover");
+ const verticalTabsPosition = document.querySelector("#vertical-tabs-position");
+ const showBookmarksBar = document.querySelector("#show-bookmarks-bar");
+@@ -30,7 +32,7 @@ const updateVerticalTabsDependentSettings = () => {
+ };
+ 
+ const tabLayout = () => {
+-    if (!TAB_SETTINGS.verticalTabsEnabled) return "horizontal";
++    if (!TAB_SETTINGS.verticalTabsEnabled) return TAB_SETTINGS.dynamicLayout !== false ? "dynamic" : "horizontal";
+     return TAB_SETTINGS.everythingInSidebar ? "sidebar" : "vertical";
+ };
+ 
+@@ -43,6 +45,8 @@ const loadSettings = settings => {
+ 
+     const layout = tabLayout();
+     for (const input of tabLayoutInputs) input.checked = input.value === layout;
++    centeredAddressBar.checked = TAB_SETTINGS.centeredAddressBar !== false;
++    roundedContentFrame.checked = TAB_SETTINGS.roundedContentFrame !== false;
+     verticalTabsExpandOnHover.checked = !!TAB_SETTINGS.verticalTabsExpandOnHover;
+     verticalTabsPosition.value = TAB_SETTINGS.verticalTabsPosition || "left";
+     updateVerticalTabsDependentSettings();
+@@ -55,13 +59,24 @@ function saveTabSettings() {
+ for (const input of tabLayoutInputs) {
+     input.addEventListener("change", () => {
+         if (!input.checked) return;
+-        TAB_SETTINGS.verticalTabsEnabled = input.value !== "horizontal";
++        TAB_SETTINGS.dynamicLayout = input.value === "dynamic";
++        TAB_SETTINGS.verticalTabsEnabled = input.value !== "horizontal" && input.value !== "dynamic";
+         TAB_SETTINGS.everythingInSidebar = input.value === "sidebar";
+         updateVerticalTabsDependentSettings();
+         saveTabSettings();
+     });
+ }
+ 
++centeredAddressBar.addEventListener("change", () => {
++    TAB_SETTINGS.centeredAddressBar = centeredAddressBar.checked;
++    saveTabSettings();
++});
++
++roundedContentFrame.addEventListener("change", () => {
++    TAB_SETTINGS.roundedContentFrame = roundedContentFrame.checked;
++    saveTabSettings();
++});
++
+ verticalTabsExpandOnHover.addEventListener("change", () => {
+     TAB_SETTINGS.verticalTabsExpandOnHover = verticalTabsExpandOnHover.checked;
+     saveTabSettings();
+diff --git a/Base/res/ladybird/about-pages/welcome.html b/Base/res/ladybird/about-pages/welcome.html
+index 5af75e9ba6..c06863cf76 100644
+--- a/Base/res/ladybird/about-pages/welcome.html
++++ b/Base/res/ladybird/about-pages/welcome.html
+@@ -58,12 +58,20 @@ SPDX-License-Identifier: BSD-2-Clause
+                     <h2 id="tab-layout-title">Layout</h2>
+                     <div class="tab-options" role="radiogroup" aria-labelledby="tab-layout-title">
+                         <label class="tab-option choice-card">
+-                            <input type="radio" name="tab-layout" value="horizontal" checked />
++                            <input type="radio" name="tab-layout" value="dynamic" checked />
++                            <span class="tab-preview horizontal-preview" aria-hidden="true">
++                                <span class="preview-toolbar"><i></i></span>
++                                <span class="preview-strip"><i class="active"></i><i></i><i></i></span>
++                            </span>
++                            <span class="tab-option-label">Dynamic</span>
++                        </label>
++                        <label class="tab-option choice-card">
++                            <input type="radio" name="tab-layout" value="horizontal" />
+                             <span class="tab-preview horizontal-preview" aria-hidden="true">
+                                 <span class="preview-strip"><i class="active"></i><i></i><i></i></span>
+                                 <span class="preview-toolbar"><i></i></span>
+                             </span>
+-                            <span class="tab-option-label">Tabs on top</span>
++                            <span class="tab-option-label">Classic</span>
+                         </label>
+                         <label class="tab-option choice-card">
+                             <input type="radio" name="tab-layout" value="vertical" />
+diff --git a/Base/res/ladybird/about-pages/welcome.js b/Base/res/ladybird/about-pages/welcome.js
+index 5265e49b3d..5a35460f40 100644
+--- a/Base/res/ladybird/about-pages/welcome.js
++++ b/Base/res/ladybird/about-pages/welcome.js
+@@ -90,7 +90,7 @@ function renderSearchEngines() {
+ }
+ 
+ function tabLayout() {
+-    if (!settings.tabs.verticalTabsEnabled) return "horizontal";
++    if (!settings.tabs.verticalTabsEnabled) return settings.tabs.dynamicLayout !== false ? "dynamic" : "horizontal";
+     return settings.tabs.everythingInSidebar ? "sidebar" : "vertical";
+ }
+ 
+@@ -145,7 +145,8 @@ for (const input of tabLayoutInputs) {
+         // NB: Keep our copy current, as the settings update for this change can arrive after the next one is made.
+         settings.tabs = {
+             ...settings.tabs,
+-            verticalTabsEnabled: input.value !== "horizontal",
++            dynamicLayout: input.value === "dynamic",
++            verticalTabsEnabled: input.value !== "horizontal" && input.value !== "dynamic",
+             everythingInSidebar: input.value === "sidebar",
+         };
+         ladybird.sendMessage("setTabSettings", settings.tabs);
+diff --git a/Libraries/LibWebView/Settings.cpp b/Libraries/LibWebView/Settings.cpp
+index 6c96e3ded4..9f4ea30c46 100644
+--- a/Libraries/LibWebView/Settings.cpp
++++ b/Libraries/LibWebView/Settings.cpp
+@@ -61,6 +61,9 @@ static constexpr auto VERTICAL_TABS_EXPAND_ON_HOVER_KEY = "verticalTabsExpandOnH
+ static constexpr auto VERTICAL_TABS_POSITION_KEY = "verticalTabsPosition"sv;
+ static constexpr auto VERTICAL_TABS_EXPANDED_WIDTH_KEY = "verticalTabsExpandedWidth"sv;
+ static constexpr auto EVERYTHING_IN_SIDEBAR_KEY = "everythingInSidebar"sv;
++static constexpr auto DYNAMIC_LAYOUT_KEY = "dynamicLayout"sv;
++static constexpr auto CENTERED_ADDRESS_BAR_KEY = "centeredAddressBar"sv;
++static constexpr auto ROUNDED_CONTENT_FRAME_KEY = "roundedContentFrame"sv;
+ 
+ static constexpr auto BROWSING_BEHAVIOR_KEY = "browsingBehavior"sv;
+ static constexpr auto ENABLE_AUTOSCROLL_KEY = "enableAutoscroll"sv;
+@@ -859,6 +862,9 @@ JsonValue Settings::serialize_json() const
+     if (m_tab_settings.vertical_tabs_expanded_width.has_value())
+         tab_settings.set(VERTICAL_TABS_EXPANDED_WIDTH_KEY, *m_tab_settings.vertical_tabs_expanded_width);
+     tab_settings.set(EVERYTHING_IN_SIDEBAR_KEY, m_tab_settings.everything_in_sidebar);
++    tab_settings.set(DYNAMIC_LAYOUT_KEY, m_tab_settings.dynamic_layout);
++    tab_settings.set(CENTERED_ADDRESS_BAR_KEY, m_tab_settings.centered_address_bar);
++    tab_settings.set(ROUNDED_CONTENT_FRAME_KEY, m_tab_settings.rounded_content_frame);
+     settings.set(TAB_SETTINGS_KEY, move(tab_settings));
+ 
+     JsonObject browsing_behavior;
+@@ -1283,6 +1289,12 @@ TabSettings Settings::parse_tab_settings(JsonValue const& settings)
+         tab_settings.vertical_tabs_expanded_width = *vertical_tabs_expanded_width;
+     if (auto everything_in_sidebar = settings.as_object().get_bool(EVERYTHING_IN_SIDEBAR_KEY); everything_in_sidebar.has_value())
+         tab_settings.everything_in_sidebar = *everything_in_sidebar;
++    if (auto dynamic_layout = settings.as_object().get_bool(DYNAMIC_LAYOUT_KEY); dynamic_layout.has_value())
++        tab_settings.dynamic_layout = *dynamic_layout;
++    if (auto centered_address_bar = settings.as_object().get_bool(CENTERED_ADDRESS_BAR_KEY); centered_address_bar.has_value())
++        tab_settings.centered_address_bar = *centered_address_bar;
++    if (auto rounded_content_frame = settings.as_object().get_bool(ROUNDED_CONTENT_FRAME_KEY); rounded_content_frame.has_value())
++        tab_settings.rounded_content_frame = *rounded_content_frame;
+ 
+     return tab_settings;
+ }
+diff --git a/Libraries/LibWebView/Settings.h b/Libraries/LibWebView/Settings.h
+index d8cbc2c35f..e1eaff1f01 100644
+--- a/Libraries/LibWebView/Settings.h
++++ b/Libraries/LibWebView/Settings.h
+@@ -93,6 +93,9 @@ enum class VerticalTabsPosition : u8 {
+ };
+ 
+ struct TabSettings {
++    bool dynamic_layout { true };
++    bool centered_address_bar { true };
++    bool rounded_content_frame { true };
+     bool vertical_tabs_enabled { false };
+     bool vertical_tabs_expanded { true };
+     bool vertical_tabs_expand_on_hover { false };
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index 2d9fcdc490..86a557d26c 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -442,6 +442,7 @@ BrowserWindow::BrowserWindow(Vector<URL::URL> const& initial_urls, IsPopupWindow
+     }
+ 
+     m_tabs_container->set_new_tab_action(Application::the().new_tab_action());
++    m_tabs_container->toolbar().set_dynamic_new_tab_action(Application::the().new_tab_action());
+ 
+     auto* main_widget = new QWidget(this);
+     auto* main_layout = new QVBoxLayout(main_widget);
+@@ -593,6 +594,7 @@ void BrowserWindow::initialize_ladybird_menu()
+ }
+ 
+ enum class TabLayoutChoice : u8 {
++    Dynamic,
+     AlongTheTop,
+     DownTheLeftSide,
+     DownTheRightSide,
+@@ -602,7 +604,7 @@ enum class TabLayoutChoice : u8 {
+ static TabLayoutChoice tab_layout_choice(WebView::TabSettings const& tab_settings)
+ {
+     if (!tab_settings.vertical_tabs_enabled)
+-        return TabLayoutChoice::AlongTheTop;
++        return tab_settings.dynamic_layout ? TabLayoutChoice::Dynamic : TabLayoutChoice::AlongTheTop;
+     if (tab_settings.everything_in_sidebar)
+         return TabLayoutChoice::InTheSidebar;
+     return tab_settings.vertical_tabs_position == WebView::VerticalTabsPosition::Right ? TabLayoutChoice::DownTheRightSide : TabLayoutChoice::DownTheLeftSide;
+@@ -638,7 +640,8 @@ void BrowserWindow::initialize_window_context_menu()
+         m_tab_layout_actions->addAction(action);
+         QObject::connect(action, &QAction::triggered, this, [choice] {
+             auto tab_settings = Application::settings().tab_settings();
+-            tab_settings.vertical_tabs_enabled = choice != TabLayoutChoice::AlongTheTop;
++            tab_settings.dynamic_layout = choice == TabLayoutChoice::Dynamic;
++            tab_settings.vertical_tabs_enabled = choice != TabLayoutChoice::AlongTheTop && choice != TabLayoutChoice::Dynamic;
+             tab_settings.everything_in_sidebar = choice == TabLayoutChoice::InTheSidebar;
+             if (choice == TabLayoutChoice::DownTheLeftSide)
+                 tab_settings.vertical_tabs_position = WebView::VerticalTabsPosition::Left;
+@@ -647,7 +650,8 @@ void BrowserWindow::initialize_window_context_menu()
+             Application::settings().set_tab_settings(tab_settings);
+         });
+     };
+-    add_tab_layout("Along the &Top", TabLayoutChoice::AlongTheTop);
++    add_tab_layout("&Dynamic", TabLayoutChoice::Dynamic);
++    add_tab_layout("Along the &Top (Classic)", TabLayoutChoice::AlongTheTop);
+     add_tab_layout("Down the &Left Side", TabLayoutChoice::DownTheLeftSide);
+     add_tab_layout("Down the &Right Side", TabLayoutChoice::DownTheRightSide);
+     add_tab_layout("In the &Sidebar", TabLayoutChoice::InTheSidebar);
+@@ -667,6 +671,9 @@ void BrowserWindow::show_window_context_menu(QPoint global_position)
+ void BrowserWindow::update_tabs_display()
+ {
+     auto const& settings = Application::settings().tab_settings();
++    m_tabs_container->set_dynamic_layout(settings.dynamic_layout);
++    m_tabs_container->set_centered_address_bar(settings.centered_address_bar);
++    m_tabs_container->set_rounded_content_frame(settings.rounded_content_frame);
+     m_tabs_container->set_vertical_tabs_enabled(settings.vertical_tabs_enabled);
+     m_tabs_container->set_vertical_tabs_expanded(settings.vertical_tabs_expanded);
+     m_tabs_container->set_vertical_tabs_expand_on_hover(settings.vertical_tabs_expand_on_hover);
+diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
+index 0cc15d53e7..872c5b02ff 100644
+--- a/UI/Qt/ChromeStyle.cpp
++++ b/UI/Qt/ChromeStyle.cpp
+@@ -308,7 +308,8 @@ QWidget#LadybirdToolbarContainer {{
+ }}
+ 
+ QWidget#LadybirdToolbarContainer[bookmarksBarBelow="true"],
+-QWidget#LadybirdToolbarContainer[verticalTabs="true"] {{
++QWidget#LadybirdToolbarContainer[verticalTabs="true"],
++QWidget#LadybirdToolbarContainer[dynamicTabsBelow="true"] {{
+     border-bottom-color: transparent;
+ }}
+ 
+@@ -1132,6 +1133,13 @@ QWidget#LadybirdTabStrip {{
+     border: 0;
+ }}
+ 
++QWidget#LadybirdTabStrip[dynamicLayout="true"] {{
++    color: {4};
++    background: {10};
++    border: 0;
++    border-bottom: 1px solid {7};
++}}
++
+ QWidget#LadybirdVerticalTabBar {{
+     color: {4};
+     background: {9};
+@@ -1260,7 +1268,7 @@ QWidget#LadybirdVerticalTabBar[verticalTabsPosition="right"] {{
+ #endif
+         ,
+         background, hover, pressed, control_border, text, close_hover, close_text, sidebar_separator, sidebar_separator_hover,
+-        style_sheet_color(chrome_sidebar_background(palette)));
++        style_sheet_color(chrome_sidebar_background(palette)), style_sheet_color(chrome_background(palette)));
+ }
+ 
+ QString autocomplete_popup_style_sheet(QPalette const&)
+diff --git a/UI/Qt/TabBar.cpp b/UI/Qt/TabBar.cpp
+index 756fa366d2..874547ae95 100644
+--- a/UI/Qt/TabBar.cpp
++++ b/UI/Qt/TabBar.cpp
+@@ -876,6 +876,14 @@ void TabBar::set_tab_layout(TabLayout tab_layout)
+     refresh_tab_layout();
+ }
+ 
++void TabBar::set_dynamic_pill_tabs(bool enabled)
++{
++    if (m_dynamic_pill_tabs == enabled)
++        return;
++    m_dynamic_pill_tabs = enabled;
++    update();
++}
++
+ void TabBar::set_pinned_tabs_in_rows(bool in_rows)
+ {
+     if (m_pinned_tabs_in_rows == in_rows)
+@@ -1148,6 +1156,13 @@ void TabBar::paintEvent(QPaintEvent*)
+             auto tab_rect = shifted_tab_rect(index);
+             if (!tab_rect.isValid() || tab_rect.right() < 0 || tab_rect.left() > width())
+                 return;
++            if (m_dynamic_pill_tabs) {
++                auto pill = horizontal_tab_card_shape_rect(QRectF(tab_rect), horizontal_tab_end_room(index)).adjusted(0, -1, 0, -2);
++                painter.setBrush(horizontal_tab_hover_surface(Theme::chrome_palette(*this), hover_progress));
++                painter.setPen(Qt::NoPen);
++                painter.drawRoundedRect(pill, 7, 7);
++                return;
++            }
+             auto body_rect = horizontal_selected_tab_body_rect(QRectF(tab_rect), horizontal_tab_end_room(index));
+             if (body_rect.width() < 2 * HORIZONTAL_SELECTED_TAB_RADIUS)
+                 return;
+@@ -1213,8 +1228,8 @@ void TabBar::paintEvent(QPaintEvent*)
+             tab_path.addRoundedRect(shape_rect, vertical_tab_radius, vertical_tab_radius);
+ 
+         // Horizontal tabs are divided by lines, except around the selected tab and the hovered one, and between pinned
+-        // tabs. The last tab has none after it.
+-        if (!is_vertical) {
++        // tabs. The last tab has none after it. Dynamic pill tabs use soft cards without separators.
++        if (!is_vertical && !m_dynamic_pill_tabs) {
+             auto next_index = index + 1;
+             auto next_is_pinned = next_index < pinned_count;
+             // NB: The lines beside the tabs the selection moves between stay hidden until the tabs have settled, so none
+@@ -1251,6 +1266,12 @@ void TabBar::paintEvent(QPaintEvent*)
+             painter.setOpacity(selection);
+             if (is_vertical) {
+                 paint_selected_vertical_tab(painter, Theme::chrome_palette(*this), shape_rect, vertical_tab_radius);
++            } else if (m_dynamic_pill_tabs) {
++                auto pill = shape_rect.adjusted(0, -1, 0, -2);
++                auto dark = Theme::is_dark(*this);
++                painter.setPen(Qt::NoPen);
++                painter.setBrush(dark ? QColor(255, 255, 255, 24) : QColor(28, 25, 23, 18));
++                painter.drawRoundedRect(pill, 7, 7);
+             } else {
+                 painter.setPen(Qt::NoPen);
+                 painter.setBrush(ChromeStyle::chrome_active_tab_surface(Theme::chrome_palette(*this)));
+@@ -3368,6 +3389,7 @@ void TabWidget::insert_tab(int index, Tab* widget, QString const& label)
+     m_tab_bar->insertTab(index, label);
+     place_toolbar_over_page_column();
+ 
++    update_tab_chrome_visibility();
+     update_tab_layout();
+     update_tab_button_visibility();
+ 
+@@ -3401,6 +3423,7 @@ Tab* TabWidget::take_tab(int index)
+     if (m_tab_bar->count() > 0 && m_tab_bar->currentIndex() >= 0)
+         m_stacked_widget->setCurrentIndex(m_tab_bar->currentIndex());
+ 
++    update_tab_chrome_visibility();
+     update_tab_layout();
+     update_tab_button_visibility();
+     return as<Tab>(widget);
+@@ -3513,6 +3536,31 @@ void TabWidget::window_control_buttons_changed()
+     rebuild_layout();
+ }
+ 
++void TabWidget::set_dynamic_layout(bool enabled)
++{
++    if (m_dynamic_layout == enabled)
++        return;
++    m_dynamic_layout = enabled;
++    rebuild_layout();
++}
++
++void TabWidget::set_centered_address_bar(bool enabled)
++{
++    if (m_centered_address_bar == enabled)
++        return;
++    m_centered_address_bar = enabled;
++    m_toolbar->set_dynamic_layout(is_dynamic_horizontal(), m_centered_address_bar);
++}
++
++void TabWidget::set_rounded_content_frame(bool enabled)
++{
++    if (m_rounded_content_frame == enabled)
++        return;
++    m_rounded_content_frame = enabled;
++    m_page_column_layout->setContentsMargins(m_rounded_content_frame ? QMargins(6, 0, 6, 6) : QMargins());
++    update_chrome_style();
++}
++
+ void TabWidget::set_vertical_tabs_enabled(bool enabled)
+ {
+     if (m_vertical_tabs_enabled == enabled)
+@@ -4253,7 +4301,11 @@ int TabWidget::vertical_tabs_layout_width() const
+ 
+ bool TabWidget::should_show_window_controls_in_tab_toolbar() const
+ {
+-    return m_window_controls_visible && m_tab_bar->tab_layout() != TabLayout::Horizontal && !vertical_tabs_hold_window_controls() && !toolbar_is_in_sidebar();
++    if (!m_window_controls_visible)
++        return false;
++    if (is_dynamic_horizontal())
++        return true;
++    return m_tab_bar->tab_layout() != TabLayout::Horizontal && !vertical_tabs_hold_window_controls() && !toolbar_is_in_sidebar();
+ }
+ 
+ // The expanded sidebar holds the window controls when they are on its side. With everything in the sidebar, they stay
+@@ -4364,11 +4416,14 @@ void TabWidget::rebuild_layout()
+     m_tab_bar->set_vertical_tabs_position(m_vertical_tabs_position);
+     m_tab_bar->set_pinned_tabs_in_rows(m_vertical_tabs_hover_expanded && !m_vertical_tabs_expanded);
+     m_tab_bar->set_tab_layout(current_tab_layout());
++    m_tab_bar->set_dynamic_pill_tabs(is_dynamic_horizontal());
++    set_dynamic_property_if_needed(*m_tab_bar_row, "dynamicLayout", is_dynamic_horizontal());
+     if constexpr (!use_native_macos_window_controls())
+         set_window_control_button_order(*m_window_controls, window_controls_are_on_left());
+     m_vertical_tabs_expanded_width = clamp(m_vertical_tabs_expanded_width, minimum_vertical_tabs_expanded_width(), VERTICAL_TABS_MAX_EXPANDED_WIDTH);
+     update_toolbar_window_controls_visibility();
+     m_toolbar->set_arrangement(toolbar_is_in_sidebar() ? ToolbarArrangement::Sidebar : ToolbarArrangement::Row, window_controls_are_on_left(), SIDEBAR_CONTENT_INSET - vertical_tabs_side_margin(true));
++    m_toolbar->set_dynamic_layout(is_dynamic_horizontal(), m_centered_address_bar);
+     place_all_tabs_and_sidebar_toggle();
+ 
+     if (m_tab_bar->tab_layout() != TabLayout::Horizontal) {
+@@ -4411,6 +4466,21 @@ void TabWidget::rebuild_layout()
+             m_main_layout->activate();
+             slide_page_with_toggling_sidebar();
+         }
++    } else if (is_dynamic_horizontal()) {
++        rebuild_layout_for_horizontal_tabs();
++        m_toolbar_follows_page_column = false;
++        m_toolbar_placeholder->hide();
++        if (m_toolbar->parentWidget() != this) {
++            m_toolbar->setParent(this);
++            m_toolbar->setVisible(m_tab_bar_visible);
++        }
++        add_page_to_page_column();
++
++        m_main_layout->addWidget(m_toolbar);
++        m_main_layout->addWidget(m_tab_bar_row);
++        m_main_layout->addWidget(m_page_column, 1);
++        m_page_column->show();
++        m_vertical_tabs_content->hide();
+     } else {
+         rebuild_layout_for_horizontal_tabs();
+         rebuild_page_column();
+@@ -4432,6 +4502,16 @@ void TabWidget::rebuild_layout()
+ 
+ void TabWidget::rebuild_layout_for_horizontal_tabs()
+ {
++    if (is_dynamic_horizontal()) {
++        m_tab_bar_row->setMinimumHeight(HORIZONTAL_TAB_STRIP_HEIGHT);
++        m_tab_bar_row_layout->setSpacing(0);
++        m_tab_bar_row_layout->setContentsMargins(6, 0, 6, 3);
++        m_new_tab_button->hide();
++        m_tab_bar_row_layout->addWidget(m_tab_bar, 0, Qt::AlignVCenter);
++        m_tab_bar_row_layout->addStretch(1);
++        return;
++    }
++
+     m_tab_bar_row->setMinimumHeight(HORIZONTAL_TAB_STRIP_HEIGHT);
+     m_tab_bar_row_layout->setSpacing(0);
+     // NB: Without the traffic lights, the Ladybird button starts the strip, and its room for its focus ring takes part of
+@@ -4735,6 +4815,19 @@ void TabWidget::place_toolbar_sidebar_buttons()
+     if (!on_right || !m_vertical_tabs_expanded)
+         m_toolbar->restore_trailing_sidebar_slot();
+ 
++    if (is_dynamic_horizontal()) {
++        slot.hide();
++        auto* trailing_layout = static_cast<QBoxLayout*>(trailing_slot.layout());
++        if (m_ladybird_buttons->parentWidget() != &trailing_slot) {
++            m_ladybird_buttons->setParent(&trailing_slot);
++            m_ladybird_button->set_tile_vertical_offset(0);
++            trailing_layout->addWidget(m_ladybird_buttons, 0, Qt::AlignVCenter);
++        }
++        m_ladybird_buttons->setVisible(m_tab_bar_visible);
++        trailing_slot.setVisible(m_tab_bar_visible);
++        return;
++    }
++
+     trailing_slot.setVisible(m_tab_bar_visible && on_right);
+ 
+     if (!m_tab_bar_visible || !is_vertical || (m_vertical_tabs_expanded && !on_right)) {
+@@ -4965,6 +5058,7 @@ void TabWidget::rebuild_page_column()
+ // while the pointer is near the toolbar. The tab performance monitor's row ends the column.
+ void TabWidget::add_page_to_page_column()
+ {
++    m_page_column_layout->setContentsMargins(m_rounded_content_frame ? QMargins(6, 0, 6, 6) : QMargins());
+     m_page_column_layout->addWidget(m_notification_bar_column);
+     if (!m_bookmarks_bar->shows_over_page())
+         m_page_column_layout->addWidget(m_bookmarks_bar);
+@@ -5188,16 +5282,19 @@ void TabWidget::update_tab_layout()
+     update_vertical_tabs_resize_handle();
+     update_vertical_tabs_content_separator();
+ 
+-    // Everything on the strip but the tab bar: its margins, the window controls, and the new tab button with its gap.
+     auto margins = m_tab_bar_row_layout->contentsMargins();
+-    auto controls_width = margins.left() + margins.right() + HORIZONTAL_NEW_TAB_BUTTON_GAP - HORIZONTAL_TAB_END_ROOM + HORIZONTAL_NEW_TAB_BUTTON_SIZE + horizontal_tab_strip_drag_space();
+-    controls_width += m_ladybird_buttons->sizeHint().width() + LADYBIRD_BUTTONS_TRAILING_GAP - HORIZONTAL_TAB_END_ROOM;
+-    // NB: This is the room the window controls need, and not their width, which shrinks along with a strip that is too
+-    //     narrow for them. The minimum width below would then follow it down.
+-    if (!m_window_controls->isHidden())
+-        controls_width += m_window_controls->sizeHint().expandedTo(m_window_controls->minimumSize()).width();
+-
+-    auto available_for_tabs = width() - controls_width;
++    int controls_width = margins.left() + margins.right();
++    if (!is_dynamic_horizontal()) {
++        // Everything on the strip but the tab bar: its margins, the window controls, and the new tab button with its gap.
++        controls_width += HORIZONTAL_NEW_TAB_BUTTON_GAP - HORIZONTAL_TAB_END_ROOM + HORIZONTAL_NEW_TAB_BUTTON_SIZE + horizontal_tab_strip_drag_space();
++        controls_width += m_ladybird_buttons->sizeHint().width() + LADYBIRD_BUTTONS_TRAILING_GAP - HORIZONTAL_TAB_END_ROOM;
++        // NB: This is the room the window controls need, and not their width, which shrinks along with a strip that is too
++        //     narrow for them. The minimum width below would then follow it down.
++        if (!m_window_controls->isHidden())
++            controls_width += m_window_controls->sizeHint().expandedTo(m_window_controls->minimumSize()).width();
++    }
++
++    auto available_for_tabs = max(0, width() - controls_width);
+     auto pinned_count = m_tab_bar->pinned_tab_count();
+ 
+     // NB: The tab strip has no minimum width from its contents (see the constructor), so it keeps the window wide enough
+@@ -5209,7 +5306,8 @@ void TabWidget::update_tab_layout()
+     auto tabs_width = (pinned_count * HORIZONTAL_PINNED_TAB_WIDTH) + ((m_tab_bar->count() - pinned_count) * HORIZONTAL_TAB_MAX_WIDTH) + (2 * HORIZONTAL_TAB_END_ROOM);
+     auto tab_bar_width = min(available_for_tabs, tabs_width + max(0, m_tab_bar->horizontal_tabs_end_offset()));
+     m_tab_bar->setFixedWidth(max(0, tab_bar_width));
+-    place_horizontal_new_tab_button();
++    if (!is_dynamic_horizontal())
++        place_horizontal_new_tab_button();
+ }
+ 
+ void TabWidget::update_tab_button_visibility()
+@@ -5238,8 +5336,10 @@ void TabWidget::update_tab_chrome_visibility()
+ {
+     auto tab_layout = m_tab_bar->tab_layout();
+     auto is_horizontal = tab_layout == TabLayout::Horizontal;
+-    auto show_top_row = m_tab_bar_visible && is_horizontal;
++    auto dynamic_horizontal = is_dynamic_horizontal();
++    auto show_top_row = m_tab_bar_visible && is_horizontal && (!dynamic_horizontal || m_tab_bar->count() > 1);
+     m_tab_bar_row->setVisible(show_top_row);
++    m_toolbar->set_dynamic_tabs_below(dynamic_horizontal && show_top_row);
+     m_toolbar->setVisible(m_tab_bar_visible);
+     m_toolbar_placeholder->setVisible(m_tab_bar_visible && m_toolbar_follows_page_column);
+     m_vertical_tab_bar_column->setVisible(m_tab_bar_visible && !is_horizontal);
+@@ -5248,7 +5348,7 @@ void TabWidget::update_tab_chrome_visibility()
+ 
+     auto show_window_controls = m_window_controls_visible
+         && m_tab_bar_visible
+-        && (is_horizontal || (!use_native_macos_window_controls() && (vertical_tabs_hold_window_controls() || toolbar_is_in_sidebar())));
++        && ((is_horizontal && !dynamic_horizontal) || (!use_native_macos_window_controls() && (vertical_tabs_hold_window_controls() || toolbar_is_in_sidebar())));
+     if (m_window_controls_reveal) {
+         // NB: Without a toolbar row or a tab strip, nothing holds the window controls, so they stay out of sight.
+         if (show_window_controls && !is_horizontal && !vertical_tabs_hold_window_controls()) {
+@@ -5296,6 +5396,10 @@ void TabWidget::update_chrome_style()
+     auto reserved_space_palette = m_vertical_tabs_reserved_space->palette();
+     reserved_space_palette.setColor(QPalette::Window, ChromeStyle::chrome_sidebar_background(Theme::chrome_palette(*this)));
+     m_vertical_tabs_reserved_space->setPalette(reserved_space_palette);
++    m_page_column->setAutoFillBackground(m_rounded_content_frame);
++    auto page_column_palette = m_page_column->palette();
++    page_column_palette.setColor(QPalette::Window, ChromeStyle::chrome_background(Theme::chrome_palette(*this)));
++    m_page_column->setPalette(page_column_palette);
+     if (m_all_tabs_popover)
+         m_all_tabs_popover->update_chrome_style(palette());
+     m_is_updating_chrome_style = false;
+diff --git a/UI/Qt/TabBar.h b/UI/Qt/TabBar.h
+index fcbf5c1df9..f336e39af3 100644
+--- a/UI/Qt/TabBar.h
++++ b/UI/Qt/TabBar.h
+@@ -93,6 +93,7 @@ public:
+     TabWidget* tab_widget() const { return m_tab_widget; }
+     TabLayout tab_layout() const { return m_tab_layout; }
+     void set_tab_layout(TabLayout);
++    void set_dynamic_pill_tabs(bool);
+     // While collapsed vertical tabs only peek open on hover, the pinned tabs keep their rows, one tab each, rather than
+     // forming the grid, so no tab moves out from under the pointer.
+     void set_pinned_tabs_in_rows(bool);
+@@ -229,6 +230,7 @@ private:
+     QPointer<TabWidget> m_tab_widget;
+ 
+     TabLayout m_tab_layout { TabLayout::Horizontal };
++    bool m_dynamic_pill_tabs { false };
+     bool m_pinned_tabs_in_rows { false };
+     WebView::VerticalTabsPosition m_vertical_tabs_position { WebView::VerticalTabsPosition::Left };
+     int m_available_width { 0 };
+@@ -343,6 +345,9 @@ public:
+     void set_window_controls_visible(bool);
+     void window_control_buttons_changed();
+     void update_window_button_icons();
++    void set_dynamic_layout(bool);
++    void set_centered_address_bar(bool);
++    void set_rounded_content_frame(bool);
+     void set_vertical_tabs_enabled(bool);
+     void set_everything_in_sidebar(bool);
+     void set_vertical_tabs_expanded(bool);
+@@ -378,6 +383,7 @@ protected:
+ 
+ private:
+     TabLayout current_tab_layout() const;
++    bool is_dynamic_horizontal() const { return !m_vertical_tabs_enabled && m_dynamic_layout; }
+     QWidget* tab_drag_area_widget() const;
+     bool vertical_tabs_effectively_expanded() const;
+     bool cursor_is_over_vertical_tabs() const;
+@@ -490,6 +496,9 @@ private:
+     QSpacerItem* m_vertical_tabs_footer_spacer { nullptr };
+     bool m_tab_bar_visible { true };
+     bool m_window_controls_visible { true };
++    bool m_dynamic_layout { true };
++    bool m_centered_address_bar { true };
++    bool m_rounded_content_frame { true };
+     bool m_vertical_tabs_enabled { false };
+     bool m_everything_in_sidebar { false };
+     bool m_vertical_tabs_expanded { true };
+diff --git a/UI/Qt/WindowToolbar.cpp b/UI/Qt/WindowToolbar.cpp
+index aa56a2481d..ba8f293bbb 100644
+--- a/UI/Qt/WindowToolbar.cpp
++++ b/UI/Qt/WindowToolbar.cpp
+@@ -45,6 +45,7 @@
+ #include <QFrame>
+ #include <QGraphicsOpacityEffect>
+ #include <QHBoxLayout>
++#include <QKeySequence>
+ #include <QMenu>
+ #include <QMouseEvent>
+ #include <QPainter>
+@@ -1345,6 +1346,15 @@ WindowToolbar::WindowToolbar(WebView::IsPrivate is_private, QWidget* parent)
+     trailing_sidebar_slot_layout->setSpacing(TOOLBAR_SPACING);
+     m_trailing_sidebar_slot->hide();
+ 
++    m_dynamic_new_tab_button = new ToolbarButton(m_toolbar);
++    m_dynamic_new_tab_button->setObjectName("LadybirdDynamicNewTabButton");
++    m_dynamic_new_tab_button->set_size(TOOLBAR_BUTTON_SIZE);
++    m_dynamic_new_tab_button->setIconSize(TOOLBAR_ICON_SIZE);
++    m_dynamic_new_tab_button->setAutoRaise(true);
++    m_dynamic_new_tab_button->setFocusPolicy(Qt::NoFocus);
++    m_dynamic_new_tab_button->setToolTip("New Tab");
++    m_dynamic_new_tab_button->hide();
++
+     m_sidebar_footer = new QWidget(this);
+     m_sidebar_footer->setObjectName("LadybirdSidebarFooter");
+     m_sidebar_footer->setProperty(WINDOW_DRAG_REGION_PROPERTY, true);
+@@ -1435,7 +1445,21 @@ void WindowToolbar::lay_out_as_row()
+     toolbar_layout->addWidget(m_sidebar_slot, 0, Qt::AlignVCenter);
+     toolbar_layout->addWidget(m_navigation_buttons, 0, Qt::AlignVCenter);
+     m_navigation_buttons->show();
+-    toolbar_layout->addWidget(&field_slot(), 1);
++    auto& slot = field_slot();
++    slot.setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
++    if (m_dynamic_layout && m_centered_address_bar) {
++        slot.setMinimumWidth(220);
++        slot.setMaximumWidth(640);
++        toolbar_layout->addStretch(1);
++        toolbar_layout->addWidget(&slot, 2);
++        toolbar_layout->addStretch(1);
++    } else {
++        slot.setMinimumWidth(0);
++        slot.setMaximumWidth(QWIDGETSIZE_MAX);
++        toolbar_layout->addWidget(&slot, 1);
++    }
++    toolbar_layout->addWidget(m_dynamic_new_tab_button, 0, Qt::AlignVCenter);
++    m_dynamic_new_tab_button->setVisible(m_dynamic_layout);
+     toolbar_layout->addWidget(m_downloads_button, 0, Qt::AlignVCenter);
+     if (m_feedback_button)
+         toolbar_layout->addWidget(m_feedback_button, 0, Qt::AlignVCenter);
+@@ -1463,11 +1487,15 @@ void WindowToolbar::lay_out_in_sidebar()
+     // NB: The field's container leaves room for its focus ring all around, which the row's margins make up for.
+     auto ring_room = TOOLBAR_LOCATION_FOCUS_RING_ROOM;
+     field_row->setContentsMargins(m_sidebar_inset - ring_room, SIDEBAR_FIELD_TOP_MARGIN - ring_room, m_sidebar_inset - ring_room, SIDEBAR_FIELD_BOTTOM_MARGIN - ring_room);
+-    field_row->addWidget(&field_slot(), 1);
++    auto& slot = field_slot();
++    slot.setMinimumWidth(0);
++    slot.setMaximumWidth(QWIDGETSIZE_MAX);
++    field_row->addWidget(&slot, 1);
+     toolbar_layout->addLayout(field_row);
+     host_field_in_panel();
+ 
+     // NB: What the sidebar has no room for stays hidden, as widgets left out of a layout would show where they last were.
++    m_dynamic_new_tab_button->hide();
+     m_sidebar_slot->hide();
+     m_trailing_sidebar_slot->hide();
+     m_window_controls->hide();
+@@ -1958,6 +1986,39 @@ void WindowToolbar::set_bookmarks_bar_below(bool below)
+     update();
+ }
+ 
++void WindowToolbar::set_dynamic_layout(bool dynamic_layout, bool centered_address_bar)
++{
++    if (m_dynamic_layout == dynamic_layout && m_centered_address_bar == centered_address_bar)
++        return;
++    m_dynamic_layout = dynamic_layout;
++    m_centered_address_bar = centered_address_bar;
++    if (m_arrangement == ToolbarArrangement::Row) {
++        delete m_toolbar->layout();
++        lay_out_as_row();
++        set_window_controls_visible(m_window_controls_visible);
++        update_field_panel();
++    }
++}
++
++void WindowToolbar::set_dynamic_new_tab_action(QAction* action)
++{
++    if (!m_dynamic_new_tab_button || !action)
++        return;
++    QObject::disconnect(m_dynamic_new_tab_button, &QToolButton::clicked, nullptr, nullptr);
++    QObject::connect(m_dynamic_new_tab_button, &QToolButton::clicked, action, &QAction::trigger);
++    m_dynamic_new_tab_button->setToolTip(qformatted("New Tab  {}", action->shortcut().toString(QKeySequence::NativeText)));
++}
++
++void WindowToolbar::set_dynamic_tabs_below(bool below)
++{
++    if (property("dynamicTabsBelow").toBool() == below)
++        return;
++    setProperty("dynamicTabsBelow", below);
++    style()->unpolish(this);
++    style()->polish(this);
++    update();
++}
++
+ bool WindowToolbar::event(QEvent* event)
+ {
+     // An inactive window's toolbar icons drop to the muted color.
+@@ -2034,6 +2095,8 @@ void WindowToolbar::recreate_icons()
+     m_navigate_forward_action.action().setIcon(create_chrome_icon(ChromeIcon::Forward, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+     m_reload_action->setIcon(create_chrome_icon(ChromeIcon::Reload, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+     m_stop_action->setIcon(create_chrome_icon(ChromeIcon::Stop, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
++    if (m_dynamic_new_tab_button)
++        m_dynamic_new_tab_button->setIcon(create_chrome_icon(ChromeIcon::NewTab, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+     m_downloads_button->setIcon(create_chrome_icon(ChromeIcon::Download, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+     if (m_feedback_button)
+         m_feedback_button->setIcon(create_chrome_icon(ChromeIcon::Feedback, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+diff --git a/UI/Qt/WindowToolbar.h b/UI/Qt/WindowToolbar.h
+index dd05424c15..22d6812a4d 100644
+--- a/UI/Qt/WindowToolbar.h
++++ b/UI/Qt/WindowToolbar.h
+@@ -33,6 +33,7 @@ class LocationEdit;
+ class PerformanceMonitorWidget;
+ class Popover;
+ class ReloadButton;
++class ToolbarButton;
+ class FieldPanel;
+ class Tab;
+ 
+@@ -77,6 +78,9 @@ public:
+     void update_window_control_icons();
+     void set_vertical_tabs_enabled(bool);
+     void set_bookmarks_bar_below(bool);
++    void set_dynamic_layout(bool dynamic_layout, bool centered_address_bar);
++    void set_dynamic_new_tab_action(QAction*);
++    void set_dynamic_tabs_below(bool);
+ 
+     ToolbarArrangement arrangement() const { return m_arrangement; }
+     // The sidebar's own margin plus the given inset keeps the toolbar's contents clear of the sidebar's edges.
+@@ -153,6 +157,8 @@ private:
+     QWidget* m_suggestions_area { nullptr };
+     bool m_window_controls_visible { false };
+     bool m_window_controls_on_left { false };
++    bool m_dynamic_layout { false };
++    bool m_centered_address_bar { false };
+     int m_sidebar_inset { 0 };
+     int m_sidebar_footer_leading_room { 0 };
+     qreal m_contents_opacity { 1 };
+@@ -179,6 +185,7 @@ private:
+     QAction* m_open_downloads_page_action { nullptr };
+     ReloadButton* m_reload_button { nullptr };
+ 
++    ToolbarButton* m_dynamic_new_tab_button { nullptr };
+     DownloadsButton* m_downloads_button { nullptr };
+     QPointer<DownloadsPopover> m_downloads_popover;
+     size_t m_completed_download_count { 0 };

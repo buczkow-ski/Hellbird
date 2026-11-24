@@ -1,0 +1,97 @@
+diff --git a/Services/Compositor/DirectCompositionWindowServer.cpp b/Services/Compositor/DirectCompositionWindowServer.cpp
+index 987c492a4c..0d3acc3d0b 100644
+--- a/Services/Compositor/DirectCompositionWindowServer.cpp
++++ b/Services/Compositor/DirectCompositionWindowServer.cpp
+@@ -135,7 +135,7 @@ LRESULT CALLBACK ChildWindowThread::parking_window_procedure(HWND window, UINT m
+     switch (message) {
+     case create_child_window_message: {
+         auto child_window = CreateWindowExW(WS_EX_NOPARENTNOTIFY | WS_EX_NOREDIRECTIONBITMAP, child_window_class_name, L"",
+-            WS_CHILDWINDOW | WS_DISABLED | WS_VISIBLE, 0, 0, 1, 1, window, nullptr, GetModuleHandleW(nullptr), nullptr);
++            WS_CHILDWINDOW | WS_DISABLED, 0, 0, 1, 1, window, nullptr, GetModuleHandleW(nullptr), nullptr);
+         if (!child_window)
+             dbgln("Compositor: Unable to create the window of a remote layer: error {}", GetLastError());
+         return reinterpret_cast<LRESULT>(child_window);
+@@ -453,6 +453,7 @@ bool DirectCompositionRemoteLayer::show_frame(Frame frame)
+ 
+ void DirectCompositionRemoteLayer::stop_showing_frame()
+ {
++    ShowWindow(m_window, SW_HIDE);
+     m_frame_visual->SetContent(nullptr);
+     m_frame_visual->RemoveAllVisuals();
+     m_shown_sublayers.clear();
+@@ -635,8 +636,11 @@ void DirectCompositionRemoteLayer::show_changes()
+         SetThreadDpiAwarenessContext(dpi_awareness);
+         m_window_size = m_window_size_to_show;
+     }
+-    if (m_frame_swap_chain)
++    if (m_frame_swap_chain) {
+         m_frame_swap_chain->show_drawing();
++        if (!IsWindowVisible(m_window))
++            ShowWindow(m_window, SW_SHOWNA);
++    }
+     for (auto& [identity, shown_sublayer] : m_shown_sublayers) {
+         if (shown_sublayer.swap_chain)
+             shown_sublayer.swap_chain->show_drawing();
+diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
+index ae55650154..0cc15d53e7 100644
+--- a/UI/Qt/ChromeStyle.cpp
++++ b/UI/Qt/ChromeStyle.cpp
+@@ -2130,6 +2130,12 @@ public:
+ 
+ void install_application_style()
+ {
++#if defined(Q_OS_WIN)
++    auto font = QApplication::font();
++    font.setHintingPreference(QFont::PreferFullHinting);
++    font.setStyleStrategy(static_cast<QFont::StyleStrategy>(font.styleStrategy() | QFont::PreferAntialias));
++    QApplication::setFont(font);
++#endif
+     QApplication::setStyle(new ApplicationStyle);
+ }
+ 
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index f7b026cc55..f41e20eb87 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -192,6 +192,11 @@ Tab::Tab(BrowserWindow* window, DeferredTab deferred_tab)
+ 
+ void Tab::create_tab_shell()
+ {
++    setAutoFillBackground(true);
++    auto tab_palette = palette();
++    tab_palette.setColor(QPalette::Window, Theme::panel().page);
++    setPalette(tab_palette);
++
+     auto* tab_layout = new QBoxLayout(QBoxLayout::Direction::TopToBottom, this);
+     tab_layout->setSpacing(0);
+     tab_layout->setContentsMargins(0, 0, 0, 0);
+diff --git a/UI/Qt/WebContentView.cpp b/UI/Qt/WebContentView.cpp
+index a96dfcf483..125e49bbdb 100644
+--- a/UI/Qt/WebContentView.cpp
++++ b/UI/Qt/WebContentView.cpp
+@@ -148,6 +148,7 @@ WebContentView::WebContentView(QWidget* window, Optional<u64> hub_view_id, WebCo
+     setAttribute(Qt::WA_NativeWindow);
+     setParent(window);
+     setApi(QRhiWidget::Api::Direct3D11);
++    set_page_background_color_to_system_canvas(websites_prefer_dark());
+ #elif defined(LADYBIRD_QT_USE_IOSURFACE_LAYER)
+     // The page is shown by a layer of this widget's own native view, and Qt paints the widget only while that layer does
+     // not cover it (see update_whether_qt_paints_view()).
+diff --git a/UI/Qt/main.cpp b/UI/Qt/main.cpp
+index 60df509824..b441117e3a 100644
+--- a/UI/Qt/main.cpp
++++ b/UI/Qt/main.cpp
+@@ -54,6 +54,13 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
+     }
+ #endif
+ 
++#if defined(AK_OS_WINDOWS)
++    // Qt 6's default DirectWrite font engine on Windows causes uneven glyph spacing (e.g. colliding "sp"/"tt")
++    // and soft stems on raster and translucent widgets. Use GDI metrics unless explicitly overridden.
++    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
++        qputenv("QT_QPA_PLATFORM", "windows:fontengine=gdi");
++#endif
++
+     // The web content view is presented in a native child window. Without this attribute, a widget
+     // gaining a native window would force every other widget in the browser window to become native
+     // as well.
