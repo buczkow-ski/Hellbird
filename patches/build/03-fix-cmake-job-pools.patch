@@ -1,0 +1,20 @@
+diff --git a/Meta/CMake/rust_crate.cmake b/Meta/CMake/rust_crate.cmake
+--- a/Meta/CMake/rust_crate.cmake
++++ b/Meta/CMake/rust_crate.cmake
+@@ -1,4 +1,4 @@
+-set_property(GLOBAL PROPERTY JOB_POOLS "${JOB_POOLS};cargo=1")
++set_property(GLOBAL APPEND PROPERTY JOB_POOLS cargo=1)
+ 
+ # Detect the Rust toolchain.
+ find_program(RUST_CARGO cargo REQUIRED)
+diff --git a/Meta/CMake/use_linker.cmake b/Meta/CMake/use_linker.cmake
+--- a/Meta/CMake/use_linker.cmake
++++ b/Meta/CMake/use_linker.cmake
+@@ -39,6 +39,6 @@
+ endif()
+ 
+ if (LAGOM_LINK_POOL_SIZE)
+-    set_property(GLOBAL PROPERTY JOB_POOLS link_pool=${LAGOM_LINK_POOL_SIZE})
++    set_property(GLOBAL APPEND PROPERTY JOB_POOLS link_pool=${LAGOM_LINK_POOL_SIZE})
+     set(CMAKE_JOB_POOL_LINK link_pool CACHE STRING "Linking job pool")
+ endif()

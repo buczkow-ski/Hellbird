@@ -631,7 +631,7 @@ index aa56a2481d..ba8f293bbb 100644
 +    m_dynamic_new_tab_button = new ToolbarButton(m_toolbar);
 +    m_dynamic_new_tab_button->setObjectName("LadybirdDynamicNewTabButton");
 +    m_dynamic_new_tab_button->set_size(TOOLBAR_BUTTON_SIZE);
-+    m_dynamic_new_tab_button->setIconSize(TOOLBAR_ICON_SIZE);
++    m_dynamic_new_tab_button->setIconSize({ TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE });
 +    m_dynamic_new_tab_button->setAutoRaise(true);
 +    m_dynamic_new_tab_button->setFocusPolicy(Qt::NoFocus);
 +    m_dynamic_new_tab_button->setToolTip("New Tab");
