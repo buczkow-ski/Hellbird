@@ -1,0 +1,3 @@
+# Stage 1: Build system, branding, Freedesktop & Windows packaging
+01-hellbird-build-and-packaging.patch
+02-windows-gui-subsystem-and-presets.patch
