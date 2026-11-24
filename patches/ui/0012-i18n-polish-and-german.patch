@@ -1,0 +1,2868 @@
+diff --git a/Base/res/ladybird/about-pages/about.html b/Base/res/ladybird/about-pages/about.html
+index 25305ba648..b135a7b5ad 100644
+--- a/Base/res/ladybird/about-pages/about.html
++++ b/Base/res/ladybird/about-pages/about.html
+@@ -41,6 +41,7 @@
+                 color: var(--secondary-text-color);
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <h1>List of About URLs</h1>
+diff --git a/Base/res/ladybird/about-pages/bookmarks.html b/Base/res/ladybird/about-pages/bookmarks.html
+index 7481f899cd..0875e0ffd6 100644
+--- a/Base/res/ladybird/about-pages/bookmarks.html
++++ b/Base/res/ladybird/about-pages/bookmarks.html
+@@ -270,6 +270,7 @@
+                 font-size: 13px;
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <nav class="folders" id="folders" aria-label="Bookmark folders">
+@@ -478,11 +479,13 @@
+                 const link = createElement("a", { href: "#", className: "folder-link" });
+                 link.style.paddingLeft = `${10 + depth * 20}px`;
+                 link.innerHTML = FOLDER_SVG;
++                const nameEl = createElement("span", {
++                    className: "name",
++                    textContent: folder ? folder.title || "(no title)" : "Bookmarks bar",
++                });
++                if (folder && folder.title) nameEl.setAttribute("data-no-i18n", "");
+                 link.append(
+-                    createElement("span", {
+-                        className: "name",
+-                        textContent: folder ? folder.title || "(no title)" : "Bookmarks bar",
+-                    }),
++                    nameEl,
+                     createElement("span", { className: "count", textContent: String(children.length) })
+                 );
+                 if (!SEARCH_QUERY && id === CURRENT_FOLDER_ID) link.setAttribute("aria-current", "page");
+@@ -544,6 +547,7 @@
+                     const title = createElement("a", { href: item.url, className: "title", draggable: false });
+                     title.append(...highlightText(item.title || item.url, SEARCH_QUERY));
+                     const detail = createElement("span", { className: "detail" });
++                    detail.setAttribute("data-no-i18n", "");
+                     detail.append(...highlightText(displayUrl(item.url), SEARCH_QUERY));
+                     row.append(favicon, title, detail);
+                 }
+diff --git a/Base/res/ladybird/about-pages/crashes.html b/Base/res/ladybird/about-pages/crashes.html
+index ba120b9b25..d7129c542c 100644
+--- a/Base/res/ladybird/about-pages/crashes.html
++++ b/Base/res/ladybird/about-pages/crashes.html
+@@ -311,6 +311,7 @@
+                 white-space: pre-wrap;
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <header>
+diff --git a/Base/res/ladybird/about-pages/downloads.html b/Base/res/ladybird/about-pages/downloads.html
+index dc3d7579e7..5ac274b23f 100644
+--- a/Base/res/ladybird/about-pages/downloads.html
++++ b/Base/res/ladybird/about-pages/downloads.html
+@@ -172,6 +172,7 @@
+                 }
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <header>
+diff --git a/Base/res/ladybird/about-pages/history.html b/Base/res/ladybird/about-pages/history.html
+index 15b013c20b..93e23837fb 100644
+--- a/Base/res/ladybird/about-pages/history.html
++++ b/Base/res/ladybird/about-pages/history.html
+@@ -224,6 +224,7 @@
+                 border: 0;
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <div class="history-header">
+diff --git a/Base/res/ladybird/about-pages/i18n.js b/Base/res/ladybird/about-pages/i18n.js
+new file mode 100644
+index 0000000000..58f65620a0
+--- /dev/null
++++ b/Base/res/ladybird/about-pages/i18n.js
+@@ -0,0 +1,867 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++(() => {
++    const DICTIONARIES = {
++        pl: {
++            // Common & navigation
++            "Settings": "Ustawienia",
++            "Settings categories": "Kategorie ustawień",
++            "Search settings": "Szukaj w ustawieniach",
++            "No settings match this search.": "Brak ustawień pasujących do wyszukiwania.",
++            "Appearance": "Wygląd",
++            "Search": "Wyszukiwanie",
++            "Startup and browsing": "Uruchamianie i przeglądanie",
++            "Privacy and security": "Prywatność i bezpieczeństwo",
++            "Permissions": "Uprawnienia",
++            "Content blocking": "Blokowanie treści",
++            "Feedback": "Opinie",
++            "Advanced": "Zaawansowane",
++            "System": "Systemowy",
++            "System default": "Domyślny systemowy",
++            "Light": "Jasny",
++            "Dark": "Ciemny",
++            "Always": "Zawsze",
++            "Never": "Nigdy",
++            "Add": "Dodaj",
++            "Remove": "Usuń",
++            "Delete": "Usuń",
++            "Delete all": "Usuń wszystko",
++            "Close": "Zamknij",
++            "Edit…": "Edytuj…",
++            "Clear…": "Wyczyść…",
++            "Copy": "Kopiuj",
++            "Copy URL": "Kopiuj adres URL",
++            "Save changes": "Zapisz zmiany",
++            "Reset all": "Resetuj wszystko",
++            "Restore default": "Przywróć domyślne",
++            "Open folder": "Otwórz folder",
++            "Example": "Przykład",
++            "Optional": "Opcjonalne",
++            "Default": "Domyślny",
++            "Enabled": "Włączone",
++            "Disabled": "Wyłączone",
++            "Active": "Aktywne",
++            "Paused": "Wstrzymane",
++            "Retry": "Ponów",
++            "Show all": "Pokaż wszystko",
++            "Load more": "Wczytaj więcej",
++            "Cancel": "Anuluj",
++            "Done": "Gotowe",
++            "On": "Wł.",
++            "Off": "Wył.",
++            "Saved": "Zapisano",
++            "Allow": "Zezwalaj",
++            "Block": "Blokuj",
++            "Ask": "Pytaj",
++            "Subscribed ✓": "Subskrybowana ✓",
++            "Forget site": "Zapomnij witrynę",
++            "Copied": "Skopiowano",
++            "Copied!": "Skopiowano!",
++            "Open": "Otwórz",
++            "Show in folder": "Pokaż w folderze",
++            "Pause": "Wstrzymaj",
++            "Resume": "Wznów",
++            "Clear": "Wyczyść",
++            "No bookmarks": "Brak zakładek",
++            "No history": "Brak historii",
++
++            // Appearance & language
++            "Interface language": "Język interfejsu",
++            "Choose the language used for menus, settings, and dialogs.": "Wybierz język używany w menu, ustawieniach i oknach dialogowych.",
++            "Accent color": "Kolor akcentu",
++            "Color": "Kolor",
++            "The colors of tabs, toolbars, menus and highlights.": "Kolory kart, pasków narzędzi, menu i podświetleń.",
++            "Ember": "Żar",
++            "Harbor": "Port",
++            "Glacier": "Lodowiec",
++            "Lagoon": "Laguna",
++            "Moss": "Mech",
++            "Saffron": "Szafran",
++            "Copper": "Miedź",
++            "Cherry": "Wiśnia",
++            "Blossom": "Kwiat",
++            "Lavender": "Lawenda",
++            "Websites": "Strony internetowe",
++            "Whether websites are asked to show their light or dark design.": "Określa, czy strony mają wyświetlać jasny, czy ciemny motyw.",
++            "Force dark mode": "Wymuś tryb ciemny",
++            "Darken web pages that don’t provide a dark theme of their own.": "Przyciemniaj strony, które nie oferują własnego ciemnego motywu.",
++            "Overrides…": "Wyjątki…",
++            "Layout": "Układ",
++            "Dynamic": "Dynamiczny",
++            "Classic": "Klasyczny",
++            "Tabs on top": "Karty na górze",
++            "Tabs on the side": "Karty z boku",
++            "Everything in the sidebar": "Wszystko na pasku bocznym",
++            "Centered address bar": "Wyśrodkowany pasek adresu",
++            "Show subtle frame around web pages": "Pokaż subtelną ramkę wokół stron",
++            "Expand vertical tabs on hover when collapsed": "Rozwijaj pionowe karty po najechaniu, gdy są zwinięte",
++            "Sidebar position": "Położenie paska bocznego",
++            "Left": "Po lewej",
++            "Right": "Po prawej",
++            "Show system menu bar": "Pokaż systemowy pasek menu",
++            "Show bookmarks bar": "Pokaż pasek zakładek",
++            "Only when hovering the navigation toolbar": "Tylko po najechaniu na pasek nawigacji",
++            "Default page zoom": "Domyślne powiększenie strony",
++
++            // Search
++            "Search engine": "Wyszukiwarka",
++            "Custom search engines…": "Własne wyszukiwarki…",
++            "Manage custom search engines": "Zarządzaj własnymi wyszukiwarkami",
++            "Search engine name": "Nazwa wyszukiwarki",
++            "Search URL": "Adres URL wyszukiwania",
++            "Use %s as a placeholder for the search query": "Użyj %s jako symbolu zastępczego zapytania",
++            "Suggestions URL (optional)": "Adres URL podpowiedzi (opcjonalny)",
++            "Use %s for the query. The response must use the OpenSearch JSON format.": "Użyj %s dla zapytania. Odpowiedź musi być w formacie OpenSearch JSON.",
++            "Add engine": "Dodaj wyszukiwarkę",
++            "Show search suggestions": "Pokaż podpowiedzi wyszukiwania",
++            "Use !bangs": "Używaj !bangów",
++            "Type !gh ladybird, or ladybird !gh, to search a site directly. Bangs are resolved on this computer, and never reach your search engine.": "Wpisz !gh ladybird lub ladybird !gh, aby przeszukać witrynę bezpośrednio. Bangi są przetwarzane lokalnie i nigdy nie trafiają do wyszukiwarki.",
++
++            // Startup & browsing
++            "Startup": "Uruchamianie",
++            "Default browser": "Domyślna przeglądarka",
++            "Make default": "Ustaw jako domyślną",
++            "Hellbird is your default browser.": "Hellbird jest Twoją domyślną przeglądarką.",
++            "Links from other apps open in Hellbird.": "Linki z innych aplikacji otwierają się w Hellbird.",
++            "Open links from other apps in Hellbird.": "Otwieraj linki z innych aplikacji w Hellbird.",
++            "Restore previous windows and tabs": "Przywracaj poprzednie okna i karty",
++            "New tab page URL": "Adres strony nowej karty",
++            "Browsing": "Przeglądanie",
++            "Use autoscrolling": "Używaj automatycznego przewijania",
++            "Scroll pages by pressing the middle mouse button and moving the mouse.": "Przewijaj strony, naciskając środkowy przycisk myszy i poruszając kursorem.",
++            "Paste with the middle mouse button": "Wklejaj środkowym przyciskiem myszy",
++            "Paste text from the clipboard when the middle mouse button is clicked.": "Wkleja tekst ze schowka po kliknięciu środkowym przyciskiem myszy.",
++            "Languages": "Języki",
++            "Website languages": "Języki stron internetowych",
++            "Languages that websites are asked to use, in order of preference.": "Preferowane języki, w jakich mają wyświetlać się strony internetowe.",
++            "Choose languages for websites in order of preference": "Wybierz preferowane języki dla stron internetowych w kolejności",
++            "Select a language to add…": "Wybierz język do dodania…",
++
++            // Privacy & security
++            "Browsing data": "Dane przeglądania",
++            "Clear browsing data": "Wyczyść dane przeglądania",
++            "Remove browsing data from:": "Usuń dane przeglądania z okresu:",
++            "Last hour": "Ostatnia godzina",
++            "Last 4 hours": "Ostatnie 4 godziny",
++            "Today": "Dzisiaj",
++            "All time": "Od początku",
++            "Browsing history": "Historia przeglądania",
++            "Remove visited pages from history and address bar suggestions": "Usuń odwiedzone strony z historii i podpowiedzi paska adresu",
++            "Download history": "Historia pobierania",
++            "Remove records of downloaded files, but keep the files themselves": "Usuń wpisy o pobranych plikach, ale zachowaj same pliki",
++            "Cookies and site data": "Pliki cookie i dane witryn",
++            "Remove items that may sign you out of most sites": "Usuń dane, co może wylogować Cię z większości stron",
++            "Cached files": "Pliki w pamięci podręcznej",
++            "Remove items that help pages load faster": "Usuń elementy przyspieszające ładowanie stron",
++            "Remove data": "Usuń dane",
++            "Nothing is kept": "Nic nie jest przechowywane",
++            "Global Privacy Control": "Global Privacy Control",
++            "Tell websites not to sell or share your data.": "Informuj strony, aby nie sprzedawały ani nie udostępniały Twoich danych.",
++            "Automatic connections": "Połączenia automatyczne",
++            "Services are automatic connections Hellbird makes for browser features in the background. These controls do not affect normal browsing or actions you explicitly request, such as updating filter lists.": "Usługi to automatyczne połączenia w tle dla funkcji przeglądarki. Te ustawienia nie wpływają na zwykłe przeglądanie ani na działania uruchamiane ręcznie, np. aktualizację list filtrów.",
++            "Allow automatic service connections": "Zezwalaj na automatyczne połączenia usług",
++            "Let individually enabled services connect in the background.": "Pozwalaj indywidualnie włączonym usługom łączyć się w tle.",
++            "Automatic service connections are paused. Individual service choices are preserved.": "Automatyczne połączenia usług są wstrzymane. Indywidualne wybory zostały zachowane.",
++            "Filter list updates": "Aktualizacje list filtrów",
++            "Periodically download updates for enabled filter list subscriptions.": "Okresowo pobieraj aktualizacje włączonych list filtrów.",
++            "Update checks": "Sprawdzanie aktualizacji",
++            "Periodically ask ladybird.org whether a newer Ladybird engine release is available.": "Okresowo sprawdzaj na ladybird.org, czy dostępna jest nowsza wersja silnika Ladybird.",
++            "DNS": "DNS",
++            "System DNS": "Systemowy DNS",
++            "DNS provider": "Dostawca DNS",
++            "Custom DNS server": "Własny serwer DNS",
++            "DNS server (IP or hostname)": "Serwer DNS (IP lub nazwa hosta)",
++            "Type": "Typ",
++            "Port": "Port",
++            "Validate DNSSEC locally": "Weryfikuj DNSSEC lokalnie",
++            "This setting is controlled via the command line": "To ustawienie jest kontrolowane z linii poleceń",
++
++            // Permissions
++            "Autoplay": "Autoodtwarzanie",
++            "Sites can play audio and video on their own.": "Witryny mogą automatycznie odtwarzać dźwięk i wideo.",
++            "Allow audio and video": "Zezwalaj na dźwięk i wideo",
++            "Block audio": "Blokuj dźwięk",
++            "Block audio and video": "Blokuj dźwięk i wideo",
++            "Location": "Lokalizacja",
++            "Sites can ask to know your location.": "Witryny mogą prosić o dostęp do Twojej lokalizacji.",
++            "Notifications": "Powiadomienia",
++            "Sites can ask to send you notifications.": "Witryny mogą prosić o wysyłanie powiadomień.",
++            "Microphone": "Mikrofon",
++            "Sites can ask to use your microphone.": "Witryny mogą prosić o dostęp do mikrofonu.",
++            "Exceptions…": "Wyjątki…",
++            "Site exceptions": "Wyjątki witryn",
++            "Site policy": "Polityka witryny",
++            "Sites without an override use the default setting.": "Witryny bez wyjątków korzystają z ustawienia domyślnego.",
++            "Add site": "Dodaj witrynę",
++            "Remove all sites": "Usuń wszystkie witryny",
++
++            // Content blocking & subscribe
++            "Block ads, trackers and more": "Blokuj reklamy, elementy śledzące i nie tylko",
++            "Filter lists": "Listy filtrów",
++            "Update enabled lists": "Aktualizuj włączone listy",
++            "Add filter list…": "Dodaj listę filtrów…",
++            "Import list…": "Importuj listę…",
++            "Show language-specific lists": "Pokaż listy dla poszczególnych języków",
++            "Custom filters": "Własne filtry",
++            "Add Adblock-compatible rules, one per line.": "Dodaj reguły zgodne z Adblock/uBlock, po jednej w wierszu.",
++            "Add a filter list maintained by a source you trust. Automatic updates reveal your IP address to that source.": "Dodaj listę filtrów z zaufanego źródła. Automatyczne aktualizacje ujawniają temu źródłu Twój adres IP.",
++            "Filter list URL": "Adres URL listy filtrów",
++            "Or import an Adblock-compatible list stored on this computer.": "Lub zaimportuj listę zgodną z Adblock zapisaną na tym komputerze.",
++            "Turned off on": "Wyłączone na",
++            "Filter List Subscription": "Subskrypcja listy filtrów",
++            "Hellbird Shield — Filter List Preview": "Hellbird Shield — Podgląd listy filtrów",
++            "Preview & subscribe to a filter list": "Podgląd i subskrypcja listy filtrów",
++            "Preview": "Podgląd",
++            "Subscribe": "Subskrybuj",
++            "Unsubscribe": "Anuluj subskrypcję",
++            "Subscribed": "Subskrybowana",
++            "Loading filter list…": "Wczytywanie listy filtrów…",
++            "Unable to load filter list": "Nie udało się wczytać listy filtrów",
++            "Find in filter list": "Znajdź na liście filtrów",
++            "Find in filter list…": "Znajdź na liście filtrów…",
++            "Previous match (Shift+Enter)": "Poprzednie dopasowanie (Shift+Enter)",
++            "Next match (Enter)": "Następne dopasowanie (Enter)",
++            "Copy filter list URL": "Kopiuj adres URL listy filtrów",
++            "Show more lines": "Pokaż więcej wierszy",
++            "Enter an HTTP or HTTPS filter list URL (Adblock Plus / uBlock Origin format) to inspect its rules before subscribing. You can also click any": "Wpisz adres HTTP lub HTTPS listy filtrów (format Adblock Plus / uBlock Origin), aby podejrzeć reguły przed subskrypcją. Możesz też kliknąć dowolny link",
++            "link on the web to open it here automatically.": "w sieci, aby otworzyć go tutaj automatycznie.",
++
++            // Feedback & crashes & advanced
++            "Crash reports": "Raporty awarii",
++            "Crash Reports": "Raporty awarii",
++            "Ask me": "Pytaj mnie",
++            "Never send": "Nigdy nie wysyłaj",
++            "Reports are kept on this computer until you review them": "Raporty są przechowywane na tym komputerze, dopóki ich nie przejrzysz",
++            "Review reports": "Przejrzyj raporty",
++            "Open the folder containing saved crash reports.": "Otwórz folder z zapisanymi raportami awarii.",
++            "Show Feedback button in toolbar": "Pokaż przycisk Opinie na pasku narzędzi",
++            "Developer": "Dla programistów",
++            "Filter configuration keys": "Filtruj klucze konfiguracji",
++            "Crash details, Ladybird version and platform.": "Szczegóły awarii, wersja Ladybird i platforma.",
++            "Crash report settings": "Ustawienia raportów awarii",
++            "Include website addresses": "Dołącz adresy odwiedzanych stron",
++            "No crash reports waiting": "Brak oczekujących raportów awarii",
++            "Send": "Wyślij",
++            "Send all": "Wyślij wszystkie",
++            "Show report": "Pokaż raport",
++            "What were you doing? (optional)": "Co robiłeś/aś? (opcjonalne)",
++
++            // Welcome
++            "Welcome": "Witamy",
++            "Welcome to Hellbird": "Witamy w Hellbird",
++            "You can change any of this later in Settings.": "Wszystko to możesz później zmienić w Ustawieniach.",
++            "Start browsing": "Rozpocznij przeglądanie",
++            "Downloads uBlock filters, EasyList, EasyPrivacy, and Peter Lowe's list once you start browsing, and keeps them up to date. If a site breaks, pause Hellbird Shield for that site from the toolbar.": "Pobiera filtry uBlock, EasyList, EasyPrivacy i listę Petera Lowe’a po rozpoczęciu przeglądania i utrzymuje je aktualne. Jeśli strona nie działa poprawnie, wstrzymaj Hellbird Shield dla tej witryny z paska narzędzi.",
++
++            // New Tab
++            "New Tab": "Nowa karta",
++            "Search or enter address": "Szukaj lub wpisz adres",
++            "Enter address": "Wpisz adres",
++            "to search": "aby szukać",
++            "to search a site": "aby przeszukać stronę",
++
++            // Bookmarks, Downloads, History, About, Support, Version
++            "Bookmarks": "Zakładki",
++            "Bookmarks bar": "Pasek zakładek",
++            "Bookmark folders": "Foldery zakładek",
++            "Bookmark options": "Opcje zakładek",
++            "Import from HTML…": "Importuj z HTML…",
++            "Export to HTML…": "Eksportuj do HTML…",
++            "New folder": "Nowy folder",
++            "Search bookmarks": "Szukaj w zakładkach",
++            "Downloads": "Pobrane",
++            "Clear finished": "Wyczyść ukończone",
++            "Loading downloads…": "Wczytywanie pobranych…",
++            "No downloads yet": "Brak pobranych plików",
++            "History": "Historia",
++            "Clear history…": "Wyczyść historię…",
++            "Loading history…": "Wczytywanie historii…",
++            "Search history": "Szukaj w historii",
++            "About URLs": "Strony wewnętrzne",
++            "List of About URLs": "Lista stron wewnętrznych",
++            "Support": "Wsparcie",
++            "Feature": "Funkcja",
++            "Full report": "Pełny raport",
++            "Platform features": "Funkcje platformy",
++            "Process": "Proces",
++            "Status": "Status",
++            "About Hellbird": "O przeglądarce Hellbird",
++            "Version": "Wersja",
++            "Engine": "Silnik",
++            "Built": "Zbudowano",
++            "Platform": "Platforma",
++            "Privacy status": "Status prywatności",
++            "Privacy settings": "Ustawienia prywatności",
++            "Licenses": "Licencje",
++            "Private by default. Powered by the": "Prywatna domyślnie. Napędzana przez",
++            "Hellbird is an independent project. It is not affiliated with the Ladybird Browser Initiative.": "Hellbird jest niezależnym projektem i nie jest powiązany z Ladybird Browser Initiative.",
++        },
++        de: {
++            // Common & navigation
++            "Settings": "Einstellungen",
++            "Settings categories": "Einstellungskategorien",
++            "Search settings": "Einstellungen durchsuchen",
++            "No settings match this search.": "Keine Einstellungen entsprechen dieser Suche.",
++            "Appearance": "Darstellung",
++            "Search": "Suche",
++            "Startup and browsing": "Start und Surfen",
++            "Privacy and security": "Datenschutz und Sicherheit",
++            "Permissions": "Berechtigungen",
++            "Content blocking": "Inhaltsblockierung",
++            "Feedback": "Feedback",
++            "Advanced": "Erweitert",
++            "System": "System",
++            "System default": "Systemstandard",
++            "Light": "Hell",
++            "Dark": "Dunkel",
++            "Always": "Immer",
++            "Never": "Nie",
++            "Add": "Hinzufügen",
++            "Remove": "Entfernen",
++            "Delete": "Löschen",
++            "Delete all": "Alle löschen",
++            "Close": "Schließen",
++            "Edit…": "Bearbeiten…",
++            "Clear…": "Leeren…",
++            "Copy": "Kopieren",
++            "Copy URL": "URL kopieren",
++            "Save changes": "Änderungen speichern",
++            "Reset all": "Alle zurücksetzen",
++            "Restore default": "Standard wiederherstellen",
++            "Open folder": "Ordner öffnen",
++            "Example": "Beispiel",
++            "Optional": "Optional",
++            "Default": "Standard",
++            "Enabled": "Aktiviert",
++            "Disabled": "Deaktiviert",
++            "Active": "Aktiv",
++            "Paused": "Pausiert",
++            "Retry": "Erneut versuchen",
++            "Show all": "Alle anzeigen",
++            "Load more": "Mehr laden",
++            "Cancel": "Abbrechen",
++            "Done": "Fertig",
++            "On": "Ein",
++            "Off": "Aus",
++            "Saved": "Gespeichert",
++            "Allow": "Erlauben",
++            "Block": "Blockieren",
++            "Ask": "Nachfragen",
++            "Subscribed ✓": "Abonniert ✓",
++            "Forget site": "Website vergessen",
++            "Copied": "Kopiert",
++            "Copied!": "Kopiert!",
++            "Open": "Öffnen",
++            "Show in folder": "Im Ordner anzeigen",
++            "Pause": "Pausieren",
++            "Resume": "Fortsetzen",
++            "Clear": "Leeren",
++            "No bookmarks": "Keine Lesezeichen",
++            "No history": "Kein Verlauf",
++
++            // Appearance & language
++            "Interface language": "Sprache der Benutzeroberfläche",
++            "Choose the language used for menus, settings, and dialogs.": "Wähle die Sprache für Menüs, Einstellungen und Dialoge.",
++            "Accent color": "Akzentfarbe",
++            "Color": "Farbe",
++            "The colors of tabs, toolbars, menus and highlights.": "Die Farben von Tabs, Symbolleisten, Menüs und Hervorhebungen.",
++            "Ember": "Glut",
++            "Harbor": "Hafen",
++            "Glacier": "Gletscher",
++            "Lagoon": "Lagune",
++            "Moss": "Moos",
++            "Saffron": "Safran",
++            "Copper": "Kupfer",
++            "Cherry": "Kirsche",
++            "Blossom": "Blüte",
++            "Lavender": "Lavendel",
++            "Websites": "Websites",
++            "Whether websites are asked to show their light or dark design.": "Legt fest, ob Websites um ihr helles oder dunkles Design gebeten werden.",
++            "Force dark mode": "Dunkelmodus erzwingen",
++            "Darken web pages that don’t provide a dark theme of their own.": "Webseiten abdunkeln, die kein eigenes dunkles Design anbieten.",
++            "Overrides…": "Ausnahmen…",
++            "Layout": "Layout",
++            "Dynamic": "Dynamisch",
++            "Classic": "Klassisch",
++            "Tabs on top": "Tabs oben",
++            "Tabs on the side": "Tabs an der Seite",
++            "Everything in the sidebar": "Alles in der Seitenleiste",
++            "Centered address bar": "Zentrierte Adressleiste",
++            "Show subtle frame around web pages": "Dezenten Rahmen um Webseiten anzeigen",
++            "Expand vertical tabs on hover when collapsed": "Vertikale Tabs beim Überfahren ausklappen, wenn minimiert",
++            "Sidebar position": "Position der Seitenleiste",
++            "Left": "Links",
++            "Right": "Rechts",
++            "Show system menu bar": "Systemmenüleiste anzeigen",
++            "Show bookmarks bar": "Lesezeichenleiste anzeigen",
++            "Only when hovering the navigation toolbar": "Nur beim Überfahren der Navigationsleiste",
++            "Default page zoom": "Standard-Seitenzoom",
++
++            // Search
++            "Search engine": "Suchmaschine",
++            "Custom search engines…": "Benutzerdefinierte Suchmaschinen…",
++            "Manage custom search engines": "Benutzerdefinierte Suchmaschinen verwalten",
++            "Search engine name": "Name der Suchmaschine",
++            "Search URL": "Such-URL",
++            "Use %s as a placeholder for the search query": "Verwende %s als Platzhalter für die Suchanfrage",
++            "Suggestions URL (optional)": "Vorschlags-URL (optional)",
++            "Use %s for the query. The response must use the OpenSearch JSON format.": "Verwende %s für die Anfrage. Die Antwort muss im OpenSearch-JSON-Format vorliegen.",
++            "Add engine": "Suchmaschine hinzufügen",
++            "Show search suggestions": "Suchvorschläge anzeigen",
++            "Use !bangs": "!Bangs verwenden",
++            "Type !gh ladybird, or ladybird !gh, to search a site directly. Bangs are resolved on this computer, and never reach your search engine.": "Gib !gh ladybird oder ladybird !gh ein, um direkt auf einer Website zu suchen. Bangs werden lokal aufgelöst und erreichen nie deine Suchmaschine.",
++
++            // Startup & browsing
++            "Startup": "Start",
++            "Default browser": "Standardbrowser",
++            "Make default": "Als Standard festlegen",
++            "Hellbird is your default browser.": "Hellbird ist dein Standardbrowser.",
++            "Links from other apps open in Hellbird.": "Links aus anderen Apps werden in Hellbird geöffnet.",
++            "Open links from other apps in Hellbird.": "Links aus anderen Apps in Hellbird öffnen.",
++            "Restore previous windows and tabs": "Vorherige Fenster und Tabs wiederherstellen",
++            "New tab page URL": "URL der Neuer-Tab-Seite",
++            "Browsing": "Surfen",
++            "Use autoscrolling": "Automatisches Scrollen verwenden",
++            "Scroll pages by pressing the middle mouse button and moving the mouse.": "Seiten durch Drücken der mittleren Maustaste und Bewegen der Maus scrollen.",
++            "Paste with the middle mouse button": "Mit der mittleren Maustaste einfügen",
++            "Paste text from the clipboard when the middle mouse button is clicked.": "Text aus der Zwischenablage beim Klick mit der mittleren Maustaste einfügen.",
++            "Languages": "Sprachen",
++            "Website languages": "Sprachen für Websites",
++            "Languages that websites are asked to use, in order of preference.": "Bevorzugte Sprachen für die Anzeige von Websites.",
++            "Choose languages for websites in order of preference": "Wähle bevorzugte Sprachen für Websites in der gewünschten Reihenfolge",
++            "Select a language to add…": "Sprache zum Hinzufügen auswählen…",
++
++            // Privacy & security
++            "Browsing data": "Browserdaten",
++            "Clear browsing data": "Browserdaten löschen",
++            "Remove browsing data from:": "Browserdaten entfernen aus:",
++            "Last hour": "Letzte Stunde",
++            "Last 4 hours": "Letzte 4 Stunden",
++            "Today": "Heute",
++            "All time": "Gesamter Zeitraum",
++            "Browsing history": "Browserverlauf",
++            "Remove visited pages from history and address bar suggestions": "Besuchte Seiten aus Verlauf und Adressleistenvorschlägen entfernen",
++            "Download history": "Downloadverlauf",
++            "Remove records of downloaded files, but keep the files themselves": "Einträge heruntergeladener Dateien entfernen, Dateien aber behalten",
++            "Cookies and site data": "Cookies und Websitedaten",
++            "Remove items that may sign you out of most sites": "Elemente entfernen, wodurch du von den meisten Websites abgemeldet wirst",
++            "Cached files": "Zwischengespeicherte Dateien",
++            "Remove items that help pages load faster": "Elemente entfernen, die das Laden von Seiten beschleunigen",
++            "Remove data": "Daten entfernen",
++            "Nothing is kept": "Nichts wird gespeichert",
++            "Global Privacy Control": "Global Privacy Control",
++            "Tell websites not to sell or share your data.": "Websites mitteilen, deine Daten nicht zu verkaufen oder weiterzugeben.",
++            "Automatic connections": "Automatische Verbindungen",
++            "Services are automatic connections Hellbird makes for browser features in the background. These controls do not affect normal browsing or actions you explicitly request, such as updating filter lists.": "Dienste sind automatische Hintergrundverbindungen für Browserfunktionen. Diese Einstellungen betreffen weder normales Surfen noch manuell ausgelöste Aktionen wie Filterlisten-Updates.",
++            "Allow automatic service connections": "Automatische Dienstverbindungen erlauben",
++            "Let individually enabled services connect in the background.": "Einzeln aktivierten Diensten Hintergrundverbindungen erlauben.",
++            "Automatic service connections are paused. Individual service choices are preserved.": "Automatische Dienstverbindungen sind pausiert. Einzelne Auswahlen bleiben erhalten.",
++            "Filter list updates": "Filterlisten-Updates",
++            "Periodically download updates for enabled filter list subscriptions.": "Regelmäßig Updates für aktivierte Filterlisten herunterladen.",
++            "Update checks": "Update-Prüfungen",
++            "Periodically ask ladybird.org whether a newer Ladybird engine release is available.": "Regelmäßig bei ladybird.org prüfen, ob eine neuere Ladybird-Engine-Version verfügbar ist.",
++            "DNS": "DNS",
++            "System DNS": "System-DNS",
++            "DNS provider": "DNS-Anbieter",
++            "Custom DNS server": "Benutzerdefinierter DNS-Server",
++            "DNS server (IP or hostname)": "DNS-Server (IP oder Hostname)",
++            "Type": "Typ",
++            "Port": "Port",
++            "Validate DNSSEC locally": "DNSSEC lokal validieren",
++            "This setting is controlled via the command line": "Diese Einstellung wird über die Kommandozeile gesteuert",
++
++            // Permissions
++            "Autoplay": "Automatische Wiedergabe",
++            "Sites can play audio and video on their own.": "Websites können Audio und Video selbstständig wiedergeben.",
++            "Allow audio and video": "Audio und Video erlauben",
++            "Block audio": "Audio blockieren",
++            "Block audio and video": "Audio und Video blockieren",
++            "Location": "Standort",
++            "Sites can ask to know your location.": "Websites können nach deinem Standort fragen.",
++            "Notifications": "Benachrichtigungen",
++            "Sites can ask to send you notifications.": "Websites können fragen, ob sie Benachrichtigungen senden dürfen.",
++            "Microphone": "Mikrofon",
++            "Sites can ask to use your microphone.": "Websites können um Zugriff auf dein Mikrofon bitten.",
++            "Exceptions…": "Ausnahmen…",
++            "Site exceptions": "Website-Ausnahmen",
++            "Site policy": "Website-Richtlinie",
++            "Sites without an override use the default setting.": "Websites ohne Ausnahme verwenden die Standardeinstellung.",
++            "Add site": "Website hinzufügen",
++            "Remove all sites": "Alle Websites entfernen",
++
++            // Content blocking & subscribe
++            "Block ads, trackers and more": "Werbung, Tracker und mehr blockieren",
++            "Filter lists": "Filterlisten",
++            "Update enabled lists": "Aktivierte Listen aktualisieren",
++            "Add filter list…": "Filterliste hinzufügen…",
++            "Import list…": "Liste importieren…",
++            "Show language-specific lists": "Sprachspezifische Listen anzeigen",
++            "Custom filters": "Eigene Filter",
++            "Add Adblock-compatible rules, one per line.": "Adblock-/uBlock-kompatible Regeln hinzufügen, eine pro Zeile.",
++            "Add a filter list maintained by a source you trust. Automatic updates reveal your IP address to that source.": "Füge eine Filterliste einer vertrauenswürdigen Quelle hinzu. Automatische Updates teilen dieser Quelle deine IP-Adresse mit.",
++            "Filter list URL": "Filterlisten-URL",
++            "Or import an Adblock-compatible list stored on this computer.": "Oder importiere eine auf diesem Computer gespeicherte Adblock-kompatible Liste.",
++            "Turned off on": "Deaktiviert auf",
++            "Filter List Subscription": "Filterlisten-Abonnement",
++            "Hellbird Shield — Filter List Preview": "Hellbird Shield — Filterlisten-Vorschau",
++            "Preview & subscribe to a filter list": "Filterliste prüfen & abonnieren",
++            "Preview": "Vorschau",
++            "Subscribe": "Abonnieren",
++            "Unsubscribe": "Abbestellen",
++            "Subscribed": "Abonniert",
++            "Loading filter list…": "Filterliste wird geladen…",
++            "Unable to load filter list": "Filterliste konnte nicht geladen werden",
++            "Find in filter list": "In Filterliste suchen",
++            "Find in filter list…": "In Filterliste suchen…",
++            "Previous match (Shift+Enter)": "Vorheriger Treffer (Umschalt+Enter)",
++            "Next match (Enter)": "Nächster Treffer (Enter)",
++            "Copy filter list URL": "Filterlisten-URL kopieren",
++            "Show more lines": "Weitere Zeilen anzeigen",
++            "Enter an HTTP or HTTPS filter list URL (Adblock Plus / uBlock Origin format) to inspect its rules before subscribing. You can also click any": "Gib eine HTTP- oder HTTPS-URL einer Filterliste (Adblock Plus / uBlock Origin) ein, um ihre Regeln vor dem Abonnieren zu prüfen. Du kannst auch jeden",
++            "link on the web to open it here automatically.": "-Link im Web anklicken, um ihn automatisch hier zu öffnen.",
++
++            // Feedback & crashes & advanced
++            "Crash reports": "Absturzberichte",
++            "Crash Reports": "Absturzberichte",
++            "Ask me": "Nachfragen",
++            "Never send": "Nie senden",
++            "Reports are kept on this computer until you review them": "Berichte bleiben auf diesem Computer gespeichert, bis du sie prüfst",
++            "Review reports": "Berichte prüfen",
++            "Open the folder containing saved crash reports.": "Ordner mit gespeicherten Absturzberichten öffnen.",
++            "Show Feedback button in toolbar": "Feedback-Schaltfläche in der Symbolleiste anzeigen",
++            "Developer": "Entwickler",
++            "Filter configuration keys": "Konfigurationsschlüssel filtern",
++            "Crash details, Ladybird version and platform.": "Absturzdetails, Ladybird-Version und Plattform.",
++            "Crash report settings": "Einstellungen für Absturzberichte",
++            "Include website addresses": "Website-Adressen einschließen",
++            "No crash reports waiting": "Keine ausstehenden Absturzberichte",
++            "Send": "Senden",
++            "Send all": "Alle senden",
++            "Show report": "Bericht anzeigen",
++            "What were you doing? (optional)": "Was hast du gerade getan? (optional)",
++
++            // Welcome
++            "Welcome": "Willkommen",
++            "Welcome to Hellbird": "Willkommen bei Hellbird",
++            "You can change any of this later in Settings.": "Du kannst all dies später in den Einstellungen ändern.",
++            "Start browsing": "Loslegen",
++            "Downloads uBlock filters, EasyList, EasyPrivacy, and Peter Lowe's list once you start browsing, and keeps them up to date. If a site breaks, pause Hellbird Shield for that site from the toolbar.": "Lädt uBlock-Filter, EasyList, EasyPrivacy und Peter Lowes Liste beim Surfen herunter und hält sie aktuell. Falls eine Seite nicht richtig funktioniert, pausiere Hellbird Shield für diese Seite in der Symbolleiste.",
++
++            // New Tab
++            "New Tab": "Neuer Tab",
++            "Search or enter address": "Suchen oder Adresse eingeben",
++            "Enter address": "Adresse eingeben",
++            "to search": "zum Suchen",
++            "to search a site": "zum Durchsuchen einer Website",
++
++            // Bookmarks, Downloads, History, About, Support, Version
++            "Bookmarks": "Lesezeichen",
++            "Bookmarks bar": "Lesezeichenleiste",
++            "Bookmark folders": "Lesezeichenordner",
++            "Bookmark options": "Lesezeichenoptionen",
++            "Import from HTML…": "Aus HTML importieren…",
++            "Export to HTML…": "Als HTML exportieren…",
++            "New folder": "Neuer Ordner",
++            "Search bookmarks": "Lesezeichen durchsuchen",
++            "Downloads": "Downloads",
++            "Clear finished": "Abgeschlossene leeren",
++            "Loading downloads…": "Downloads werden geladen…",
++            "No downloads yet": "Noch keine Downloads",
++            "History": "Verlauf",
++            "Clear history…": "Verlauf löschen…",
++            "Loading history…": "Verlauf wird geladen…",
++            "Search history": "Verlauf durchsuchen",
++            "About URLs": "Interne Seiten",
++            "List of About URLs": "Liste interner Seiten",
++            "Support": "Unterstützung",
++            "Feature": "Funktion",
++            "Full report": "Vollständiger Bericht",
++            "Platform features": "Plattformfunktionen",
++            "Process": "Prozess",
++            "Status": "Status",
++            "About Hellbird": "Über Hellbird",
++            "Version": "Version",
++            "Engine": "Engine",
++            "Built": "Erstellt",
++            "Platform": "Plattform",
++            "Privacy status": "Datenschutzstatus",
++            "Privacy settings": "Datenschutzeinstellungen",
++            "Licenses": "Lizenzen",
++            "Private by default. Powered by the": "Standardmäßig privat. Angetrieben von der",
++            "Hellbird is an independent project. It is not affiliated with the Ladybird Browser Initiative.": "Hellbird ist ein unabhängiges Projekt und steht nicht in Verbindung mit der Ladybird Browser Initiative.",
++        },
++    };
++
++    const NUM = "([\\d.,\\s\\u00a0\\u202f]+)";
++    const PATTERNS = {
++        pl: [
++            [/^Search (.+) or enter address$/, (_, engine) => `Szukaj w ${engine} lub wpisz adres`],
++            [new RegExp(`^${NUM} filters?$`), (_, n) => `${n} filtrów`],
++            [new RegExp(`^${NUM} rules?$`), (_, n) => `${n} reguł`],
++            [new RegExp(`^${NUM} lines?$`), (_, n) => `${n} wierszy`],
++            [new RegExp(`^Showing ${NUM} of ${NUM} lines$`), (_, a, b) => `Wyświetlono ${a} z ${b} wierszy`],
++            [new RegExp(`^${NUM} of ${NUM}$`), (_, a, b) => `${a} z ${b}`],
++            [/^No matches$/, () => "Brak dopasowań"],
++        ],
++        de: [
++            [/^Search (.+) or enter address$/, (_, engine) => `Mit ${engine} suchen oder Adresse eingeben`],
++            [new RegExp(`^${NUM} filters?$`), (_, n) => `${n} Filter`],
++            [new RegExp(`^${NUM} rules?$`), (_, n) => `${n} Regeln`],
++            [new RegExp(`^${NUM} lines?$`), (_, n) => `${n} Zeilen`],
++            [new RegExp(`^Showing ${NUM} of ${NUM} lines$`), (_, a, b) => `${a} von ${b} Zeilen angezeigt`],
++            [new RegExp(`^${NUM} of ${NUM}$`), (_, a, b) => `${a} von ${b}`],
++            [/^No matches$/, () => "Keine Treffer"],
++        ],
++    };
++
++    const originalTextNodes = new WeakMap();
++    const originalAttrs = new WeakMap();
++    const ATTRS = ["placeholder", "title", "aria-label", "data-title"];
++    const SKIP_TAGS = new Set(["SCRIPT", "STYLE", "CODE", "PRE", "TEXTAREA"]);
++    const USER_CONTENT_SELECTOR =
++        "[data-no-i18n], #code-lines, #list-url, #loading-url, .row > .title, .entry-title, .entry-domain, .entry-favicon, .download-title, .download-url, .download-destination";
++    let originalTitle = "";
++    let lastAppliedTitle = "";
++    let configuredPreference = "system";
++    let activeLanguage = "en";
++    let isApplying = false;
++    let scheduled = false;
++    const pendingRoots = new Set();
++
++    function resolveLanguage(pref) {
++        if (pref === "pl" || pref === "de" || pref === "en") return pref;
++        const nav = (navigator.language || "en").toLowerCase();
++        if (nav.startsWith("pl")) return "pl";
++        if (nav.startsWith("de")) return "de";
++        return "en";
++    }
++
++    function translateRaw(text, lang) {
++        if (lang === "en" || !text) return text;
++        const leading = text.match(/^\s*/)[0];
++        const trailing = text.match(/\s*$/)[0];
++        const core = text.trim();
++        if (!core) return text;
++
++        const dict = DICTIONARIES[lang];
++        if (dict && Object.prototype.hasOwnProperty.call(dict, core)) {
++            return leading + dict[core] + trailing;
++        }
++        const normalized = core.replace(/\s+/g, " ");
++        if (dict && Object.prototype.hasOwnProperty.call(dict, normalized)) {
++            return leading + dict[normalized] + trailing;
++        }
++        const patterns = PATTERNS[lang];
++        if (patterns) {
++            for (const [regex, formatter] of patterns) {
++                const match = normalized.match(regex);
++                if (match) return leading + formatter(...match) + trailing;
++            }
++        }
++        return text;
++    }
++
++    function shouldSkipElement(el) {
++        if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
++        return SKIP_TAGS.has(el.tagName) || (typeof el.matches === "function" && el.matches(USER_CONTENT_SELECTOR));
++    }
++
++    function hasSkippedAncestor(node) {
++        let cur = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
++        while (cur) {
++            if (shouldSkipElement(cur)) return true;
++            cur = cur.parentElement;
++        }
++        return false;
++    }
++
++    function translateTextNode(node, lang) {
++        if (hasSkippedAncestor(node)) return;
++        const current = node.nodeValue || "";
++        if (!current.trim()) return;
++
++        let source = originalTextNodes.get(node);
++        if (source === undefined) {
++            source = current;
++            originalTextNodes.set(node, source);
++        } else {
++            const expectedCurrent = translateRaw(source, activeLanguage);
++            if (current !== expectedCurrent && current !== source) {
++                source = current;
++                originalTextNodes.set(node, source);
++            }
++        }
++
++        const next = translateRaw(source, lang);
++        if (next !== current) node.nodeValue = next;
++    }
++
++    function translateElementAttributes(el, lang) {
++        if (shouldSkipElement(el)) return;
++        let saved = originalAttrs.get(el);
++        for (const attr of ATTRS) {
++            if (!el.hasAttribute(attr)) continue;
++            const current = el.getAttribute(attr);
++            if (!saved) {
++                saved = Object.create(null);
++                originalAttrs.set(el, saved);
++            }
++            if (!(attr in saved)) {
++                saved[attr] = current;
++            } else {
++                const expectedCurrent = translateRaw(saved[attr], activeLanguage);
++                if (current !== expectedCurrent && current !== saved[attr]) {
++                    saved[attr] = current;
++                }
++            }
++            const next = translateRaw(saved[attr], lang);
++            if (next !== current) el.setAttribute(attr, next);
++        }
++    }
++
++    function applySubtree(root, lang) {
++        if (!root) return;
++        if (root.nodeType === Node.TEXT_NODE) {
++            translateTextNode(root, lang);
++            return;
++        }
++        if (root.nodeType !== Node.ELEMENT_NODE && root.nodeType !== Node.DOCUMENT_NODE) return;
++        if (root.nodeType === Node.ELEMENT_NODE) {
++            if (hasSkippedAncestor(root)) return;
++            translateElementAttributes(root, lang);
++        }
++
++        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
++            acceptNode(node) {
++                if (node.nodeType === Node.ELEMENT_NODE && shouldSkipElement(node)) {
++                    return NodeFilter.FILTER_REJECT;
++                }
++                return NodeFilter.FILTER_ACCEPT;
++            },
++        });
++        let node = walker.nextNode();
++        while (node) {
++            if (node.nodeType === Node.TEXT_NODE) {
++                translateTextNode(node, lang);
++            } else if (node.nodeType === Node.ELEMENT_NODE) {
++                translateElementAttributes(node, lang);
++            }
++            node = walker.nextNode();
++        }
++    }
++
++    function syncTitle(lang) {
++        const current = document.title || "";
++        if (!originalTitle || (current !== lastAppliedTitle && current !== originalTitle)) {
++            originalTitle = current;
++        }
++        const next = translateRaw(originalTitle, lang);
++        lastAppliedTitle = next;
++        if (next !== current) document.title = next;
++    }
++
++    function applyLanguage(pref) {
++        configuredPreference = pref || "system";
++        const nextLang = resolveLanguage(configuredPreference);
++        isApplying = true;
++        try {
++            document.documentElement.lang = nextLang;
++            syncTitle(nextLang);
++            if (document.body) applySubtree(document.body, nextLang);
++            activeLanguage = nextLang;
++        } finally {
++            isApplying = false;
++        }
++    }
++
++    function flushPending() {
++        scheduled = false;
++        if (isApplying) return;
++        const batch = Array.from(pendingRoots);
++        pendingRoots.clear();
++        isApplying = true;
++        try {
++            syncTitle(activeLanguage);
++            for (const target of batch) {
++                if (target.isConnected) applySubtree(target, activeLanguage);
++            }
++        } finally {
++            isApplying = false;
++        }
++    }
++
++    function scheduleRetranslate(target) {
++        if (target) pendingRoots.add(target);
++        if (scheduled) return;
++        scheduled = true;
++        queueMicrotask(flushPending);
++    }
++
++    const observer = new MutationObserver(records => {
++        if (isApplying) return;
++        for (const record of records) {
++            if (record.type === "childList") {
++                for (const added of record.addedNodes) {
++                    if (!hasSkippedAncestor(added)) scheduleRetranslate(added);
++                }
++            } else if (record.type === "characterData" || record.type === "attributes") {
++                if (!hasSkippedAncestor(record.target)) scheduleRetranslate(record.target);
++            }
++        }
++    });
++
++    const titleObserver = new MutationObserver(() => {
++        if (!isApplying) scheduleRetranslate(null);
++    });
++
++    function start() {
++        applyLanguage(configuredPreference);
++        const titleEl = document.querySelector("title");
++        if (titleEl) {
++            titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true });
++        }
++        if (document.body) {
++            observer.observe(document.body, {
++                childList: true,
++                subtree: true,
++                characterData: true,
++                attributes: true,
++                attributeFilter: ATTRS,
++            });
++        }
++    }
++
++    if (document.readyState === "loading") {
++        document.addEventListener("DOMContentLoaded", start, { once: true });
++    } else {
++        start();
++    }
++
++    document.addEventListener("WebUILoaded", () => {
++        if (typeof ladybird !== "undefined" && typeof ladybird.sendMessage === "function") {
++            ladybird.sendMessage("loadInterfaceLanguage");
++        }
++    });
++
++    document.addEventListener("WebUIMessage", event => {
++        const detail = event.detail;
++        if (!detail) return;
++        if (detail.name === "interfaceLanguageChanged" && typeof detail.data === "string") {
++            applyLanguage(detail.data);
++        } else if (detail.name === "loadSettings" && detail.data?.appearance?.interfaceLanguage) {
++            applyLanguage(detail.data.appearance.interfaceLanguage);
++        }
++    });
++
++    window.hellbirdI18n = {
++        t: text => translateRaw(text, activeLanguage),
++        setLanguage: applyLanguage,
++        get language() {
++            return activeLanguage;
++        },
++    };
++})();
+diff --git a/Base/res/ladybird/about-pages/newtab.html b/Base/res/ladybird/about-pages/newtab.html
+index 72ba82df54..32b1b31005 100644
+--- a/Base/res/ladybird/about-pages/newtab.html
++++ b/Base/res/ladybird/about-pages/newtab.html
+@@ -80,6 +80,7 @@
+                 box-shadow: inset 0 0 0 1px var(--separator);
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <div class="brand">
+diff --git a/Base/res/ladybird/about-pages/settings.html b/Base/res/ladybird/about-pages/settings.html
+index 409eafae19..3c7b5737d4 100644
+--- a/Base/res/ladybird/about-pages/settings.html
++++ b/Base/res/ladybird/about-pages/settings.html
+@@ -932,6 +932,7 @@
+                 }
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <nav class="settings-sidebar">
+@@ -976,6 +977,20 @@
+             <div class="tab-panel active" id="tab-appearance" data-title="Appearance">
+                 <div class="card">
+                     <div class="card-body">
++                        <div class="card-group inline-container control-row">
++                            <label for="interface-language">
++                                Interface language
++                                <p class="description">
++                                    Choose the language used for menus, settings, and dialogs.
++                                </p>
++                            </label>
++                            <select id="interface-language">
++                                <option value="system">System default</option>
++                                <option value="en" data-no-i18n>English</option>
++                                <option value="pl" data-no-i18n>Polski</option>
++                                <option value="de" data-no-i18n>Deutsch</option>
++                            </select>
++                        </div>
+                         <div class="card-group inline-container">
+                             <span>Appearance</span>
+                             <div id="interface-theme" class="segmented" role="radiogroup" aria-label="Appearance">
+diff --git a/Base/res/ladybird/about-pages/settings/appearance.js b/Base/res/ladybird/about-pages/settings/appearance.js
+index 4a4fb5bf0a..dba4add0e0 100644
+--- a/Base/res/ladybird/about-pages/settings/appearance.js
++++ b/Base/res/ladybird/about-pages/settings/appearance.js
+@@ -1,6 +1,7 @@
+ const showMenuBar = document.querySelector("#show-menu-bar");
+ const showMenuBarGroup = document.querySelector("#show-menu-bar-group");
+ const showBookmarksBar = document.querySelector("#show-bookmarks-bar");
++const interfaceLanguage = document.querySelector("#interface-language");
+ const interfaceTheme = document.querySelector("#interface-theme");
+ const websiteColorScheme = document.querySelector("#website-color-scheme");
+ const colorTheme = document.querySelector("#color-theme");
+@@ -28,6 +29,7 @@ const loadSettings = settings => {
+ 
+     showMenuBar.checked = !!APPEARANCE.showMenuBar;
+     showBookmarksBar.value = APPEARANCE.showBookmarksBar || "never";
++    if (interfaceLanguage) interfaceLanguage.value = APPEARANCE.interfaceLanguage || "system";
+     setSegmentedValue(interfaceTheme, APPEARANCE.interfaceTheme || "system");
+     setSegmentedValue(websiteColorScheme, APPEARANCE.websiteColorScheme || "system");
+     setSegmentedValue(colorTheme, APPEARANCE.colorTheme || "ember");
+@@ -47,6 +49,14 @@ showBookmarksBar.addEventListener("change", () => {
+     saveAppearance();
+ });
+ 
++if (interfaceLanguage) {
++    interfaceLanguage.addEventListener("change", () => {
++        APPEARANCE.interfaceLanguage = interfaceLanguage.value;
++        if (window.hellbirdI18n) window.hellbirdI18n.setLanguage(APPEARANCE.interfaceLanguage);
++        saveAppearance();
++    });
++}
++
+ interfaceTheme.addEventListener("change", () => {
+     APPEARANCE.interfaceTheme = segmentedValue(interfaceTheme);
+     saveAppearance();
+diff --git a/Base/res/ladybird/about-pages/subscribe.html b/Base/res/ladybird/about-pages/subscribe.html
+index 2ef94bc39b..8b7ad6e48e 100644
+--- a/Base/res/ladybird/about-pages/subscribe.html
++++ b/Base/res/ladybird/about-pages/subscribe.html
+@@ -434,6 +434,7 @@ SPDX-License-Identifier: BSD-2-Clause
+                 display: none !important;
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <header class="banner">
+@@ -507,7 +508,7 @@ SPDX-License-Identifier: BSD-2-Clause
+                 <button id="retry-btn" class="banner-btn" type="button">Retry</button>
+             </div>
+ 
+-            <div id="code-lines" class="code-lines hidden"></div>
++            <div id="code-lines" class="code-lines hidden" data-no-i18n></div>
+             <div id="load-more-bar" class="load-more-bar hidden">
+                 <span id="load-more-text"></span>
+                 <button id="load-more-btn" type="button">Show more lines</button>
+diff --git a/Base/res/ladybird/about-pages/support.html b/Base/res/ladybird/about-pages/support.html
+index 164bde8a47..32c947b4ad 100644
+--- a/Base/res/ladybird/about-pages/support.html
++++ b/Base/res/ladybird/about-pages/support.html
+@@ -192,6 +192,7 @@
+                 }
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <header>
+diff --git a/Base/res/ladybird/about-pages/version.html b/Base/res/ladybird/about-pages/version.html
+index 7f1e868fe8..d727e59191 100644
+--- a/Base/res/ladybird/about-pages/version.html
++++ b/Base/res/ladybird/about-pages/version.html
+@@ -168,6 +168,7 @@
+                 height: 12px;
+             }
+         </style>
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+     </head>
+     <body>
+         <img
+diff --git a/Base/res/ladybird/about-pages/welcome.html b/Base/res/ladybird/about-pages/welcome.html
+index 009fbca828..e13f129a37 100644
+--- a/Base/res/ladybird/about-pages/welcome.html
++++ b/Base/res/ladybird/about-pages/welcome.html
+@@ -12,6 +12,7 @@ SPDX-License-Identifier: BSD-2-Clause
+         <link rel="stylesheet" href="resource://ladybird/ladybird.css" />
+         <link rel="stylesheet" href="resource://ladybird/about-pages/webui.css" />
+         <link rel="stylesheet" href="resource://ladybird/about-pages/welcome.css" />
++        <script src="resource://ladybird/about-pages/i18n.js" defer></script>
+         <script type="module" src="resource://ladybird/about-pages/welcome.js"></script>
+     </head>
+     <body>
+diff --git a/Libraries/LibWebView/Settings.cpp b/Libraries/LibWebView/Settings.cpp
+index fe7362eede..446a84facf 100644
+--- a/Libraries/LibWebView/Settings.cpp
++++ b/Libraries/LibWebView/Settings.cpp
+@@ -38,6 +38,7 @@ static constexpr auto SHOW_BOOKMARKS_BAR_KEY = "showBookmarksBar"sv;
+ static constexpr auto INTERFACE_THEME_KEY = "interfaceTheme"sv;
+ static constexpr auto WEBSITE_COLOR_SCHEME_KEY = "websiteColorScheme"sv;
+ static constexpr auto COLOR_THEME_KEY = "colorTheme"sv;
++static constexpr auto INTERFACE_LANGUAGE_KEY = "interfaceLanguage"sv;
+ 
+ static constexpr auto WINDOW_SETTINGS_KEY = "window"sv;
+ static constexpr auto WINDOW_POSITION_KEY = "position"sv;
+@@ -313,6 +314,34 @@ static constexpr Optional<ThemePreference> theme_preference_from_string(StringVi
+     return {};
+ }
+ 
++StringView interface_language_to_string(InterfaceLanguage language)
++{
++    switch (language) {
++    case InterfaceLanguage::System:
++        return "system"sv;
++    case InterfaceLanguage::English:
++        return "en"sv;
++    case InterfaceLanguage::Polish:
++        return "pl"sv;
++    case InterfaceLanguage::German:
++        return "de"sv;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++Optional<InterfaceLanguage> interface_language_from_string(StringView language)
++{
++    if (language == "system"sv)
++        return InterfaceLanguage::System;
++    if (language == "en"sv)
++        return InterfaceLanguage::English;
++    if (language == "pl"sv)
++        return InterfaceLanguage::Polish;
++    if (language == "de"sv)
++        return InterfaceLanguage::German;
++    return {};
++}
++
+ static constexpr StringView color_theme_to_string(ColorTheme theme)
+ {
+     switch (theme) {
+@@ -856,6 +885,7 @@ JsonValue Settings::serialize_json() const
+     appearance.set(INTERFACE_THEME_KEY, theme_preference_to_string(m_appearance.interface_theme));
+     appearance.set(WEBSITE_COLOR_SCHEME_KEY, theme_preference_to_string(m_appearance.website_color_scheme));
+     appearance.set(COLOR_THEME_KEY, color_theme_to_string(m_appearance.color_theme));
++    appearance.set(INTERFACE_LANGUAGE_KEY, interface_language_to_string(m_appearance.interface_language));
+     settings.set(APPEARANCE_KEY, move(appearance));
+ 
+     JsonObject zoom_per_host;
+@@ -1165,6 +1195,10 @@ Appearance Settings::parse_appearance(JsonValue const& settings)
+         if (auto parsed = color_theme_from_string(*color_theme); parsed.has_value())
+             appearance.color_theme = *parsed;
+     }
++    if (auto interface_language = settings.as_object().get_string(INTERFACE_LANGUAGE_KEY); interface_language.has_value()) {
++        if (auto parsed = interface_language_from_string(*interface_language); parsed.has_value())
++            appearance.interface_language = *parsed;
++    }
+ 
+     return appearance;
+ }
+diff --git a/Libraries/LibWebView/Settings.h b/Libraries/LibWebView/Settings.h
+index 545f35d033..d8aa332472 100644
+--- a/Libraries/LibWebView/Settings.h
++++ b/Libraries/LibWebView/Settings.h
+@@ -45,6 +45,16 @@ enum class ThemePreference : u8 {
+     Dark,
+ };
+ 
++enum class InterfaceLanguage : u8 {
++    System,
++    English,
++    Polish,
++    German,
++};
++
++WEBVIEW_API StringView interface_language_to_string(InterfaceLanguage);
++WEBVIEW_API Optional<InterfaceLanguage> interface_language_from_string(StringView);
++
+ // The colors of the browser's own tabs, toolbars and menus. Each theme is made from one or two base colors.
+ // NB: Ember keeps every surface neutral too, and only its highlights are colored. Neutral follows the system's accent.
+ #define ENUMERATE_COLOR_THEMES(X) \
+@@ -72,6 +82,7 @@ struct Appearance {
+     ThemePreference interface_theme { ThemePreference::System };
+     ThemePreference website_color_scheme { ThemePreference::System };
+     ColorTheme color_theme { ColorTheme::Ember };
++    InterfaceLanguage interface_language { InterfaceLanguage::System };
+ };
+ 
+ enum class HostSetting : u8 {
+diff --git a/Libraries/LibWebView/WebUI.cpp b/Libraries/LibWebView/WebUI.cpp
+index 220698b083..672196486a 100644
+--- a/Libraries/LibWebView/WebUI.cpp
++++ b/Libraries/LibWebView/WebUI.cpp
+@@ -7,6 +7,8 @@
+ #include <AK/NeverDestroyed.h>
+ #include <LibIPC/Transport.h>
+ #include <LibIPC/TransportHandle.h>
++#include <LibWebView/Application.h>
++#include <LibWebView/Settings.h>
+ #include <LibWebView/WebContentClient.h>
+ #include <LibWebView/WebContentPage.h>
+ #include <LibWebView/WebUI.h>
+@@ -116,16 +118,47 @@ ErrorOr<RefPtr<WebUI>> WebUI::create(WebContentClient& client, Web::PageId page_
+     return web_ui;
+ }
+ 
++class WebUIInterfaceLanguageObserver final : public SettingsObserver {
++public:
++    explicit WebUIInterfaceLanguageObserver(WebUI& web_ui)
++        : SettingsObserver(Application::settings())
++        , m_web_ui(web_ui)
++        , m_last_language(Application::settings().appearance().interface_language)
++    {
++    }
++
++private:
++    virtual void appearance_changed() override
++    {
++        auto current = Application::settings().appearance().interface_language;
++        if (current == m_last_language)
++            return;
++        m_last_language = current;
++        m_web_ui.send_interface_language();
++    }
++
++    WebUI& m_web_ui;
++    InterfaceLanguage m_last_language;
++};
++
+ WebUI::WebUI(WebContentClient& client, Web::PageId page_id, NonnullOwnPtr<IPC::Transport> transport, String host)
+     : IPC::ConnectionToServer<WebUIClientEndpoint, WebUIServerEndpoint>(*this, move(transport))
+     , m_client(client)
+     , m_page_id(page_id)
+     , m_host(move(host))
+ {
++    m_interface_language_observer = make<WebUIInterfaceLanguageObserver>(*this);
+ }
+ 
+ WebUI::~WebUI() = default;
+ 
++void WebUI::send_interface_language()
++{
++    if (!has_client())
++        return;
++    async_send_message("interfaceLanguageChanged"_string, JsonValue { interface_language_to_string(Application::settings().appearance().interface_language) });
++}
++
+ void WebUI::die()
+ {
+     if (auto client = m_client.strong_ref())
+@@ -144,6 +177,11 @@ void WebUI::received_message(String name, JsonValue data)
+     if (!has_client())
+         return;
+ 
++    if (name == "loadInterfaceLanguage"sv) {
++        send_interface_language();
++        return;
++    }
++
+     auto interface = m_interfaces.get(name);
+     if (!interface.has_value()) {
+         warnln("Received message from WebUI for unrecognized interface: {}", name);
+diff --git a/Libraries/LibWebView/WebUI.h b/Libraries/LibWebView/WebUI.h
+index 49f9c2a8be..0884fd687f 100644
+--- a/Libraries/LibWebView/WebUI.h
++++ b/Libraries/LibWebView/WebUI.h
+@@ -11,6 +11,7 @@
+ #include <AK/JsonValue.h>
+ #include <AK/NonnullRefPtr.h>
+ #include <AK/Optional.h>
++#include <AK/OwnPtr.h>
+ #include <AK/RefPtr.h>
+ #include <AK/Span.h>
+ #include <AK/String.h>
+@@ -26,6 +27,8 @@
+ 
+ namespace WebView {
+ 
++class SettingsObserver;
++
+ class WEBVIEW_API WebUI
+     : public IPC::ConnectionToServer<WebUIClientEndpoint, WebUIServerEndpoint>
+     , public WebUIClientEndpoint {
+@@ -53,6 +56,7 @@ public:
+ 
+     String const& host() const { return m_host; }
+     Web::PageId page_id() const { return m_page_id; }
++    void send_interface_language();
+ 
+ protected:
+     WebUI(WebContentClient&, Web::PageId, NonnullOwnPtr<IPC::Transport>, String host);
+@@ -76,6 +80,7 @@ private:
+     String m_host;
+ 
+     HashMap<StringView, Interface> m_interfaces;
++    OwnPtr<SettingsObserver> m_interface_language_observer;
+ };
+ 
+ #define WEB_UI(WebUIType)                                                                                                                       \
+diff --git a/Libraries/LibWebView/WebUI/ApplicationWebUI.cpp b/Libraries/LibWebView/WebUI/ApplicationWebUI.cpp
+index 70f7f8c510..765c6b8435 100644
+--- a/Libraries/LibWebView/WebUI/ApplicationWebUI.cpp
++++ b/Libraries/LibWebView/WebUI/ApplicationWebUI.cpp
+@@ -53,7 +53,13 @@ void ApplicationWebUI::register_interfaces()
+ 
+ void ApplicationWebUI::received_message(String name, JsonValue data)
+ {
+-    if (has_client() && callbacks().on_message)
++    if (!has_client())
++        return;
++    if (name == "loadInterfaceLanguage"sv) {
++        send_interface_language();
++        return;
++    }
++    if (callbacks().on_message)
+         callbacks().on_message(m_id, move(name), move(data));
+ }
+ 
+diff --git a/UI/Qt/AllTabsPopover.cpp b/UI/Qt/AllTabsPopover.cpp
+index 07eb29ff0b..ad6fa5fa5f 100644
+--- a/UI/Qt/AllTabsPopover.cpp
++++ b/UI/Qt/AllTabsPopover.cpp
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <UI/Qt/AllTabsPopover.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/Theme.h>
+@@ -295,7 +296,7 @@ void AllTabsPopover::set_recently_closed(Vector<Entry> entries)
+ 
+ void AllTabsPopover::set_tabs(Vector<Entry> entries)
+ {
+-    m_search_field->setPlaceholderText(QString("Search %1 tabs").arg(entries.size()));
++    m_search_field->setPlaceholderText(tr_ui(QString("Search %1 tabs").arg(entries.size())));
+     // NB: The search and the tab picked with the keyboard stay as they were while the list is filled again for tabs that
+     //     open, close or change behind it. If that tab is gone, the highlight starts over.
+     QPointer<QObject> keyboard_tab = isVisible() ? m_tab_list->keyboard_tab() : nullptr;
+diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
+index 39746b801d..f0a266cd5b 100644
+--- a/UI/Qt/Application.cpp
++++ b/UI/Qt/Application.cpp
+@@ -62,6 +62,7 @@
+ #include <UI/Qt/ExternalURLHandler.h>
+ #include <UI/Qt/HistoryPage.h>
+ #include <UI/Qt/Menu.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/PageCard.h>
+ #include <UI/Qt/PictureInPictureWindow.h>
+ #include <UI/Qt/PlainText.h>
+@@ -394,6 +395,7 @@ public:
+ 
+         auto make_action = [&](QString const& text) {
+             auto* action = new QAction(text, m_application_widget);
++            bind_localized_text(*action, text);
+             action->setShortcutVisibleInContextMenu(true);
+             return action;
+         };
+@@ -554,6 +556,7 @@ public:
+         m_debug_menu = create_application_menu(*m_application_widget, application.debug_menu());
+ 
+         m_help_menu = new QMenu("Help", m_application_widget);
++        bind_localized_title(*m_help_menu, QStringLiteral("Help"));
+         if (WebView::ReportSubmission::has_report_server()) {
+             m_help_menu->addAction(create_application_action(*m_application_widget, application.report_website_issue_action(), IncludeActionIcon::No));
+             m_help_menu->addSeparator();
+@@ -622,7 +625,7 @@ public:
+         if (!m_reopen_recently_closed_tab_action)
+             return;
+ 
+-        m_reopen_recently_closed_tab_action->setText("&Reopen Closed Tab");
++        bind_localized_text(*m_reopen_recently_closed_tab_action, QStringLiteral("&Reopen Closed Tab"));
+         auto* active_window = Application::the().active_window_if_any();
+         auto& session = active_window ? active_window->session() : Application::session_store(WebView::IsPrivate::No);
+         m_reopen_recently_closed_tab_action->setEnabled(session.has_closed_units());
+@@ -1687,9 +1690,9 @@ void Application::offer_to_restore_unexpectedly_closed_tabs(BrowserWindow& windo
+     };
+     auto question = tab_count == 1 ? QStringLiteral("Restore the tab you had open?") : qformatted("Restore the {} tabs you had open?", tab_count);
+     Vector<PageCard::Button> buttons;
+-    buttons.append({ "Not now", PageCard::ButtonRole::Secondary, {} });
+-    buttons.append({ "Restore tabs", PageCard::ButtonRole::Primary, AK::move(restore_tabs) });
+-    window.show_page_card(BrowserWindow::PageCardSlot::RestoreSession, "Hellbird quit unexpectedly", question, AK::move(buttons));
++    buttons.append({ tr_ui("Not now"), PageCard::ButtonRole::Secondary, {} });
++    buttons.append({ tr_ui("Restore tabs"), PageCard::ButtonRole::Primary, AK::move(restore_tabs) });
++    window.show_page_card(BrowserWindow::PageCardSlot::RestoreSession, tr_ui("Hellbird quit unexpectedly"), tr_ui(question), AK::move(buttons));
+ }
+ 
+ void Application::open_startup_tabs(BrowserWindow& window, Vector<URL::URL> const& urls)
+@@ -2449,7 +2452,7 @@ void Application::display_update_check_result(WebView::UpdateCheckResult::Kind k
+ 
+     Vector<PageCard::Button> buttons;
+     // A version skipped for the debug action would also be skipped when it is offered for real.
+-    buttons.append({ "Skip", PageCard::ButtonRole::Secondary, [version = *version, trigger] {
++    buttons.append({ tr_ui("Skip"), PageCard::ButtonRole::Secondary, [version = *version, trigger] {
+                         if (trigger != WebView::UpdateCheckTrigger::Debug)
+                             HubConnection::the().async_skip_update_version(version);
+                     } });
+@@ -2457,11 +2460,11 @@ void Application::display_update_check_result(WebView::UpdateCheckResult::Kind k
+     auto text = qformatted("You have Ladybird {}.", current_version);
+     if (first_is_one_of(install_method, WebView::InstallMethod::DEB, WebView::InstallMethod::RPM, WebView::InstallMethod::Flatpak)) {
+         text = qformatted("You have Ladybird {}. Update it with your system's software updater.", current_version);
+-        buttons.append({ "Remind me later", PageCard::ButtonRole::Primary, {} });
++        buttons.append({ tr_ui("Remind me later"), PageCard::ButtonRole::Primary, {} });
+ #    if defined(LADYBIRD_HAS_SPARKLE)
+     } else if (install_method == WebView::InstallMethod::MacOSApp) {
+-        buttons.append({ "Remind me later", PageCard::ButtonRole::Secondary, {} });
+-        buttons.append({ "Install update", PageCard::ButtonRole::Primary, [trigger] {
++        buttons.append({ tr_ui("Remind me later"), PageCard::ButtonRole::Secondary, {} });
++        buttons.append({ tr_ui("Install update"), PageCard::ButtonRole::Primary, [trigger] {
+                             auto* software_updater = Application::the().software_updater();
+                             if (!software_updater)
+                                 return;
+@@ -2472,14 +2475,14 @@ void Application::display_update_check_result(WebView::UpdateCheckResult::Kind k
+                         } });
+ #    endif
+     } else {
+-        buttons.append({ "Remind me later", PageCard::ButtonRole::Secondary, {} });
+-        buttons.append({ "View release", PageCard::ButtonRole::Primary, [url = WebView::release_page_url(*version)] {
++        buttons.append({ tr_ui("Remind me later"), PageCard::ButtonRole::Secondary, {} });
++        buttons.append({ tr_ui("View release"), PageCard::ButtonRole::Primary, [url = WebView::release_page_url(*version)] {
+                             if (auto release_page = URL::Parser::basic_parse(url); release_page.has_value())
+                                 Application::the().open_url_in_new_tab(*release_page, Web::HTML::ActivateTab::Yes, {}, WebView::IsPrivate::No);
+                         } });
+     }
+ 
+-    window->show_page_card(BrowserWindow::PageCardSlot::Update, qformatted("Ladybird {} is available", *version), text, move(buttons));
++    window->show_page_card(BrowserWindow::PageCardSlot::Update, tr_ui(qformatted("Ladybird {} is available", *version)), tr_ui(text), move(buttons));
+ }
+ #endif
+ 
+@@ -2527,13 +2530,13 @@ void Application::offer_restart_after_update()
+         return;
+ 
+     Vector<PageCard::Button> buttons;
+-    buttons.append({ "Not now", PageCard::ButtonRole::Secondary, {} });
+-    buttons.append({ "Restart", PageCard::ButtonRole::Primary, [] { Application::the().restart(); } });
++    buttons.append({ tr_ui("Not now"), PageCard::ButtonRole::Secondary, {} });
++    buttons.append({ tr_ui("Restart"), PageCard::ButtonRole::Primary, [] { Application::the().restart(); } });
+     // A temporary profile is gone once Ladybird quits, and its windows and tabs with it. A session that could not be
+     // saved, as when its database would not open, is gone as well.
+     auto reopens = !m_profile_is_temporary && m_session_store && m_session_store->is_persistent();
+     auto text = reopens ? "Restart Hellbird to use the new version. Your windows and tabs will reopen, except private ones."_string : "Restart Hellbird to use the new version."_string;
+-    window->show_page_card(BrowserWindow::PageCardSlot::Update, "Hellbird was updated", qstring_from_ak_string(text), move(buttons));
++    window->show_page_card(BrowserWindow::PageCardSlot::Update, tr_ui("Hellbird was updated"), tr_ui(qstring_from_ak_string(text)), move(buttons));
+ }
+ 
+ void Application::restart()
+@@ -2985,6 +2988,7 @@ QMenuBar* Application::create_application_menu_bar(ForBrowserWindow for_browser_
+     auto* menu_bar = new QMenuBar();
+ 
+     auto* file_menu = menu_bar->addMenu("&File");
++    bind_localized_title(*file_menu, QStringLiteral("&File"));
+     file_menu->addAction(new_tab_action());
+     file_menu->addAction(new_window_action());
+     file_menu->addAction(new_private_window_action());
+@@ -3000,6 +3004,7 @@ QMenuBar* Application::create_application_menu_bar(ForBrowserWindow for_browser_
+     file_menu->addAction(quit_action());
+ 
+     auto* edit_menu = menu_bar->addMenu("&Edit");
++    bind_localized_title(*edit_menu, QStringLiteral("&Edit"));
+     if (for_browser_window == ForBrowserWindow::Yes) {
+         edit_menu->addAction(create_application_action(*menu_bar, application.undo_action(), IncludeActionIcon::No));
+         edit_menu->addAction(create_application_action(*menu_bar, application.redo_action(), IncludeActionIcon::No));
+@@ -3022,6 +3027,7 @@ QMenuBar* Application::create_application_menu_bar(ForBrowserWindow for_browser_
+     edit_menu->addAction(open_settings_action());
+ 
+     auto* view_menu = menu_bar->addMenu("&View");
++    bind_localized_title(*view_menu, QStringLiteral("&View"));
+     if (for_browser_window == ForBrowserWindow::Yes) {
+         view_menu->addAction(open_next_tab_action());
+         view_menu->addAction(open_previous_tab_action());
+@@ -3045,6 +3051,7 @@ QMenuBar* Application::create_application_menu_bar(ForBrowserWindow for_browser_
+         view_menu->addSeparator();
+ 
+         auto* zoom_menu = view_menu->addMenu("&Zoom");
++        bind_localized_title(*zoom_menu, QStringLiteral("&Zoom"));
+         zoom_menu->addAction(zoom_in_action());
+         zoom_menu->addAction(zoom_out_action());
+         zoom_menu->addAction(reset_zoom_action());
+@@ -3052,6 +3059,7 @@ QMenuBar* Application::create_application_menu_bar(ForBrowserWindow for_browser_
+         // The translation menu is the active tab's, so it's filled in as it opens.
+         if (Application::the().has_translator()) {
+             auto* translation_menu = view_menu->addMenu("&Translation");
++            bind_localized_title(*translation_menu, QStringLiteral("&Translation"));
+             QObject::connect(translation_menu, &QMenu::aboutToShow, translation_menu, [translation_menu] {
+                 if (auto* tab = Application::the().active_tab())
+                     repopulate_application_menu(*translation_menu, tab->view().translation_menu());
+@@ -3079,6 +3087,7 @@ QMenuBar* Application::create_application_menu_bar(ForBrowserWindow for_browser_
+         // NB: The Task Manager needs no browser window, so it can be opened while none is focused, such as right after
+         //     it was closed.
+         auto* inspect_menu = menu_bar->addMenu("&Inspect");
++        bind_localized_title(*inspect_menu, QStringLiteral("&Inspect"));
+         inspect_menu->addAction(create_application_action(*inspect_menu, *m_open_task_manager_action, IncludeActionIcon::No));
+     }
+     menu_bar->addMenu(help_menu());
+diff --git a/UI/Qt/Application.h b/UI/Qt/Application.h
+index 127f55228f..3ab52cfe63 100644
+--- a/UI/Qt/Application.h
++++ b/UI/Qt/Application.h
+@@ -100,6 +100,7 @@ public:
+     Function<void(Vector<URL::URL> const&)> on_new_tab;
+     Function<void(Vector<URL::URL> const&)> on_new_window;
+     static WebView::Settings& settings() { return *s_the->m_settings; }
++    static WebView::Settings* settings_if_available() { return s_the ? s_the->m_settings.ptr() : nullptr; }
+     static Bookmarks& bookmarks() { return *s_the->m_bookmarks; }
+     static BookmarkStore& bookmark_store() { return *s_the->m_bookmark_store; }
+ 
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index 86a557d26c..c4cbfca984 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -25,6 +25,7 @@
+ #include <UI/Qt/HubConnection.h>
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/LadybirdButton.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/Menu.h>
+ #include <UI/Qt/Motion.h>
+ #include <UI/Qt/Popover.h>
+@@ -553,6 +554,7 @@ void BrowserWindow::initialize_ladybird_menu()
+     m_ladybird_menu->addAction(application.reopen_recently_closed_tab_action());
+     if (m_is_private == WebView::IsPrivate::Yes) {
+         auto* restart_private_session_action = m_ladybird_menu->addAction("Start a Fresh Private Session…");
++        bind_localized_text(*restart_private_session_action, QStringLiteral("Start a Fresh Private Session\u2026"));
+         QObject::connect(restart_private_session_action, &QAction::triggered, this, [this] {
+             if (m_current_tab)
+                 m_current_tab->show_private_session_popover();
+@@ -563,6 +565,7 @@ void BrowserWindow::initialize_ladybird_menu()
+     m_ladybird_menu->addMenu(application.history_menu());
+     m_ladybird_menu->addMenu(application.bookmarks_menu());
+     auto* downloads_action = m_ladybird_menu->addAction("Downloads");
++    bind_localized_text(*downloads_action, QStringLiteral("Downloads"));
+     downloads_action->setShortcutVisibleInContextMenu(true);
+     // NB: The application's own downloads action owns the shortcut. This item only shows it.
+ #if defined(AK_OS_MACOS)
+@@ -615,9 +618,11 @@ void BrowserWindow::initialize_window_context_menu()
+     m_window_context_menu = new QMenu(this);
+ 
+     auto* new_tab_action = m_window_context_menu->addAction("New &Tab");
++    bind_localized_text(*new_tab_action, QStringLiteral("New &Tab"));
+     QObject::connect(new_tab_action, &QAction::triggered, this, &BrowserWindow::open_new_tab);
+ 
+     m_reopen_closed_tab_action = m_window_context_menu->addAction("&Reopen Closed Tab");
++    bind_localized_text(*m_reopen_closed_tab_action, QStringLiteral("&Reopen Closed Tab"));
+     QObject::connect(m_reopen_closed_tab_action, &QAction::triggered, this, [this] {
+         Application::the().reopen_recently_closed_tab(this);
+     });
+@@ -625,6 +630,7 @@ void BrowserWindow::initialize_window_context_menu()
+     m_window_context_menu->addSeparator();
+ 
+     m_always_on_top_action = m_window_context_menu->addAction("Always on T&op");
++    bind_localized_text(*m_always_on_top_action, QStringLiteral("Always on T&op"));
+     m_always_on_top_action->setCheckable(true);
+     QObject::connect(m_always_on_top_action, &QAction::triggered, this, &BrowserWindow::set_always_on_top);
+ 
+@@ -632,9 +638,11 @@ void BrowserWindow::initialize_window_context_menu()
+ 
+     // The tab layouts of Settings, with the sidebar's side made part of the choice.
+     auto* tab_layout_menu = m_window_context_menu->addMenu("Tab &Layout");
++    bind_localized_title(*tab_layout_menu, QStringLiteral("Tab &Layout"));
+     m_tab_layout_actions = new QActionGroup(this);
+     auto add_tab_layout = [&](char const* text, TabLayoutChoice choice) {
+         auto* action = tab_layout_menu->addAction(text);
++        bind_localized_text(*action, QString::fromUtf8(text));
+         action->setCheckable(true);
+         action->setData(to_underlying(choice));
+         m_tab_layout_actions->addAction(action);
+@@ -2030,6 +2038,7 @@ void BrowserWindow::appearance_changed()
+ {
+     SystemAppearance::the().apply_interface_theme(Application::settings().appearance().interface_theme);
+     SystemAppearance::the().apply_color_theme(Application::settings().appearance().color_theme);
++    refresh_localized_qt_controls();
+     update_menu_bar_visibility();
+ 
+     m_tabs_container->update_bookmarks_bar_visibility();
+diff --git a/UI/Qt/CMakeLists.txt b/UI/Qt/CMakeLists.txt
+index 7e291cdf29..af81ebd894 100644
+--- a/UI/Qt/CMakeLists.txt
++++ b/UI/Qt/CMakeLists.txt
+@@ -43,6 +43,7 @@ add_library(ladybird_impl STATIC
+     InputMethodUtils.cpp
+     JavaScriptDialog.cpp
+     LadybirdButton.cpp
++    Localization.cpp
+     LocationEdit.cpp
+     Menu.cpp
+     NativeTextEditingLineEdit.cpp
+diff --git a/UI/Qt/FindInPageWidget.cpp b/UI/Qt/FindInPageWidget.cpp
+index 663a2186dd..aad4b5520f 100644
+--- a/UI/Qt/FindInPageWidget.cpp
++++ b/UI/Qt/FindInPageWidget.cpp
+@@ -7,6 +7,7 @@
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/FindInPageWidget.h>
+ #include <UI/Qt/Icon.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/Motion.h>
+ #include <UI/Qt/NativeTextEditingLineEdit.h>
+ #include <UI/Qt/Popover.h>
+@@ -90,8 +91,8 @@ FindInPageWidget::FindInPageWidget(Tab* tab, WebContentView* content_view)
+     m_find_text = new NativeTextEditingLineEdit(field);
+     m_find_text->setObjectName("LadybirdFindInPageText");
+     m_find_text->setFocusPolicy(Qt::FocusPolicy::StrongFocus);
+-    m_find_text->setPlaceholderText("Find in page");
+-    m_find_text->setAccessibleName("Find in page");
++    bind_localized_placeholder(*m_find_text, QStringLiteral("Find in page"));
++    m_find_text->setAccessibleName(tr_ui("Find in page"));
+     connect(m_find_text, &QLineEdit::textChanged, this, &FindInPageWidget::find_text_changed);
+     field_layout->addWidget(m_find_text, 1);
+ 
+@@ -336,7 +337,7 @@ void FindInPageWidget::update_result_label(size_t current_match_index, Optional<
+         if (total_match_count.value() > 0)
+             label_text = MUST(String::formatted("{} of {}", current_match_index + 1, total_match_count.value()));
+ 
+-        m_result_label->setText(qstring_from_ak_string(label_text));
++        m_result_label->setText(tr_ui(qstring_from_ak_string(label_text)));
+         m_result_label->setVisible(true);
+     } else {
+         set_has_no_matches(false);
+diff --git a/UI/Qt/Localization.cpp b/UI/Qt/Localization.cpp
+new file mode 100644
+index 0000000000..381219e205
+--- /dev/null
++++ b/UI/Qt/Localization.cpp
+@@ -0,0 +1,744 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <UI/Qt/Application.h>
++#include <UI/Qt/Localization.h>
++#include <UI/Qt/StringUtils.h>
++
++#include <QAbstractButton>
++#include <QAction>
++#include <QHash>
++#include <QLabel>
++#include <QLineEdit>
++#include <QLocale>
++#include <QMenu>
++#include <QObject>
++#include <QRegularExpression>
++#include <QWidget>
++
++namespace Ladybird {
++
++namespace {
++
++struct LocalizationRegistry {
++    QHash<QAction*, QString> action_texts;
++    QHash<QAction*, QString> action_tooltips;
++    QHash<QMenu*, QString> menu_titles;
++    QHash<QLabel*, QString> label_texts;
++    QHash<QAbstractButton*, QString> button_texts;
++    QHash<QLineEdit*, QString> placeholders;
++    QHash<QWidget*, QString> widget_tooltips;
++    Optional<WebView::InterfaceLanguage> last_refreshed_language;
++};
++
++LocalizationRegistry& registry()
++{
++    static LocalizationRegistry s_registry;
++    return s_registry;
++}
++
++template<typename Object>
++void bind_entry(QHash<Object*, QString>& map, Object& object, QString const& source)
++{
++    bool is_new = !map.contains(&object);
++    map.insert(&object, source);
++    if (is_new) {
++        QObject::connect(&object, &QObject::destroyed, [&map, ptr = &object]() {
++            map.remove(ptr);
++        });
++    }
++}
++
++QString strip_mnemonic(QString const& text)
++{
++    QString result;
++    result.reserve(text.size());
++    for (qsizetype i = 0; i < text.size(); ++i) {
++        if (text[i] == QLatin1Char('&')) {
++            if (i + 1 < text.size() && text[i + 1] == QLatin1Char('&')) {
++                result.append(QLatin1Char('&'));
++                ++i;
++            }
++            continue;
++        }
++        result.append(text[i]);
++    }
++    return result;
++}
++
++QHash<QString, QString> const& polish_table()
++{
++    static QHash<QString, QString> const table = {
++        // Top-level menus
++        { QStringLiteral("&File"), QStringLiteral("&Plik") },
++        { QStringLiteral("File"), QStringLiteral("Plik") },
++        { QStringLiteral("&Edit"), QStringLiteral("&Edycja") },
++        { QStringLiteral("Edit"), QStringLiteral("Edycja") },
++        { QStringLiteral("&View"), QStringLiteral("&Widok") },
++        { QStringLiteral("View"), QStringLiteral("Widok") },
++        { QStringLiteral("History"), QStringLiteral("Historia") },
++        { QStringLiteral("Bookmarks"), QStringLiteral("Zakładki") },
++        { QStringLiteral("&Inspect"), QStringLiteral("&Inspekcja") },
++        { QStringLiteral("Inspect"), QStringLiteral("Inspekcja") },
++        { QStringLiteral("Debug"), QStringLiteral("Debugowanie") },
++        { QStringLiteral("Help"), QStringLiteral("Pomoc") },
++        { QStringLiteral("&Zoom"), QStringLiteral("&Powiększenie") },
++        { QStringLiteral("Zoom"), QStringLiteral("Powiększenie") },
++        { QStringLiteral("&Translation"), QStringLiteral("&Tłumaczenie") },
++        { QStringLiteral("Color Scheme"), QStringLiteral("Motyw kolorystyczny") },
++        { QStringLiteral("Contrast"), QStringLiteral("Kontrast") },
++        { QStringLiteral("Motion"), QStringLiteral("Ruch") },
++        { QStringLiteral("Tab &Layout"), QStringLiteral("&Układ kart") },
++        { QStringLiteral("Show Bookmarks Bar"), QStringLiteral("Pokaż pasek zakładek") },
++
++        // File & window actions
++        { QStringLiteral("New &Tab"), QStringLiteral("Nowa &karta") },
++        { QStringLiteral("New Tab"), QStringLiteral("Nowa karta") },
++        { QStringLiteral("New &Window"), QStringLiteral("Nowe &okno") },
++        { QStringLiteral("New Window"), QStringLiteral("Nowe okno") },
++        { QStringLiteral("New Pri&vate Window"), QStringLiteral("Nowe okno &prywatne") },
++        { QStringLiteral("New Private Window"), QStringLiteral("Nowe okno prywatne") },
++        { QStringLiteral("&Reopen Closed Tab"), QStringLiteral("&Przywróć zamkniętą kartę") },
++        { QStringLiteral("Reopen Closed Tab"), QStringLiteral("Przywróć zamkniętą kartę") },
++        { QStringLiteral("&Close Current Tab"), QStringLiteral("&Zamknij bieżącą kartę") },
++        { QStringLiteral("Open &Next Tab"), QStringLiteral("&Następna karta") },
++        { QStringLiteral("Open &Previous Tab"), QStringLiteral("&Poprzednia karta") },
++        { QStringLiteral("&Search Tabs\u2026"), QStringLiteral("&Szukaj kart\u2026") },
++        { QStringLiteral("Move &Focus Between Toolbar and Page"), QStringLiteral("Przełącz &fokus między paskiem a stroną") },
++        { QStringLiteral("&Open File\u2026"), QStringLiteral("&Otwórz plik\u2026") },
++        { QStringLiteral("Open &Location\u2026"), QStringLiteral("Otwórz &adres\u2026") },
++        { QStringLiteral("Copy Page &URL"), QStringLiteral("Kopiuj &adres strony") },
++        { QStringLiteral("&Quit"), QStringLiteral("&Zakończ") },
++        { QStringLiteral("Start a Fresh Private Session\u2026"), QStringLiteral("Rozpocznij nową sesję prywatną\u2026") },
++
++        // Edit & View actions
++        { QStringLiteral("Undo"), QStringLiteral("Cofnij") },
++        { QStringLiteral("Redo"), QStringLiteral("Ponów") },
++        { QStringLiteral("Cut"), QStringLiteral("Wytnij") },
++        { QStringLiteral("Copy"), QStringLiteral("Kopiuj") },
++        { QStringLiteral("Paste"), QStringLiteral("Wklej") },
++        { QStringLiteral("Paste and Match Style"), QStringLiteral("Wklej bez formatowania") },
++        { QStringLiteral("Select All"), QStringLiteral("Zaznacz wszystko") },
++        { QStringLiteral("&Find in Page\u2026"), QStringLiteral("&Znajdź na stronie\u2026") },
++        { QStringLiteral("Find &Next"), QStringLiteral("Znajdź &następne") },
++        { QStringLiteral("Find Pre&vious"), QStringLiteral("Znajdź &poprzednie") },
++        { QStringLiteral("Settings"), QStringLiteral("Ustawienia") },
++        { QStringLiteral("Downloads"), QStringLiteral("Pobrane") },
++        { QStringLiteral("Reload"), QStringLiteral("Odśwież") },
++        { QStringLiteral("Reload Without Cache"), QStringLiteral("Odśwież bez pamięci podręcznej") },
++        { QStringLiteral("&Stop"), QStringLiteral("&Zatrzymaj") },
++        { QStringLiteral("Stop"), QStringLiteral("Zatrzymaj") },
++        { QStringLiteral("Stop loading this page"), QStringLiteral("Zatrzymaj ładowanie strony") },
++        { QStringLiteral("Back"), QStringLiteral("Wstecz") },
++        { QStringLiteral("Forward"), QStringLiteral("Dalej") },
++        { QStringLiteral("Zoom In"), QStringLiteral("Powiększ") },
++        { QStringLiteral("Zoom Out"), QStringLiteral("Pomniejsz") },
++        { QStringLiteral("Reset Zoom"), QStringLiteral("Resetuj powiększenie") },
++        { QStringLiteral("Force Dark Mode"), QStringLiteral("Wymuś tryb ciemny") },
++        { QStringLiteral("Show Sidebar"), QStringLiteral("Pokaż pasek boczny") },
++        { QStringLiteral("Hide Sidebar"), QStringLiteral("Ukryj pasek boczny") },
++        { QStringLiteral("Show Menu Bar"), QStringLiteral("Pokaż pasek menu") },
++        { QStringLiteral("Auto"), QStringLiteral("Automatycznie") },
++        { QStringLiteral("Dark"), QStringLiteral("Ciemny") },
++        { QStringLiteral("Light"), QStringLiteral("Jasny") },
++        { QStringLiteral("Less"), QStringLiteral("Mniejszy") },
++        { QStringLiteral("More"), QStringLiteral("Większy") },
++        { QStringLiteral("Reduce"), QStringLiteral("Ogranicz") },
++        { QStringLiteral("No Preference"), QStringLiteral("Bez preferencji") },
++        { QStringLiteral("View History"), QStringLiteral("Pokaż historię") },
++        { QStringLiteral("Clear Browsing Data"), QStringLiteral("Wyczyść dane przeglądania") },
++        { QStringLiteral("View Page Source"), QStringLiteral("Pokaż źródło strony") },
++        { QStringLiteral("Enable DevTools"), QStringLiteral("Włącz narzędzia deweloperskie") },
++        { QStringLiteral("Disable DevTools"), QStringLiteral("Wyłącz narzędzia deweloperskie") },
++        { QStringLiteral("Task Manager"), QStringLiteral("Menedżer zadań") },
++        { QStringLiteral("Open Task Manager"), QStringLiteral("Otwórz menedżer zadań") },
++        { QStringLiteral("About Hellbird"), QStringLiteral("O przeglądarce Hellbird") },
++        { QStringLiteral("About Ladybird"), QStringLiteral("O przeglądarce Hellbird") },
++        { QStringLiteral("Check for Updates\u2026"), QStringLiteral("Sprawdź aktualizacje\u2026") },
++        { QStringLiteral("Report Website Issue\u2026"), QStringLiteral("Zgłoś problem ze stroną\u2026") },
++
++        // Bookmarks & page context menus
++        { QStringLiteral("Add Bookmark"), QStringLiteral("Dodaj zakładkę") },
++        { QStringLiteral("Add Bookmark\u2026"), QStringLiteral("Dodaj zakładkę\u2026") },
++        { QStringLiteral("Remove Bookmark"), QStringLiteral("Usuń zakładkę") },
++        { QStringLiteral("Edit Bookmark\u2026"), QStringLiteral("Edytuj zakładkę\u2026") },
++        { QStringLiteral("Toggle Bookmark"), QStringLiteral("Przełącz zakładkę") },
++        { QStringLiteral("Bookmark All Tabs\u2026"), QStringLiteral("Dodaj wszystkie karty do zakładek\u2026") },
++        { QStringLiteral("Manage Bookmarks"), QStringLiteral("Zarządzaj zakładkami") },
++        { QStringLiteral("New Folder\u2026"), QStringLiteral("Nowy folder\u2026") },
++        { QStringLiteral("Edit Folder\u2026"), QStringLiteral("Edytuj folder\u2026") },
++        { QStringLiteral("Delete Folder"), QStringLiteral("Usuń folder") },
++        { QStringLiteral("Open All in Tabs"), QStringLiteral("Otwórz wszystkie w kartach") },
++        { QStringLiteral("(Empty)"), QStringLiteral("(Pusty)") },
++        { QStringLiteral("Edit\u2026"), QStringLiteral("Edytuj\u2026") },
++        { QStringLiteral("Delete"), QStringLiteral("Usuń") },
++        { QStringLiteral("Open in New Tab"), QStringLiteral("Otwórz w nowej karcie") },
++        { QStringLiteral("Open in New Window"), QStringLiteral("Otwórz w nowym oknie") },
++        { QStringLiteral("Open in Private Window"), QStringLiteral("Otwórz w oknie prywatnym") },
++        { QStringLiteral("Open Link in New Tab"), QStringLiteral("Otwórz link w nowej karcie") },
++        { QStringLiteral("Open Link in New Window"), QStringLiteral("Otwórz link w nowym oknie") },
++        { QStringLiteral("Open Link in Private Window"), QStringLiteral("Otwórz link w oknie prywatnym") },
++        { QStringLiteral("Copy Link"), QStringLiteral("Kopiuj link") },
++        { QStringLiteral("Copy Link Address"), QStringLiteral("Kopiuj adres linku") },
++        { QStringLiteral("Download Linked File"), QStringLiteral("Pobierz plik z linku") },
++        { QStringLiteral("Save Link As\u2026"), QStringLiteral("Zapisz link jako\u2026") },
++        { QStringLiteral("Copy Image"), QStringLiteral("Kopiuj obraz") },
++        { QStringLiteral("Copy Image Address"), QStringLiteral("Kopiuj adres obrazu") },
++        { QStringLiteral("Open Image"), QStringLiteral("Otwórz obraz") },
++        { QStringLiteral("Open Image in New Tab"), QStringLiteral("Otwórz obraz w nowej karcie") },
++        { QStringLiteral("Save Image As\u2026"), QStringLiteral("Zapisz obraz jako\u2026") },
++        { QStringLiteral("Copy Video Address"), QStringLiteral("Kopiuj adres wideo") },
++        { QStringLiteral("Copy Audio Address"), QStringLiteral("Kopiuj adres dźwięku") },
++        { QStringLiteral("Open Video"), QStringLiteral("Otwórz wideo") },
++        { QStringLiteral("Open Video in New Tab"), QStringLiteral("Otwórz wideo w nowej karcie") },
++        { QStringLiteral("Open Audio"), QStringLiteral("Otwórz dźwięk") },
++        { QStringLiteral("Open Audio in New Tab"), QStringLiteral("Otwórz dźwięk w nowej karcie") },
++        { QStringLiteral("Play"), QStringLiteral("Odtwórz") },
++        { QStringLiteral("Mute"), QStringLiteral("Wycisz") },
++        { QStringLiteral("Unmute"), QStringLiteral("Wyłącz wyciszenie") },
++        { QStringLiteral("Show Controls"), QStringLiteral("Pokaż kontrolki") },
++        { QStringLiteral("Hide Controls"), QStringLiteral("Ukryj kontrolki") },
++        { QStringLiteral("Loop"), QStringLiteral("Zapętl") },
++        { QStringLiteral("Picture in Picture"), QStringLiteral("Obraz w obrazie") },
++        { QStringLiteral("Exit Picture in Picture"), QStringLiteral("Zamknij obraz w obrazie") },
++        { QStringLiteral("Full Screen"), QStringLiteral("Pełny ekran") },
++        { QStringLiteral("Exit Full Screen"), QStringLiteral("Opuść pełny ekran") },
++        { QStringLiteral("Inspect Element"), QStringLiteral("Zbadaj element") },
++        { QStringLiteral("Take Screenshot..."), QStringLiteral("Zrób zrzut ekranu…") },
++        { QStringLiteral("Take Screenshot\u2026"), QStringLiteral("Zrób zrzut ekranu\u2026") },
++        { QStringLiteral("Look Up"), QStringLiteral("Sprawdź w słowniku") },
++        { QStringLiteral("No Guesses Found"), QStringLiteral("Brak podpowiedzi") },
++        { QStringLiteral("Ignore Spelling"), QStringLiteral("Ignoruj pisownię") },
++        { QStringLiteral("Learn Spelling"), QStringLiteral("Dodaj do słownika") },
++        { QStringLiteral("Always"), QStringLiteral("Zawsze") },
++        { QStringLiteral("Never"), QStringLiteral("Nigdy") },
++        { QStringLiteral("Only When Hovering the Navigation Toolbar"), QStringLiteral("Tylko po najechaniu na pasek nawigacji") },
++
++        // Tab & window context menus
++        { QStringLiteral("&Duplicate Tab"), QStringLiteral("&Duplikuj kartę") },
++        { QStringLiteral("&Pin Tab"), QStringLiteral("&Przypnij kartę") },
++        { QStringLiteral("&Unpin Tab"), QStringLiteral("&Odepnij kartę") },
++        { QStringLiteral("Un&pin Tab"), QStringLiteral("&Odepnij kartę") },
++        { QStringLiteral("Unpin Tab"), QStringLiteral("Odepnij kartę") },
++        { QStringLiteral("&Mute Tab"), QStringLiteral("&Wycisz kartę") },
++        { QStringLiteral("Un&mute Tab"), QStringLiteral("&Wyłącz wyciszenie karty") },
++        { QStringLiteral("Move to New &Window"), QStringLiteral("Przenieś do nowego &okna") },
++        { QStringLiteral("Copy &URL"), QStringLiteral("Kopiuj &adres URL") },
++        { QStringLiteral("&Close Tab"), QStringLiteral("&Zamknij kartę") },
++        { QStringLiteral("Cl&ose Other Tabs"), QStringLiteral("Zamknij &inne karty") },
++        { QStringLiteral("New Tab to the &Right"), QStringLiteral("Nowa karta po &prawej") },
++        { QStringLiteral("New Tab &Below"), QStringLiteral("Nowa karta &poniżej") },
++        { QStringLiteral("Close Tabs to the &Left"), QStringLiteral("Zamknij karty po &lewej") },
++        { QStringLiteral("Close Tabs &Above"), QStringLiteral("Zamknij karty &powyżej") },
++        { QStringLiteral("Close Tabs to the R&ight"), QStringLiteral("Zamknij karty po p&rawej") },
++        { QStringLiteral("Close Tabs B&elow"), QStringLiteral("Zamknij karty p&oniżej") },
++        { QStringLiteral("Always on T&op"), QStringLiteral("Zawsze na &wierzchu") },
++        { QStringLiteral("&Dynamic"), QStringLiteral("&Dynamiczny") },
++        { QStringLiteral("Along the &Top (Classic)"), QStringLiteral("Na &górze (Klasyczny)") },
++        { QStringLiteral("Down the &Left Side"), QStringLiteral("Po &lewej stronie") },
++        { QStringLiteral("Down the &Right Side"), QStringLiteral("Po &prawej stronie") },
++        { QStringLiteral("In the &Sidebar"), QStringLiteral("Na &pasku bocznym") },
++
++        // Toolbar, omnibox, find bar, window buttons
++        { QStringLiteral("Search or enter address"), QStringLiteral("Szukaj lub wpisz adres") },
++        { QStringLiteral("All Tabs"), QStringLiteral("Wszystkie karty") },
++        { QStringLiteral("Minimize"), QStringLiteral("Minimalizuj") },
++        { QStringLiteral("Maximize"), QStringLiteral("Maksymalizuj") },
++        { QStringLiteral("Restore"), QStringLiteral("Przywróć") },
++        { QStringLiteral("Close"), QStringLiteral("Zamknij") },
++        { QStringLiteral("Find in page"), QStringLiteral("Znajdź na stronie") },
++        { QStringLiteral("No matches"), QStringLiteral("Brak dopasowań") },
++        { QStringLiteral("Pause"), QStringLiteral("Wstrzymaj") },
++        { QStringLiteral("Resume"), QStringLiteral("Wznów") },
++        { QStringLiteral("Send feedback"), QStringLiteral("Wyślij opinię") },
++        { QStringLiteral("Using your location"), QStringLiteral("Używa Twojej lokalizacji") },
++        { QStringLiteral("Using your microphone"), QStringLiteral("Używa Twojego mikrofonu") },
++
++        // PageCard (crash recovery & updates)
++        { QStringLiteral("Hellbird quit unexpectedly"), QStringLiteral("Hellbird został nieoczekiwanie zamknięty") },
++        { QStringLiteral("Restore the tab you had open?"), QStringLiteral("Przywrócić ostatnio otwartą kartę?") },
++        { QStringLiteral("Not now"), QStringLiteral("Nie teraz") },
++        { QStringLiteral("Restore tabs"), QStringLiteral("Przywróć karty") },
++        { QStringLiteral("Hellbird was updated"), QStringLiteral("Hellbird został zaktualizowany") },
++        { QStringLiteral("Restart Hellbird to use the new version."), QStringLiteral("Uruchom ponownie Hellbird, aby korzystać z nowej wersji.") },
++        { QStringLiteral("Restart Hellbird to use the new version. Your windows and tabs will reopen, except private ones."), QStringLiteral("Uruchom ponownie Hellbird, aby korzystać z nowej wersji. Okna i karty zostaną przywrócone, z wyjątkiem prywatnych.") },
++        { QStringLiteral("Restart"), QStringLiteral("Uruchom ponownie") },
++        { QStringLiteral("Skip"), QStringLiteral("Pomiń") },
++        { QStringLiteral("Remind me later"), QStringLiteral("Przypomnij później") },
++        { QStringLiteral("Install update"), QStringLiteral("Zainstaluj aktualizację") },
++        { QStringLiteral("View release"), QStringLiteral("Zobacz wydanie") },
++
++        // Hellbird Shield popover & tooltip
++        { QStringLiteral("Blocked on page"), QStringLiteral("Zablokowane na stronie") },
++        { QStringLiteral("Blocked domains"), QStringLiteral("Zablokowane domeny") },
++        { QStringLiteral("Quick filter"), QStringLiteral("Szybki filtr") },
++        { QStringLiteral("Add custom filter (e.g. ||ads.site.com^)"), QStringLiteral("Dodaj własny filtr (np. ||ads.site.com^)") },
++        { QStringLiteral("Add"), QStringLiteral("Dodaj") },
++        { QStringLiteral("Global shield"), QStringLiteral("Globalna tarcza") },
++        { QStringLiteral("Filter lists && rules"), QStringLiteral("Listy filtrów i reguły") },
++        { QStringLiteral("Filter lists and rules"), QStringLiteral("Listy filtrów i reguły") },
++        { QStringLiteral("Active"), QStringLiteral("Aktywna") },
++        { QStringLiteral("Paused"), QStringLiteral("Wstrzymana") },
++        { QStringLiteral("Standby"), QStringLiteral("Czuwanie") },
++        { QStringLiteral("Off"), QStringLiteral("Wyłączona") },
++        { QStringLiteral("Not a website"), QStringLiteral("To nie jest witryna") },
++        { QStringLiteral("No filter lists are loaded yet"), QStringLiteral("Nie wczytano jeszcze list filtrów") },
++        { QStringLiteral("Standby on internal page"), QStringLiteral("Czuwanie na stronie wewnętrznej") },
++        { QStringLiteral("Protection disabled globally"), QStringLiteral("Ochrona wyłączona globalnie") },
++        { QStringLiteral("No trackers or ads blocked on this page yet."), QStringLiteral("Na tej stronie nie zablokowano jeszcze żadnych reklam ani trackerów.") },
++        { QStringLiteral("Nothing is being blocked on this page."), QStringLiteral("Na tej stronie nic nie jest blokowane.") },
++        { QStringLiteral("Rule already exists"), QStringLiteral("Reguła już istnieje") },
++        { QStringLiteral("Custom filters are full"), QStringLiteral("Limit własnych filtrów został osiągnięty") },
++        { QStringLiteral("Rule added"), QStringLiteral("Dodano regułę") },
++        { QStringLiteral("Hellbird Shield \u2014 Disabled"), QStringLiteral("Hellbird Shield \u2014 Wyłączona") },
++    };
++    return table;
++}
++
++QHash<QString, QString> const& german_table()
++{
++    static QHash<QString, QString> const table = {
++        // Top-level menus
++        { QStringLiteral("&File"), QStringLiteral("&Datei") },
++        { QStringLiteral("File"), QStringLiteral("Datei") },
++        { QStringLiteral("&Edit"), QStringLiteral("&Bearbeiten") },
++        { QStringLiteral("Edit"), QStringLiteral("Bearbeiten") },
++        { QStringLiteral("&View"), QStringLiteral("&Ansicht") },
++        { QStringLiteral("View"), QStringLiteral("Ansicht") },
++        { QStringLiteral("History"), QStringLiteral("Verlauf") },
++        { QStringLiteral("Bookmarks"), QStringLiteral("Lesezeichen") },
++        { QStringLiteral("&Inspect"), QStringLiteral("&Untersuchen") },
++        { QStringLiteral("Inspect"), QStringLiteral("Untersuchen") },
++        { QStringLiteral("Debug"), QStringLiteral("Debuggen") },
++        { QStringLiteral("Help"), QStringLiteral("Hilfe") },
++        { QStringLiteral("&Zoom"), QStringLiteral("&Zoom") },
++        { QStringLiteral("Zoom"), QStringLiteral("Zoom") },
++        { QStringLiteral("&Translation"), QStringLiteral("&Übersetzung") },
++        { QStringLiteral("Color Scheme"), QStringLiteral("Farbschema") },
++        { QStringLiteral("Contrast"), QStringLiteral("Kontrast") },
++        { QStringLiteral("Motion"), QStringLiteral("Bewegung") },
++        { QStringLiteral("Tab &Layout"), QStringLiteral("Tab-&Layout") },
++        { QStringLiteral("Show Bookmarks Bar"), QStringLiteral("Lesezeichenleiste anzeigen") },
++
++        // File & window actions
++        { QStringLiteral("New &Tab"), QStringLiteral("Neuer &Tab") },
++        { QStringLiteral("New Tab"), QStringLiteral("Neuer Tab") },
++        { QStringLiteral("New &Window"), QStringLiteral("Neues &Fenster") },
++        { QStringLiteral("New Window"), QStringLiteral("Neues Fenster") },
++        { QStringLiteral("New Pri&vate Window"), QStringLiteral("Neues pri&vates Fenster") },
++        { QStringLiteral("New Private Window"), QStringLiteral("Neues privates Fenster") },
++        { QStringLiteral("&Reopen Closed Tab"), QStringLiteral("Geschlossenen Tab &wieder öffnen") },
++        { QStringLiteral("Reopen Closed Tab"), QStringLiteral("Geschlossenen Tab wieder öffnen") },
++        { QStringLiteral("&Close Current Tab"), QStringLiteral("Aktuellen Tab s&chließen") },
++        { QStringLiteral("Open &Next Tab"), QStringLiteral("&Nächster Tab") },
++        { QStringLiteral("Open &Previous Tab"), QStringLiteral("&Vorheriger Tab") },
++        { QStringLiteral("&Search Tabs\u2026"), QStringLiteral("Tabs &durchsuchen\u2026") },
++        { QStringLiteral("Move &Focus Between Toolbar and Page"), QStringLiteral("&Fokus zwischen Leiste und Seite wechseln") },
++        { QStringLiteral("&Open File\u2026"), QStringLiteral("Datei &öffnen\u2026") },
++        { QStringLiteral("Open &Location\u2026"), QStringLiteral("&Adresse öffnen\u2026") },
++        { QStringLiteral("Copy Page &URL"), QStringLiteral("Seiten-&URL kopieren") },
++        { QStringLiteral("&Quit"), QStringLiteral("&Beenden") },
++        { QStringLiteral("Start a Fresh Private Session\u2026"), QStringLiteral("Neue private Sitzung starten\u2026") },
++
++        // Edit & View actions
++        { QStringLiteral("Undo"), QStringLiteral("Rückgängig") },
++        { QStringLiteral("Redo"), QStringLiteral("Wiederholen") },
++        { QStringLiteral("Cut"), QStringLiteral("Ausschneiden") },
++        { QStringLiteral("Copy"), QStringLiteral("Kopieren") },
++        { QStringLiteral("Paste"), QStringLiteral("Einfügen") },
++        { QStringLiteral("Paste and Match Style"), QStringLiteral("Unformatiert einfügen") },
++        { QStringLiteral("Select All"), QStringLiteral("Alles auswählen") },
++        { QStringLiteral("&Find in Page\u2026"), QStringLiteral("Auf Seite &suchen\u2026") },
++        { QStringLiteral("Find &Next"), QStringLiteral("&Weitersuchen") },
++        { QStringLiteral("Find Pre&vious"), QStringLiteral("&Rückwärts suchen") },
++        { QStringLiteral("Settings"), QStringLiteral("Einstellungen") },
++        { QStringLiteral("Downloads"), QStringLiteral("Downloads") },
++        { QStringLiteral("Reload"), QStringLiteral("Neu laden") },
++        { QStringLiteral("Reload Without Cache"), QStringLiteral("Ohne Cache neu laden") },
++        { QStringLiteral("&Stop"), QStringLiteral("&Stopp") },
++        { QStringLiteral("Stop"), QStringLiteral("Stopp") },
++        { QStringLiteral("Stop loading this page"), QStringLiteral("Laden dieser Seite abbrechen") },
++        { QStringLiteral("Back"), QStringLiteral("Zurück") },
++        { QStringLiteral("Forward"), QStringLiteral("Vorwärts") },
++        { QStringLiteral("Zoom In"), QStringLiteral("Vergrößern") },
++        { QStringLiteral("Zoom Out"), QStringLiteral("Verkleinern") },
++        { QStringLiteral("Reset Zoom"), QStringLiteral("Zoom zurücksetzen") },
++        { QStringLiteral("Force Dark Mode"), QStringLiteral("Dunkelmodus erzwingen") },
++        { QStringLiteral("Show Sidebar"), QStringLiteral("Seitenleiste anzeigen") },
++        { QStringLiteral("Hide Sidebar"), QStringLiteral("Seitenleiste ausblenden") },
++        { QStringLiteral("Show Menu Bar"), QStringLiteral("Menüleiste anzeigen") },
++        { QStringLiteral("Auto"), QStringLiteral("Automatisch") },
++        { QStringLiteral("Dark"), QStringLiteral("Dunkel") },
++        { QStringLiteral("Light"), QStringLiteral("Hell") },
++        { QStringLiteral("Less"), QStringLiteral("Weniger") },
++        { QStringLiteral("More"), QStringLiteral("Mehr") },
++        { QStringLiteral("Reduce"), QStringLiteral("Reduzieren") },
++        { QStringLiteral("No Preference"), QStringLiteral("Keine Präferenz") },
++        { QStringLiteral("View History"), QStringLiteral("Verlauf anzeigen") },
++        { QStringLiteral("Clear Browsing Data"), QStringLiteral("Browserdaten löschen") },
++        { QStringLiteral("View Page Source"), QStringLiteral("Seitenquelltext anzeigen") },
++        { QStringLiteral("Enable DevTools"), QStringLiteral("Entwicklertools aktivieren") },
++        { QStringLiteral("Disable DevTools"), QStringLiteral("Entwicklertools deaktivieren") },
++        { QStringLiteral("Task Manager"), QStringLiteral("Task-Manager") },
++        { QStringLiteral("Open Task Manager"), QStringLiteral("Task-Manager öffnen") },
++        { QStringLiteral("About Hellbird"), QStringLiteral("Über Hellbird") },
++        { QStringLiteral("About Ladybird"), QStringLiteral("Über Hellbird") },
++        { QStringLiteral("Check for Updates\u2026"), QStringLiteral("Nach Updates suchen\u2026") },
++        { QStringLiteral("Report Website Issue\u2026"), QStringLiteral("Problem mit Website melden\u2026") },
++
++        // Bookmarks & page context menus
++        { QStringLiteral("Add Bookmark"), QStringLiteral("Lesezeichen hinzufügen") },
++        { QStringLiteral("Add Bookmark\u2026"), QStringLiteral("Lesezeichen hinzufügen\u2026") },
++        { QStringLiteral("Remove Bookmark"), QStringLiteral("Lesezeichen entfernen") },
++        { QStringLiteral("Edit Bookmark\u2026"), QStringLiteral("Lesezeichen bearbeiten\u2026") },
++        { QStringLiteral("Toggle Bookmark"), QStringLiteral("Lesezeichen umschalten") },
++        { QStringLiteral("Bookmark All Tabs\u2026"), QStringLiteral("Alle Tabs als Lesezeichen speichern\u2026") },
++        { QStringLiteral("Manage Bookmarks"), QStringLiteral("Lesezeichen verwalten") },
++        { QStringLiteral("New Folder\u2026"), QStringLiteral("Neuer Ordner\u2026") },
++        { QStringLiteral("Edit Folder\u2026"), QStringLiteral("Ordner bearbeiten\u2026") },
++        { QStringLiteral("Delete Folder"), QStringLiteral("Ordner löschen") },
++        { QStringLiteral("Open All in Tabs"), QStringLiteral("Alle in Tabs öffnen") },
++        { QStringLiteral("(Empty)"), QStringLiteral("(Leer)") },
++        { QStringLiteral("Edit\u2026"), QStringLiteral("Bearbeiten\u2026") },
++        { QStringLiteral("Delete"), QStringLiteral("Löschen") },
++        { QStringLiteral("Open in New Tab"), QStringLiteral("In neuem Tab öffnen") },
++        { QStringLiteral("Open in New Window"), QStringLiteral("In neuem Fenster öffnen") },
++        { QStringLiteral("Open in Private Window"), QStringLiteral("In privatem Fenster öffnen") },
++        { QStringLiteral("Open Link in New Tab"), QStringLiteral("Link in neuem Tab öffnen") },
++        { QStringLiteral("Open Link in New Window"), QStringLiteral("Link in neuem Fenster öffnen") },
++        { QStringLiteral("Open Link in Private Window"), QStringLiteral("Link in privatem Fenster öffnen") },
++        { QStringLiteral("Copy Link"), QStringLiteral("Link kopieren") },
++        { QStringLiteral("Copy Link Address"), QStringLiteral("Link-Adresse kopieren") },
++        { QStringLiteral("Download Linked File"), QStringLiteral("Verknüpfte Datei herunterladen") },
++        { QStringLiteral("Save Link As\u2026"), QStringLiteral("Link speichern unter\u2026") },
++        { QStringLiteral("Copy Image"), QStringLiteral("Bild kopieren") },
++        { QStringLiteral("Copy Image Address"), QStringLiteral("Bildadresse kopieren") },
++        { QStringLiteral("Open Image"), QStringLiteral("Bild öffnen") },
++        { QStringLiteral("Open Image in New Tab"), QStringLiteral("Bild in neuem Tab öffnen") },
++        { QStringLiteral("Save Image As\u2026"), QStringLiteral("Bild speichern unter\u2026") },
++        { QStringLiteral("Copy Video Address"), QStringLiteral("Videoadresse kopieren") },
++        { QStringLiteral("Copy Audio Address"), QStringLiteral("Audioadresse kopieren") },
++        { QStringLiteral("Open Video"), QStringLiteral("Video öffnen") },
++        { QStringLiteral("Open Video in New Tab"), QStringLiteral("Video in neuem Tab öffnen") },
++        { QStringLiteral("Open Audio"), QStringLiteral("Audio öffnen") },
++        { QStringLiteral("Open Audio in New Tab"), QStringLiteral("Audio in neuem Tab öffnen") },
++        { QStringLiteral("Play"), QStringLiteral("Abspielen") },
++        { QStringLiteral("Mute"), QStringLiteral("Stummschalten") },
++        { QStringLiteral("Unmute"), QStringLiteral("Stummschaltung aufheben") },
++        { QStringLiteral("Show Controls"), QStringLiteral("Steuerelemente anzeigen") },
++        { QStringLiteral("Hide Controls"), QStringLiteral("Steuerelemente ausblenden") },
++        { QStringLiteral("Loop"), QStringLiteral("Wiederholen") },
++        { QStringLiteral("Picture in Picture"), QStringLiteral("Bild-in-Bild") },
++        { QStringLiteral("Exit Picture in Picture"), QStringLiteral("Bild-in-Bild beenden") },
++        { QStringLiteral("Full Screen"), QStringLiteral("Vollbild") },
++        { QStringLiteral("Exit Full Screen"), QStringLiteral("Vollbild beenden") },
++        { QStringLiteral("Inspect Element"), QStringLiteral("Element untersuchen") },
++        { QStringLiteral("Take Screenshot..."), QStringLiteral("Screenshot erstellen…") },
++        { QStringLiteral("Take Screenshot\u2026"), QStringLiteral("Screenshot erstellen\u2026") },
++        { QStringLiteral("Look Up"), QStringLiteral("Nachschlagen") },
++        { QStringLiteral("No Guesses Found"), QStringLiteral("Keine Vorschläge gefunden") },
++        { QStringLiteral("Ignore Spelling"), QStringLiteral("Rechtschreibung ignorieren") },
++        { QStringLiteral("Learn Spelling"), QStringLiteral("Zum Wörterbuch hinzufügen") },
++        { QStringLiteral("Always"), QStringLiteral("Immer") },
++        { QStringLiteral("Never"), QStringLiteral("Nie") },
++        { QStringLiteral("Only When Hovering the Navigation Toolbar"), QStringLiteral("Nur beim Überfahren der Navigationsleiste") },
++
++        // Tab & window context menus
++        { QStringLiteral("&Duplicate Tab"), QStringLiteral("Tab &duplizieren") },
++        { QStringLiteral("&Pin Tab"), QStringLiteral("Tab an&heften") },
++        { QStringLiteral("&Unpin Tab"), QStringLiteral("Tab &lösen") },
++        { QStringLiteral("Un&pin Tab"), QStringLiteral("Tab &lösen") },
++        { QStringLiteral("Unpin Tab"), QStringLiteral("Tab lösen") },
++        { QStringLiteral("&Mute Tab"), QStringLiteral("Tab stumm&schalten") },
++        { QStringLiteral("Un&mute Tab"), QStringLiteral("Stummschaltung &aufheben") },
++        { QStringLiteral("Move to New &Window"), QStringLiteral("In neues &Fenster verschieben") },
++        { QStringLiteral("Copy &URL"), QStringLiteral("&URL kopieren") },
++        { QStringLiteral("&Close Tab"), QStringLiteral("Tab s&chließen") },
++        { QStringLiteral("Cl&ose Other Tabs"), QStringLiteral("&Andere Tabs schließen") },
++        { QStringLiteral("New Tab to the &Right"), QStringLiteral("Neuer Tab &rechts") },
++        { QStringLiteral("New Tab &Below"), QStringLiteral("Neuer Tab &darunter") },
++        { QStringLiteral("Close Tabs to the &Left"), QStringLiteral("Tabs &links schließen") },
++        { QStringLiteral("Close Tabs &Above"), QStringLiteral("Tabs &darüber schließen") },
++        { QStringLiteral("Close Tabs to the R&ight"), QStringLiteral("Tabs r&echts schließen") },
++        { QStringLiteral("Close Tabs B&elow"), QStringLiteral("Tabs dar&unter schließen") },
++        { QStringLiteral("Always on T&op"), QStringLiteral("Immer im &Vordergrund") },
++        { QStringLiteral("&Dynamic"), QStringLiteral("&Dynamisch") },
++        { QStringLiteral("Along the &Top (Classic)"), QStringLiteral("&Oben (Klassisch)") },
++        { QStringLiteral("Down the &Left Side"), QStringLiteral("An der &linken Seite") },
++        { QStringLiteral("Down the &Right Side"), QStringLiteral("An der &rechten Seite") },
++        { QStringLiteral("In the &Sidebar"), QStringLiteral("In der &Seitenleiste") },
++
++        // Toolbar, omnibox, find bar, window buttons
++        { QStringLiteral("Search or enter address"), QStringLiteral("Suchen oder Adresse eingeben") },
++        { QStringLiteral("All Tabs"), QStringLiteral("Alle Tabs") },
++        { QStringLiteral("Minimize"), QStringLiteral("Minimieren") },
++        { QStringLiteral("Maximize"), QStringLiteral("Maximieren") },
++        { QStringLiteral("Restore"), QStringLiteral("Wiederherstellen") },
++        { QStringLiteral("Close"), QStringLiteral("Schließen") },
++        { QStringLiteral("Find in page"), QStringLiteral("Auf Seite suchen") },
++        { QStringLiteral("No matches"), QStringLiteral("Keine Treffer") },
++        { QStringLiteral("Pause"), QStringLiteral("Pausieren") },
++        { QStringLiteral("Resume"), QStringLiteral("Fortsetzen") },
++        { QStringLiteral("Send feedback"), QStringLiteral("Feedback senden") },
++        { QStringLiteral("Using your location"), QStringLiteral("Verwendet deinen Standort") },
++        { QStringLiteral("Using your microphone"), QStringLiteral("Verwendet dein Mikrofon") },
++
++        // PageCard (crash recovery & updates)
++        { QStringLiteral("Hellbird quit unexpectedly"), QStringLiteral("Hellbird wurde unerwartet beendet") },
++        { QStringLiteral("Restore the tab you had open?"), QStringLiteral("Den geöffneten Tab wiederherstellen?") },
++        { QStringLiteral("Not now"), QStringLiteral("Jetzt nicht") },
++        { QStringLiteral("Restore tabs"), QStringLiteral("Tabs wiederherstellen") },
++        { QStringLiteral("Hellbird was updated"), QStringLiteral("Hellbird wurde aktualisiert") },
++        { QStringLiteral("Restart Hellbird to use the new version."), QStringLiteral("Starte Hellbird neu, um die neue Version zu verwenden.") },
++        { QStringLiteral("Restart Hellbird to use the new version. Your windows and tabs will reopen, except private ones."), QStringLiteral("Starte Hellbird neu, um die neue Version zu verwenden. Fenster und Tabs werden wieder geöffnet, außer privaten.") },
++        { QStringLiteral("Restart"), QStringLiteral("Neu starten") },
++        { QStringLiteral("Skip"), QStringLiteral("Überspringen") },
++        { QStringLiteral("Remind me later"), QStringLiteral("Später erinnern") },
++        { QStringLiteral("Install update"), QStringLiteral("Update installieren") },
++        { QStringLiteral("View release"), QStringLiteral("Version anzeigen") },
++
++        // Hellbird Shield popover & tooltip
++        { QStringLiteral("Blocked on page"), QStringLiteral("Auf Seite blockiert") },
++        { QStringLiteral("Blocked domains"), QStringLiteral("Blockierte Domains") },
++        { QStringLiteral("Quick filter"), QStringLiteral("Schnellfilter") },
++        { QStringLiteral("Add custom filter (e.g. ||ads.site.com^)"), QStringLiteral("Eigenen Filter hinzufügen (z. B. ||ads.site.com^)") },
++        { QStringLiteral("Add"), QStringLiteral("Hinzufügen") },
++        { QStringLiteral("Global shield"), QStringLiteral("Globaler Schutz") },
++        { QStringLiteral("Filter lists && rules"), QStringLiteral("Filterlisten && Regeln") },
++        { QStringLiteral("Filter lists and rules"), QStringLiteral("Filterlisten und Regeln") },
++        { QStringLiteral("Active"), QStringLiteral("Aktiv") },
++        { QStringLiteral("Paused"), QStringLiteral("Pausiert") },
++        { QStringLiteral("Standby"), QStringLiteral("Bereitschaft") },
++        { QStringLiteral("Off"), QStringLiteral("Aus") },
++        { QStringLiteral("Not a website"), QStringLiteral("Keine Website") },
++        { QStringLiteral("No filter lists are loaded yet"), QStringLiteral("Noch keine Filterlisten geladen") },
++        { QStringLiteral("Standby on internal page"), QStringLiteral("Bereitschaft auf interner Seite") },
++        { QStringLiteral("Protection disabled globally"), QStringLiteral("Schutz global deaktiviert") },
++        { QStringLiteral("No trackers or ads blocked on this page yet."), QStringLiteral("Auf dieser Seite wurden noch keine Tracker oder Werbung blockiert.") },
++        { QStringLiteral("Nothing is being blocked on this page."), QStringLiteral("Auf dieser Seite wird nichts blockiert.") },
++        { QStringLiteral("Rule already exists"), QStringLiteral("Regel existiert bereits") },
++        { QStringLiteral("Custom filters are full"), QStringLiteral("Limit für eigene Filter erreicht") },
++        { QStringLiteral("Rule added"), QStringLiteral("Regel hinzugefügt") },
++        { QStringLiteral("Hellbird Shield \u2014 Disabled"), QStringLiteral("Hellbird Shield \u2014 Deaktiviert") },
++    };
++    return table;
++}
++
++Optional<QString> translate_pattern(QString const& text, WebView::InterfaceLanguage language)
++{
++    auto const is_pl = language == WebView::InterfaceLanguage::Polish;
++
++    if (auto separator = text.indexOf(QStringLiteral("  ")); separator > 0) {
++        auto head = text.left(separator);
++        auto tail = text.mid(separator + 2);
++        auto translated_head = tr_ui(head);
++        if (translated_head != head)
++            return translated_head + QStringLiteral("  ") + tail;
++    }
++
++    static QRegularExpression const protection_active_re(QStringLiteral("^Protection active on (.+)$"));
++    if (auto m = protection_active_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Ochrona aktywna na %1") : QStringLiteral("Schutz aktiv auf %1")).arg(m.captured(1));
++
++    static QRegularExpression const paused_resume_re(QStringLiteral("^Paused on (.+) \u2014 click to resume$"));
++    if (auto m = paused_resume_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Wstrzymano na %1 \u2014 kliknij, aby wznowić") : QStringLiteral("Pausiert auf %1 \u2014 zum Fortsetzen klicken")).arg(m.captured(1));
++
++    static QRegularExpression const pause_site_re(QStringLiteral("^Pause protection on (.+)$"));
++    if (auto m = pause_site_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Wstrzymaj ochronę na %1") : QStringLiteral("Schutz auf %1 pausieren")).arg(m.captured(1));
++
++    static QRegularExpression const resume_site_re(QStringLiteral("^Resume protection on (.+)$"));
++    if (auto m = resume_site_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Wznów ochronę na %1") : QStringLiteral("Schutz auf %1 fortsetzen")).arg(m.captured(1));
++
++    static QRegularExpression const shield_blocked_site_re(QStringLiteral("^Hellbird Shield \u2014 (\\d+) blocked on (.+)$"));
++    if (auto m = shield_blocked_site_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Hellbird Shield \u2014 zablokowano %1 na %2") : QStringLiteral("Hellbird Shield \u2014 %1 auf %2 blockiert")).arg(m.captured(1), m.captured(2));
++
++    static QRegularExpression const shield_blocked_re(QStringLiteral("^Hellbird Shield \u2014 (\\d+) blocked$"));
++    if (auto m = shield_blocked_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Hellbird Shield \u2014 zablokowano %1") : QStringLiteral("Hellbird Shield \u2014 %1 blockiert")).arg(m.captured(1));
++
++    static QRegularExpression const shield_paused_re(QStringLiteral("^Hellbird Shield \u2014 Paused on (.+)$"));
++    if (auto m = shield_paused_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Hellbird Shield \u2014 Wstrzymano na %1") : QStringLiteral("Hellbird Shield \u2014 Pausiert auf %1")).arg(m.captured(1));
++
++    static QRegularExpression const restore_tabs_re(QStringLiteral("^Restore the (\\d+) tabs you had open\\?$"));
++    if (auto m = restore_tabs_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Przywrócić %1 otwartych kart?") : QStringLiteral("Die %1 geöffneten Tabs wiederherstellen?")).arg(m.captured(1));
++
++    static QRegularExpression const search_tabs_re(QStringLiteral("^Search (\\d+) tabs$"));
++    if (auto m = search_tabs_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Szukaj wśród %1 kart") : QStringLiteral("%1 Tabs durchsuchen")).arg(m.captured(1));
++
++    static QRegularExpression const find_of_re(QStringLiteral("^(\\d+) of (\\d+)$"));
++    if (auto m = find_of_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("%1 z %2") : QStringLiteral("%1 von %2")).arg(m.captured(1), m.captured(2));
++
++    static QRegularExpression const open_all_tabs_re(QStringLiteral("^Open All in Tabs \\((\\d+)\\)$"));
++    if (auto m = open_all_tabs_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Otwórz wszystkie w kartach (%1)") : QStringLiteral("Alle in Tabs öffnen (%1)")).arg(m.captured(1));
++
++    static QRegularExpression const update_available_re(QStringLiteral("^(?:Hellbird|Ladybird) (.+) is available$"));
++    if (auto m = update_available_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Dostępna jest wersja Hellbird %1") : QStringLiteral("Hellbird %1 ist verfügbar")).arg(m.captured(1));
++
++    static QRegularExpression const you_have_updater_re(QStringLiteral("^You have (?:Hellbird|Ladybird) (.+)\\. Update it with your system's software updater\\.$"));
++    if (auto m = you_have_updater_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Masz wersję Hellbird %1. Zaktualizuj ją za pomocą menedżera aktualizacji systemu.") : QStringLiteral("Du verwendest Hellbird %1. Aktualisiere über die Systemaktualisierung.")).arg(m.captured(1));
++
++    static QRegularExpression const you_have_re(QStringLiteral("^You have (?:Hellbird|Ladybird) (.+)\\.$"));
++    if (auto m = you_have_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("Masz wersję Hellbird %1.") : QStringLiteral("Du verwendest Hellbird %1.")).arg(m.captured(1));
++
++    static QRegularExpression const host_filter_tooltip_re(QStringLiteral("^(.+) \\((.+)\\)\\nClick to write a filter for it$"));
++    if (auto m = host_filter_tooltip_re.match(text); m.hasMatch())
++        return (is_pl ? QStringLiteral("%1 (%2)\nKliknij, aby utworzyć filtr") : QStringLiteral("%1 (%2)\nKlicken, um einen Filter zu erstellen")).arg(m.captured(1), m.captured(2));
++
++    return {};
++}
++
++}
++
++WebView::InterfaceLanguage effective_interface_language()
++{
++    auto* settings = Application::settings_if_available();
++    if (!settings)
++        return WebView::InterfaceLanguage::English;
++
++    auto preference = settings->appearance().interface_language;
++    if (preference != WebView::InterfaceLanguage::System)
++        return preference;
++
++    auto ui_languages = QLocale::system().uiLanguages();
++    if (!ui_languages.isEmpty()) {
++        auto primary = ui_languages.first().toLower();
++        if (primary.startsWith(QStringLiteral("pl")))
++            return WebView::InterfaceLanguage::Polish;
++        if (primary.startsWith(QStringLiteral("de")))
++            return WebView::InterfaceLanguage::German;
++        return WebView::InterfaceLanguage::English;
++    }
++
++    switch (QLocale::system().language()) {
++    case QLocale::Polish:
++        return WebView::InterfaceLanguage::Polish;
++    case QLocale::German:
++        return WebView::InterfaceLanguage::German;
++    default:
++        return WebView::InterfaceLanguage::English;
++    }
++}
++
++QString tr_ui(QString const& text)
++{
++    if (text.isEmpty())
++        return text;
++
++    auto language = effective_interface_language();
++    if (language == WebView::InterfaceLanguage::English)
++        return text;
++
++    auto const& table = language == WebView::InterfaceLanguage::Polish ? polish_table() : german_table();
++    if (auto it = table.constFind(text); it != table.constEnd())
++        return *it;
++
++    if (text.contains(QLatin1Char('&'))) {
++        auto clean = strip_mnemonic(text);
++        if (auto it = table.constFind(clean); it != table.constEnd())
++            return *it;
++    }
++
++    if (auto patterned = translate_pattern(text, language); patterned.has_value())
++        return *patterned;
++
++    return text;
++}
++
++QString tr_ui(char const* text)
++{
++    return tr_ui(QString::fromUtf8(text));
++}
++
++QString tr_ui(StringView text)
++{
++    return tr_ui(qstring_from_ak_string(text));
++}
++
++void bind_localized_text(QAction& action, QString const& source_text)
++{
++    bind_entry(registry().action_texts, action, source_text);
++    action.setText(tr_ui(source_text));
++}
++
++void bind_localized_tooltip(QAction& action, QString const& source_tooltip)
++{
++    bind_entry(registry().action_tooltips, action, source_tooltip);
++    action.setToolTip(tr_ui(source_tooltip));
++}
++
++void bind_localized_title(QMenu& menu, QString const& source_title)
++{
++    bind_entry(registry().menu_titles, menu, source_title);
++    menu.setTitle(tr_ui(source_title));
++}
++
++void bind_localized_text(QLabel& label, QString const& source_text)
++{
++    bind_entry(registry().label_texts, label, source_text);
++    label.setText(tr_ui(source_text));
++}
++
++void bind_localized_text(QAbstractButton& button, QString const& source_text)
++{
++    bind_entry(registry().button_texts, button, source_text);
++    button.setText(tr_ui(source_text));
++}
++
++void bind_localized_placeholder(QLineEdit& line_edit, QString const& source_placeholder)
++{
++    bind_entry(registry().placeholders, line_edit, source_placeholder);
++    line_edit.setPlaceholderText(tr_ui(source_placeholder));
++}
++
++void bind_localized_tooltip(QWidget& widget, QString const& source_tooltip)
++{
++    bind_entry(registry().widget_tooltips, widget, source_tooltip);
++    widget.setToolTip(tr_ui(source_tooltip));
++}
++
++void refresh_localized_qt_controls()
++{
++    auto& reg = registry();
++    auto language = effective_interface_language();
++    if (reg.last_refreshed_language == language)
++        return;
++    reg.last_refreshed_language = language;
++
++    for (auto it = reg.action_texts.cbegin(); it != reg.action_texts.cend(); ++it)
++        it.key()->setText(tr_ui(it.value()));
++
++    for (auto it = reg.action_tooltips.cbegin(); it != reg.action_tooltips.cend(); ++it)
++        it.key()->setToolTip(tr_ui(it.value()));
++
++    for (auto it = reg.menu_titles.cbegin(); it != reg.menu_titles.cend(); ++it)
++        it.key()->setTitle(tr_ui(it.value()));
++
++    for (auto it = reg.label_texts.cbegin(); it != reg.label_texts.cend(); ++it)
++        it.key()->setText(tr_ui(it.value()));
++
++    for (auto it = reg.button_texts.cbegin(); it != reg.button_texts.cend(); ++it)
++        it.key()->setText(tr_ui(it.value()));
++
++    for (auto it = reg.placeholders.cbegin(); it != reg.placeholders.cend(); ++it)
++        it.key()->setPlaceholderText(tr_ui(it.value()));
++
++    for (auto it = reg.widget_tooltips.cbegin(); it != reg.widget_tooltips.cend(); ++it)
++        it.key()->setToolTip(tr_ui(it.value()));
++}
++
++}
+diff --git a/UI/Qt/Localization.h b/UI/Qt/Localization.h
+new file mode 100644
+index 0000000000..f0bc8ed37a
+--- /dev/null
++++ b/UI/Qt/Localization.h
+@@ -0,0 +1,39 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/StringView.h>
++#include <LibWebView/Settings.h>
++
++#include <QString>
++
++class QAbstractButton;
++class QAction;
++class QLabel;
++class QLineEdit;
++class QMenu;
++class QWidget;
++
++namespace Ladybird {
++
++WebView::InterfaceLanguage effective_interface_language();
++
++QString tr_ui(QString const& text);
++QString tr_ui(char const* text);
++QString tr_ui(StringView text);
++
++void bind_localized_text(QAction&, QString const& source_text);
++void bind_localized_tooltip(QAction&, QString const& source_tooltip);
++void bind_localized_title(QMenu&, QString const& source_title);
++void bind_localized_text(QLabel&, QString const& source_text);
++void bind_localized_text(QAbstractButton&, QString const& source_text);
++void bind_localized_placeholder(QLineEdit&, QString const& source_placeholder);
++void bind_localized_tooltip(QWidget&, QString const& source_tooltip);
++
++void refresh_localized_qt_controls();
++
++}
+diff --git a/UI/Qt/LocationEdit.cpp b/UI/Qt/LocationEdit.cpp
+index 4746475b55..4a4c9e0fcf 100644
+--- a/UI/Qt/LocationEdit.cpp
++++ b/UI/Qt/LocationEdit.cpp
+@@ -13,6 +13,7 @@
+ #include <UI/Qt/Autocomplete.h>
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/Icon.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/LocationEdit.h>
+ #include <UI/Qt/Menu.h>
+ #include <UI/Qt/Motion.h>
+@@ -455,7 +456,7 @@ LocationEdit::LocationEdit(QWidget* parent, WebView::Settings& settings, Nonnull
+         button->installEventFilter(this);
+ 
+     update_text_margins();
+-    setPlaceholderText("Search or enter address");
++    bind_localized_placeholder(*this, QStringLiteral("Search or enter address"));
+     update_location_icon();
+ 
+     m_omnibox.on_display_change = [this](WebView::Omnibox::Display const& display) {
+diff --git a/UI/Qt/Menu.cpp b/UI/Qt/Menu.cpp
+index ff8cd1d8d8..d76808f6a0 100644
+--- a/UI/Qt/Menu.cpp
++++ b/UI/Qt/Menu.cpp
+@@ -10,6 +10,7 @@
+ #include <UI/Qt/Application.h>
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/Icon.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/Menu.h>
+ #include <UI/Qt/StringUtils.h>
+ #include <UI/Qt/Tab.h>
+@@ -48,14 +49,24 @@ public:
+ 
+     virtual void on_text_changed(Action& action) override
+     {
+-        if (m_action)
+-            m_action->setText(qstring_from_ak_string(action.text()));
++        if (!m_action)
++            return;
++        auto text = qstring_from_ak_string(action.text());
++        if (first_is_one_of(action.id(), ActionID::BookmarkItem, ActionID::SpellingGuess, ActionID::SearchSelectedText))
++            m_action->setText(text);
++        else
++            bind_localized_text(*m_action, text);
+     }
+ 
+     virtual void on_tooltip_changed(Action& action) override
+     {
+-        if (m_action)
+-            m_action->setToolTip(qstring_from_ak_string(action.tooltip()));
++        if (!m_action)
++            return;
++        auto tooltip = qstring_from_ak_string(action.tooltip());
++        if (first_is_one_of(action.id(), ActionID::BookmarkItem, ActionID::SpellingGuess, ActionID::SearchSelectedText))
++            m_action->setToolTip(tooltip);
++        else
++            bind_localized_tooltip(*m_action, tooltip);
+     }
+ 
+     virtual void on_enabled_state_changed(Action& action) override
+@@ -455,7 +466,10 @@ void populate_session_history_traversal_menu(QMenu& menu, WebContentView& view,
+ 
+ QMenu* create_application_menu(QWidget& parent, Menu& menu)
+ {
+-    auto* application_menu = new QMenu(qstring_from_ak_string(menu.title()), &parent);
++    auto title = qstring_from_ak_string(menu.title());
++    auto* application_menu = new QMenu(title, &parent);
++    if (menu.properties().get("type"sv) != "folder"sv)
++        bind_localized_title(*application_menu, title);
+     menu.add_observer(MenuObserver::create(menu, *application_menu));
+     add_properties(*application_menu, menu);
+     add_items_to_menu(*application_menu, menu);
+@@ -509,7 +523,7 @@ static QAction* create_dynamic_history_separator(QMenu& menu)
+ 
+ static QAction* create_history_navigation_action(QMenu& menu, WebContentView& view, Action& source_action, QKeySequence::StandardKey shortcut)
+ {
+-    auto* action = new QAction(qstring_from_ak_string(source_action.text()), &menu);
++    auto* action = new QAction(tr_ui(qstring_from_ak_string(source_action.text())), &menu);
+     action->setEnabled(source_action.enabled());
+     action->setShortcuts(QKeySequence::keyBindings(shortcut));
+     QObject::connect(action, &QAction::triggered, &view, [&source_action] {
+@@ -589,13 +603,15 @@ MenuZoomRow::MenuZoomRow(QMenu& menu, QAction& zoom_out, QAction& reset_zoom, QA
+     auto* layout = new QHBoxLayout(row);
+     layout->setContentsMargins(10, 3, 10, 3);
+     layout->setSpacing(2);
+-    layout->addWidget(new QLabel("Zoom", row), 1);
++    auto* zoom_label = new QLabel(row);
++    bind_localized_text(*zoom_label, QStringLiteral("Zoom"));
++    layout->addWidget(zoom_label, 1);
+ 
+     auto add_button = [&](char const* object_name, QString const& tooltip, QAction& action) {
+         auto* button = new QPushButton(row);
+         button->setObjectName(object_name);
+-        button->setToolTip(tooltip);
+-        button->setAccessibleName(tooltip);
++        bind_localized_tooltip(*button, tooltip);
++        button->setAccessibleName(tr_ui(tooltip));
+         button->setFocusPolicy(Qt::NoFocus);
+         QObject::connect(button, &QPushButton::clicked, &action, &QAction::trigger);
+         layout->addWidget(button);
+diff --git a/UI/Qt/ShieldPopover.cpp b/UI/Qt/ShieldPopover.cpp
+index aa190007a3..f3d4d6dc39 100644
+--- a/UI/Qt/ShieldPopover.cpp
++++ b/UI/Qt/ShieldPopover.cpp
+@@ -12,6 +12,7 @@
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/ElidedLabel.h>
+ #include <UI/Qt/Icon.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/ShieldPopover.h>
+ #include <UI/Qt/StringUtils.h>
+ #include <UI/Qt/Theme.h>
+@@ -173,7 +174,9 @@ static QLabel* add_stat_tile(QWidget& parent, QHBoxLayout& layout, QString const
+     tile_layout->setSpacing(0);
+     auto* value = create_label(*tile, "LadybirdShieldStatValue", "0");
+     tile_layout->addWidget(value);
+-    tile_layout->addWidget(create_label(*tile, "LadybirdShieldDetail", caption));
++    auto* caption_label = create_label(*tile, "LadybirdShieldDetail");
++    bind_localized_text(*caption_label, caption);
++    tile_layout->addWidget(caption_label);
+     layout.addWidget(tile, 1);
+     return value;
+ }
+@@ -274,7 +277,9 @@ ShieldPopover::ShieldPopover(QWidget* parent, WebView::Settings& settings)
+     auto* filter_heading = new QHBoxLayout;
+     filter_heading->setContentsMargins(0, 0, 0, 0);
+     filter_heading->setSpacing(8);
+-    filter_heading->addWidget(create_label(card(), "LadybirdShieldDetail", "Quick filter"));
++    auto* quick_filter_label = create_label(card(), "LadybirdShieldDetail");
++    bind_localized_text(*quick_filter_label, QStringLiteral("Quick filter"));
++    filter_heading->addWidget(quick_filter_label);
+     filter_heading->addStretch(1);
+     // NB: The feedback shares the heading's line, so the popover keeps its size as it comes and goes.
+     m_filter_feedback = create_label(card(), "LadybirdShieldFeedback");
+@@ -288,10 +293,11 @@ ShieldPopover::ShieldPopover(QWidget* parent, WebView::Settings& settings)
+     m_filter_field = new QLineEdit(&card());
+     m_filter_field->setObjectName("LadybirdShieldFilter");
+     m_filter_field->setAccessibleName("Custom filter");
+-    m_filter_field->setPlaceholderText("Add custom filter (e.g. ||ads.site.com^)");
++    bind_localized_placeholder(*m_filter_field, QStringLiteral("Add custom filter (e.g. ||ads.site.com^)"));
+     QObject::connect(m_filter_field, &QLineEdit::returnPressed, this, [this] { add_custom_filter(); });
+     filter_row->addWidget(m_filter_field, 1);
+-    auto* add_button = new QPushButton("Add", &card());
++    auto* add_button = new QPushButton(&card());
++    bind_localized_text(*add_button, QStringLiteral("Add"));
+     add_button->setObjectName("LadybirdShieldAdd");
+     add_button->setAccessibleName("Add custom filter");
+     add_button->setAttribute(Qt::WA_LayoutUsesWidgetRect);
+@@ -318,10 +324,13 @@ ShieldPopover::ShieldPopover(QWidget* parent, WebView::Settings& settings)
+         m_settings.set_content_blocker_enabled(enabled);
+     });
+     footer->addWidget(m_global_switch);
+-    footer->addWidget(create_label(card(), "LadybirdShieldGlobalLabel", "Global shield"));
++    auto* global_label = create_label(card(), "LadybirdShieldGlobalLabel");
++    bind_localized_text(*global_label, QStringLiteral("Global shield"));
++    footer->addWidget(global_label);
+     footer->addStretch(1);
+     // NB: A lone ampersand would underline the character after it, as a shortcut.
+-    auto* filter_lists_link = new QPushButton("Filter lists && rules", &card());
++    auto* filter_lists_link = new QPushButton(&card());
++    bind_localized_text(*filter_lists_link, QStringLiteral("Filter lists && rules"));
+     filter_lists_link->setObjectName("LadybirdPopoverLink");
+     filter_lists_link->setAccessibleName("Filter lists and rules");
+     filter_lists_link->setCursor(Qt::PointingHandCursor);
+@@ -374,20 +383,21 @@ void ShieldPopover::set_page(WebView::ContentBlockingSnapshot const& blocking, b
+         break;
+     }
+ 
+-    m_site_label->setText(host.isEmpty() ? QStringLiteral("Not a website") : host);
++    m_site_label->setText(host.isEmpty() ? tr_ui("Not a website") : host);
+     m_site_label->setToolTip(host);
+-    m_status_badge->setText(status);
++    m_status_badge->setText(tr_ui(status));
+     set_style_property(*m_status_badge, "shieldState", status_style);
+-    m_caption->setText(caption);
+-    m_caption->setToolTip(caption);
++    auto localized_caption = tr_ui(caption);
++    m_caption->setText(localized_caption);
++    m_caption->setToolTip(localized_caption);
+ 
+     auto can_toggle = blocking.can_toggle();
+     m_power_button->set_protecting(m_is_protecting);
+     m_power_button->setEnabled(can_toggle);
+     m_power_button->setCursor(can_toggle ? Qt::PointingHandCursor : Qt::ArrowCursor);
+-    auto action = caption;
++    auto action = localized_caption;
+     if (can_toggle)
+-        action = (m_is_protecting ? QStringLiteral("Pause protection on %1") : QStringLiteral("Resume protection on %1")).arg(host);
++        action = tr_ui((m_is_protecting ? QStringLiteral("Pause protection on %1") : QStringLiteral("Resume protection on %1")).arg(host));
+     m_power_button->setToolTip(action);
+     m_power_button->setAccessibleName(action);
+ 
+@@ -405,9 +415,9 @@ void ShieldPopover::set_page(WebView::ContentBlockingSnapshot const& blocking, b
+     }
+     m_blocked_count->setText(QString::number(blocked_count));
+     m_domain_count->setText(QString::number(blocked_hosts.size()));
+-    m_empty_label->setText(m_is_protecting
++    m_empty_label->setText(tr_ui(m_is_protecting
+             ? QStringLiteral("No trackers or ads blocked on this page yet.")
+-            : QStringLiteral("Nothing is being blocked on this page."));
++            : QStringLiteral("Nothing is being blocked on this page.")));
+     set_blocked_hosts(AK::move(blocked_hosts));
+     update_icons();
+ }
+@@ -466,7 +476,7 @@ void ShieldPopover::set_blocked_hosts(Vector<BlockedHost> blocked_hosts)
+         row->setFixedHeight(BLOCKED_HOST_ROW_HEIGHT);
+         row->setAttribute(Qt::WA_LayoutUsesWidgetRect);
+         row->setFocusPolicy(Qt::TabFocus);
+-        row->setToolTip(QStringLiteral("%1 (%2)\nClick to write a filter for it").arg(blocked.host, kinds));
++        row->setToolTip(tr_ui(QStringLiteral("%1 (%2)\nClick to write a filter for it").arg(blocked.host, kinds)));
+         row->setAccessibleName(QStringLiteral("%1, %2 blocked: %3").arg(blocked.host, QString::number(blocked.count), kinds));
+         auto* row_layout = new QHBoxLayout(row);
+         row_layout->setContentsMargins(8, 0, 8, 0);
+@@ -546,7 +556,7 @@ void ShieldPopover::add_custom_filter()
+ 
+ void ShieldPopover::show_filter_feedback(QString const& text, FeedbackTone tone)
+ {
+-    m_filter_feedback->setText(text);
++    m_filter_feedback->setText(tr_ui(text));
+     set_style_property(*m_filter_feedback, "failed", tone == FeedbackTone::Failure ? QStringLiteral("true") : QStringLiteral("false"));
+     m_filter_feedback_timer->start();
+ }
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index fead75d4ad..ee5388202b 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -28,6 +28,7 @@
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/JavaScriptDialog.h>
+ #include <UI/Qt/LadybirdButton.h>
++#include <UI/Qt/Localization.h>
+ #if defined(AK_OS_MACOS)
+ #    include <UI/Qt/MacWindow.h>
+ #endif
+@@ -880,11 +881,13 @@ void Tab::create_tab_context_menu()
+     auto& application = ApplicationActions::the();
+ 
+     auto* duplicate_tab_action = new QAction("&Duplicate Tab", this);
++    bind_localized_text(*duplicate_tab_action, QStringLiteral("&Duplicate Tab"));
+     QObject::connect(duplicate_tab_action, &QAction::triggered, this, [this]() {
+         m_window->duplicate_tab(*this);
+     });
+ 
+     m_pin_tab_action = new QAction("&Pin Tab", this);
++    bind_localized_text(*m_pin_tab_action, QStringLiteral("&Pin Tab"));
+     QObject::connect(m_pin_tab_action, &QAction::triggered, this, [this]() {
+         if (m_is_pinned)
+             m_window->unpin_tab(*this);
+@@ -898,18 +901,21 @@ void Tab::create_tab_context_menu()
+     });
+ 
+     auto* mute_tab_action = new QAction("&Mute Tab", this);
++    bind_localized_text(*mute_tab_action, QStringLiteral("&Mute Tab"));
+     QObject::connect(mute_tab_action, &QAction::triggered, this, [this]() {
+         if (is_loaded())
+             view().toggle_page_mute_state();
+     });
+ 
+     auto* move_to_new_window_action = new QAction("Move to New &Window", this);
++    bind_localized_text(*move_to_new_window_action, QStringLiteral("Move to New &Window"));
+     QObject::connect(move_to_new_window_action, &QAction::triggered, this, [this]() {
+         m_window->detach_tab_to_new_window(tab_index(), m_window->mapToGlobal(QPoint(m_window->width() / 4, m_window->height() / 4)));
+     });
+ 
+     // NB: The shortcuts belong to the application's actions. The menu only shows them.
+     auto* copy_url_action = new QAction("Copy &URL", this);
++    bind_localized_text(*copy_url_action, QStringLiteral("Copy &URL"));
+     copy_url_action->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+     copy_url_action->setShortcutContext(Qt::WidgetShortcut);
+     copy_url_action->setShortcutVisibleInContextMenu(true);
+@@ -918,6 +924,7 @@ void Tab::create_tab_context_menu()
+     });
+ 
+     auto* close_tab_action = new QAction("&Close Tab", this);
++    bind_localized_text(*close_tab_action, QStringLiteral("&Close Tab"));
+     close_tab_action->setShortcut(QKeySequence(QKeySequence::Close));
+     close_tab_action->setShortcutContext(Qt::WidgetShortcut);
+     close_tab_action->setShortcutVisibleInContextMenu(true);
+@@ -949,6 +956,7 @@ void Tab::create_tab_context_menu()
+     });
+ 
+     auto* close_other_tabs_action = new QAction("Cl&ose Other Tabs", this);
++    bind_localized_text(*close_other_tabs_action, QStringLiteral("Cl&ose Other Tabs"));
+     QObject::connect(close_other_tabs_action, &QAction::triggered, this, [this]() {
+         // As with closing the following tabs, activate this tab first if the current tab is among those closing.
+         if (auto* current = m_window->current_tab(); current && current != this && !current->is_pinned())
+@@ -981,9 +989,9 @@ void Tab::create_tab_context_menu()
+ 
+     QObject::connect(m_context_menu, &QMenu::aboutToShow, this, [this, new_tab_action, close_other_tabs_action, close_preceding_tabs_action, close_following_tabs_action, mute_tab_action, move_to_new_window_action]() {
+         auto is_horizontal = m_window->tab_widget().tab_bar()->tab_layout() == TabLayout::Horizontal;
+-        new_tab_action->setText(is_horizontal ? "New Tab to the &Right" : "New Tab &Below");
+-        close_preceding_tabs_action->setText(is_horizontal ? "Close Tabs to the &Left" : "Close Tabs &Above");
+-        close_following_tabs_action->setText(is_horizontal ? "Close Tabs to the R&ight" : "Close Tabs B&elow");
++        new_tab_action->setText(tr_ui(is_horizontal ? "New Tab to the &Right" : "New Tab &Below"));
++        close_preceding_tabs_action->setText(tr_ui(is_horizontal ? "Close Tabs to the &Left" : "Close Tabs &Above"));
++        close_following_tabs_action->setText(tr_ui(is_horizontal ? "Close Tabs to the R&ight" : "Close Tabs B&elow"));
+ 
+         // Pinned tabs stay open, so each of these is only offered when it has another tab to close.
+         auto has_tabs_to_close_before = false;
+@@ -1002,7 +1010,7 @@ void Tab::create_tab_context_menu()
+ 
+         // A tab that hasn't loaded has no page to mute yet.
+         mute_tab_action->setEnabled(is_loaded());
+-        mute_tab_action->setText(is_loaded() && view().page_mute_state() == Web::HTML::MuteState::Muted ? "Un&mute Tab" : "&Mute Tab");
++        mute_tab_action->setText(tr_ui(is_loaded() && view().page_mute_state() == Web::HTML::MuteState::Muted ? "Un&mute Tab" : "&Mute Tab"));
+         move_to_new_window_action->setEnabled(m_window->tab_count() > 1);
+     });
+ }
+@@ -1112,7 +1120,7 @@ void Tab::copy_url()
+ void Tab::set_pinned(bool pinned)
+ {
+     m_is_pinned = pinned;
+-    m_pin_tab_action->setText(pinned ? "Un&pin Tab" : "&Pin Tab");
++    bind_localized_text(*m_pin_tab_action, pinned ? QStringLiteral("Un&pin Tab") : QStringLiteral("&Pin Tab"));
+ }
+ 
+ void Tab::navigate(URL::URL const& url)
+diff --git a/UI/Qt/TabBar.cpp b/UI/Qt/TabBar.cpp
+index 0931985be2..a2f5489326 100644
+--- a/UI/Qt/TabBar.cpp
++++ b/UI/Qt/TabBar.cpp
+@@ -23,6 +23,7 @@
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/LadybirdButton.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/SessionStore.h>
+ #if defined(AK_OS_MACOS)
+ #    include <UI/Qt/MacWindow.h>
+@@ -3128,7 +3129,7 @@ TabWidget::TabWidget(WebView::IsPrivate is_private, QWidget* parent)
+     m_new_tab_button->setObjectName("LadybirdNewTabButton");
+     m_new_tab_button->setFixedSize(32, 32);
+     m_new_tab_button->setFocusPolicy(Qt::NoFocus);
+-    m_new_tab_button->setToolTip(qformatted("New Tab  {}", QKeySequence(QKeySequence::AddTab).toString(QKeySequence::NativeText)));
++    bind_localized_tooltip(*m_new_tab_button, qformatted("New Tab  {}", QKeySequence(QKeySequence::AddTab).toString(QKeySequence::NativeText)));
+     m_new_tab_button->installEventFilter(this);
+ 
+     // The all-tabs button follows the sidebar's side, and sits beside the Ladybird button with horizontal tabs.
+@@ -3139,7 +3140,7 @@ TabWidget::TabWidget(WebView::IsPrivate is_private, QWidget* parent)
+     m_all_tabs_button->setAutoRaise(true);
+     m_all_tabs_button->setIconSize(QSize(16, 16));
+     m_all_tabs_button->setFocusPolicy(Qt::NoFocus);
+-    m_all_tabs_button->setToolTip(qformatted("All Tabs  {}", Application::the().search_tabs_action()->shortcut().toString(QKeySequence::NativeText)));
++    bind_localized_tooltip(*m_all_tabs_button, qformatted("All Tabs  {}", Application::the().search_tabs_action()->shortcut().toString(QKeySequence::NativeText)));
+     // The button stays pressed while the list is open.
+     m_all_tabs_button->setCheckable(true);
+     QObject::connect(m_all_tabs_button, &QToolButton::clicked, this, [this] {
+@@ -3154,7 +3155,7 @@ TabWidget::TabWidget(WebView::IsPrivate is_private, QWidget* parent)
+     m_bookmarks_menu_button->setAutoRaise(true);
+     m_bookmarks_menu_button->setIconSize({ 16, 16 });
+     m_bookmarks_menu_button->setFocusPolicy(Qt::NoFocus);
+-    m_bookmarks_menu_button->setToolTip("Bookmarks");
++    bind_localized_tooltip(*m_bookmarks_menu_button, QStringLiteral("Bookmarks"));
+     m_bookmarks_menu_button->setAccessibleName("Bookmarks");
+     m_bookmarks_menu_button->setCheckable(true);
+     m_bookmarks_menu = create_application_menu(*m_bookmarks_menu_button, Application::bookmarks().menu());
+@@ -5512,7 +5513,7 @@ void TabWidget::update_window_button_icons()
+         auto is_maximized = window()->isMaximized();
+         m_minimize_window_button->setIcon(create_chrome_icon(ChromeIcon::WindowMinimize, Theme::chrome_palette(*this)));
+         m_maximize_window_button->setIcon(create_chrome_icon(is_maximized ? ChromeIcon::WindowRestore : ChromeIcon::WindowMaximize, Theme::chrome_palette(*this)));
+-        m_maximize_window_button->setToolTip(is_maximized ? "Restore" : "Maximize");
++        bind_localized_tooltip(*m_maximize_window_button, is_maximized ? QStringLiteral("Restore") : QStringLiteral("Maximize"));
+         m_close_window_button->setIcon(create_chrome_icon(ChromeIcon::WindowClose, Theme::chrome_palette(*this)));
+     }
+ 
+diff --git a/UI/Qt/WindowToolbar.cpp b/UI/Qt/WindowToolbar.cpp
+index c5c0ec73fd..bbad309370 100644
+--- a/UI/Qt/WindowToolbar.cpp
++++ b/UI/Qt/WindowToolbar.cpp
+@@ -23,6 +23,7 @@
+ #include <UI/Qt/FeedbackPopover.h>
+ #include <UI/Qt/Icon.h>
+ #include <UI/Qt/LadybirdButton.h>
++#include <UI/Qt/Localization.h>
+ #include <UI/Qt/LocationEdit.h>
+ #if defined(AK_OS_MACOS)
+ #    include <UI/Qt/MacWindow.h>
+@@ -627,7 +628,7 @@ public:
+         : ToolbarButton(parent)
+     {
+         setObjectName("LadybirdFeedbackButton");
+-        setToolTip("Send feedback");
++        bind_localized_tooltip(*this, QStringLiteral("Send feedback"));
+         setAccessibleName("Send feedback");
+         // NB: The button stays checked while the popover is open.
+         setCheckable(true);
+@@ -739,9 +740,10 @@ public:
+             break;
+         }
+ 
+-        if (toolTip() != description) {
+-            setToolTip(description);
+-            setAccessibleName(description);
++        auto localized = tr_ui(description);
++        if (toolTip() != localized) {
++            bind_localized_tooltip(*this, description);
++            setAccessibleName(localized);
+         }
+         if (m_blocked_count == blocked_count && m_is_dimmed == is_dimmed)
+             return;
+@@ -1381,7 +1383,8 @@ WindowToolbar::WindowToolbar(WebView::IsPrivate is_private, QWidget* parent)
+     m_reload_bypassing_cache_action = create_application_action(*this, application.reload_bypassing_cache_action());
+     m_reload_bypassing_cache_action->setShortcuts({});
+     m_stop_action = new QAction("Stop", this);
+-    m_stop_action->setToolTip("Stop loading this page");
++    bind_localized_text(*m_stop_action, QStringLiteral("Stop"));
++    bind_localized_tooltip(*m_stop_action, QStringLiteral("Stop loading this page"));
+     QObject::connect(m_stop_action, &QAction::triggered, this, [this] {
+         if (m_tab && m_tab->is_loaded())
+             m_tab->view().stop_loading();
+@@ -1484,7 +1487,7 @@ WindowToolbar::WindowToolbar(WebView::IsPrivate is_private, QWidget* parent)
+     m_dynamic_new_tab_button->setIconSize({ TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE });
+     m_dynamic_new_tab_button->setAutoRaise(true);
+     m_dynamic_new_tab_button->setFocusPolicy(Qt::NoFocus);
+-    m_dynamic_new_tab_button->setToolTip("New Tab");
++    bind_localized_tooltip(*m_dynamic_new_tab_button, QStringLiteral("New Tab"));
+     m_dynamic_new_tab_button->hide();
+ 
+     m_sidebar_footer = new QWidget(this);
+@@ -2100,7 +2103,7 @@ void WindowToolbar::update_window_control_icons()
+     auto is_maximized = window()->isMaximized();
+     m_minimize_window_button->setIcon(create_chrome_icon(ChromeIcon::WindowMinimize, Theme::chrome_palette(*this)));
+     m_maximize_window_button->setIcon(create_chrome_icon(is_maximized ? ChromeIcon::WindowRestore : ChromeIcon::WindowMaximize, Theme::chrome_palette(*this)));
+-    m_maximize_window_button->setToolTip(is_maximized ? "Restore" : "Maximize");
++    bind_localized_tooltip(*m_maximize_window_button, is_maximized ? QStringLiteral("Restore") : QStringLiteral("Maximize"));
+     m_close_window_button->setIcon(create_chrome_icon(ChromeIcon::WindowClose, Theme::chrome_palette(*this)));
+ }
+ 
+@@ -2147,7 +2150,7 @@ void WindowToolbar::set_dynamic_new_tab_action(QAction* action)
+         return;
+     QObject::disconnect(m_dynamic_new_tab_button, &QToolButton::clicked, nullptr, nullptr);
+     QObject::connect(m_dynamic_new_tab_button, &QToolButton::clicked, action, &QAction::trigger);
+-    m_dynamic_new_tab_button->setToolTip(qformatted("New Tab  {}", action->shortcut().toString(QKeySequence::NativeText)));
++    bind_localized_tooltip(*m_dynamic_new_tab_button, qformatted("New Tab  {}", action->shortcut().toString(QKeySequence::NativeText)));
+ }
+ 
+ void WindowToolbar::set_dynamic_tabs_below(bool below)
+diff --git a/UI/cmake/ResourceFiles.cmake b/UI/cmake/ResourceFiles.cmake
+index f1c01aeacc..1d932fc2d4 100644
+--- a/UI/cmake/ResourceFiles.cmake
++++ b/UI/cmake/ResourceFiles.cmake
+@@ -32,6 +32,7 @@ set(ABOUT_PAGES
+     crashes.html
+     downloads.html
+     history.html
++    i18n.js
+     licenses.html
+     newtab.html
+     settings.html
