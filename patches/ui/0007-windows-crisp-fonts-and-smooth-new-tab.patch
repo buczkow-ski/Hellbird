@@ -1,5 +1,18 @@
+diff --git a/Services/Compositor/BackingStoreManager.cpp b/Services/Compositor/BackingStoreManager.cpp
+index b1f19c8d4f..e5939d56d5 100644
+--- a/Services/Compositor/BackingStoreManager.cpp
++++ b/Services/Compositor/BackingStoreManager.cpp
+@@ -110,7 +110,7 @@ static ErrorOr<GpuBackingStore> create_shared_gpu_backing_store(Gfx::IntSize siz
+     auto shared_image = Gfx::duplicate_shared_image(*texture);
+ 
+     return GpuBackingStore {
+-        .surface = TRY(Gfx::PaintingSurface::create_from_d3d_texture(skia_backend_context, move(texture))),
++        .surface = TRY(Gfx::PaintingSurface::create_from_d3d_texture(skia_backend_context, move(texture), Gfx::PaintingSurface::Origin::TopLeft, Gfx::PaintingSurface::TextAntialiasing::LCD)),
+         .shared_image = move(shared_image),
+     };
+ }
 diff --git a/Services/Compositor/DirectCompositionWindowServer.cpp b/Services/Compositor/DirectCompositionWindowServer.cpp
-index 987c492a4c..0d3acc3d0b 100644
+index 987c492a4c..97489e8de4 100644
 --- a/Services/Compositor/DirectCompositionWindowServer.cpp
 +++ b/Services/Compositor/DirectCompositionWindowServer.cpp
 @@ -135,7 +135,7 @@ LRESULT CALLBACK ChildWindowThread::parking_window_procedure(HWND window, UINT m
@@ -26,72 +39,152 @@ index 987c492a4c..0d3acc3d0b 100644
 -    if (m_frame_swap_chain)
 +    if (m_frame_swap_chain) {
          m_frame_swap_chain->show_drawing();
-+        if (!IsWindowVisible(m_window))
++        if ((GetWindowLongPtrW(m_window, GWL_STYLE) & WS_VISIBLE) == 0)
 +            ShowWindow(m_window, SW_SHOWNA);
 +    }
      for (auto& [identity, shown_sublayer] : m_shown_sublayers) {
          if (shown_sublayer.swap_chain)
              shown_sublayer.swap_chain->show_drawing();
-diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
-index ae55650154..0cc15d53e7 100644
---- a/UI/Qt/ChromeStyle.cpp
-+++ b/UI/Qt/ChromeStyle.cpp
-@@ -2130,6 +2130,12 @@ public:
+diff --git a/Services/Compositor/FontSkia.cpp b/Services/Compositor/FontSkia.cpp
+index ce4bb36db8..95f1647c3e 100644
+--- a/Services/Compositor/FontSkia.cpp
++++ b/Services/Compositor/FontSkia.cpp
+@@ -35,6 +35,8 @@
  
- void install_application_style()
- {
-+#if defined(Q_OS_WIN)
-+    auto font = QApplication::font();
-+    font.setHintingPreference(QFont::PreferFullHinting);
-+    font.setStyleStrategy(static_cast<QFont::StyleStrategy>(font.styleStrategy() | QFont::PreferAntialias));
-+    QApplication::setFont(font);
-+#endif
-     QApplication::setStyle(new ApplicationStyle);
- }
- 
-diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
-index f7b026cc55..f41e20eb87 100644
---- a/UI/Qt/Tab.cpp
-+++ b/UI/Qt/Tab.cpp
-@@ -192,6 +192,11 @@ Tab::Tab(BrowserWindow* window, DeferredTab deferred_tab)
- 
- void Tab::create_tab_shell()
- {
-+    setAutoFillBackground(true);
-+    auto tab_palette = palette();
-+    tab_palette.setColor(QPalette::Window, Theme::panel().page);
-+    setPalette(tab_palette);
+ #ifdef AK_OS_WINDOWS
+ #    include <src/ports/SkTypeface_win_dw.h>
 +
-     auto* tab_layout = new QBoxLayout(QBoxLayout::Direction::TopToBottom, this);
-     tab_layout->setSpacing(0);
-     tab_layout->setContentsMargins(0, 0, 0, 0);
-diff --git a/UI/Qt/WebContentView.cpp b/UI/Qt/WebContentView.cpp
-index a96dfcf483..125e49bbdb 100644
---- a/UI/Qt/WebContentView.cpp
-+++ b/UI/Qt/WebContentView.cpp
-@@ -148,6 +148,7 @@ WebContentView::WebContentView(QWidget* window, Optional<u64> hub_view_id, WebCo
-     setAttribute(Qt::WA_NativeWindow);
-     setParent(window);
-     setApi(QRhiWidget::Api::Direct3D11);
-+    set_page_background_color_to_system_canvas(websites_prefer_dark());
- #elif defined(LADYBIRD_QT_USE_IOSURFACE_LAYER)
-     // The page is shown by a layer of this widget's own native view, and Qt paints the widget only while that layer does
-     // not cover it (see update_whether_qt_paints_view()).
-diff --git a/UI/Qt/main.cpp b/UI/Qt/main.cpp
-index 60df509824..b441117e3a 100644
---- a/UI/Qt/main.cpp
-+++ b/UI/Qt/main.cpp
-@@ -54,6 +54,13 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
-     }
++#    include <AK/Windows.h>
+ #endif
+ 
+ namespace Compositor {
+@@ -252,10 +254,28 @@ static SkPixelGeometry configured_pixel_geometry()
+ }
  #endif
  
 +#if defined(AK_OS_WINDOWS)
-+    // Qt 6's default DirectWrite font engine on Windows causes uneven glyph spacing (e.g. colliding "sp"/"tt")
-+    // and soft stems on raster and translucent widgets. Use GDI metrics unless explicitly overridden.
-+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
-+        qputenv("QT_QPA_PLATFORM", "windows:fontengine=gdi");
++static SkPixelGeometry configured_pixel_geometry()
++{
++    BOOL font_smoothing = FALSE;
++    if (!SystemParametersInfoW(SPI_GETFONTSMOOTHING, 0, &font_smoothing, 0) || !font_smoothing)
++        return kUnknown_SkPixelGeometry;
++
++    UINT smoothing_type = 0;
++    if (!SystemParametersInfoW(SPI_GETFONTSMOOTHINGTYPE, 0, &smoothing_type, 0) || smoothing_type != FE_FONTSMOOTHINGCLEARTYPE)
++        return kUnknown_SkPixelGeometry;
++
++    UINT orientation = FE_FONTSMOOTHINGORIENTATIONRGB;
++    if (SystemParametersInfoW(SPI_GETFONTSMOOTHINGORIENTATION, 0, &orientation, 0) && orientation == FE_FONTSMOOTHINGORIENTATIONBGR)
++        return kBGR_H_SkPixelGeometry;
++    return kRGB_H_SkPixelGeometry;
++}
 +#endif
 +
-     // The web content view is presented in a native child window. Without this attribute, a widget
-     // gaining a native window would force every other widget in the browser window to become native
-     // as well.
+ SkSurfaceProps skia_text_surface_properties(u32 flags, [[maybe_unused]] bool allows_lcd_text)
+ {
+     auto geometry = kUnknown_SkPixelGeometry;
+-#if defined(AK_OS_LINUX) && defined(USE_FONTCONFIG)
++#if (defined(AK_OS_LINUX) && defined(USE_FONTCONFIG)) || defined(AK_OS_WINDOWS)
+     if (allows_lcd_text && !s_use_test_font_rendering) {
+         static auto const configured_geometry = configured_pixel_geometry();
+         geometry = configured_geometry;
+@@ -266,6 +286,10 @@ SkSurfaceProps skia_text_surface_properties(u32 flags, [[maybe_unused]] bool all
+     // Use Chromium's Linux text contrast and gamma.
+     if (!s_use_test_font_rendering)
+         return { flags, geometry, 0.2f, 1.2f };
++#elif defined(AK_OS_WINDOWS)
++    // Match Windows DirectWrite ClearType contrast and gamma so web text stems stay crisp and evenly weighted.
++    if (!s_use_test_font_rendering)
++        return { flags, geometry, 0.5f, 1.8f };
+ #endif
+     return { flags, geometry };
+ }
+@@ -296,6 +320,9 @@ Optional<SkFont> skia_font(Gfx::Font const& font, float scale, [[maybe_unused]]
+         if (requests_lcd_text && options.allows_lcd_text)
+             sk_font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
+     }
++#elif defined(AK_OS_WINDOWS)
++    if (!s_use_test_font_rendering && requests_lcd_text)
++        sk_font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
+ #endif
+ 
+     return sk_font;
+diff --git a/Services/Compositor/PaintingSurface.cpp b/Services/Compositor/PaintingSurface.cpp
+index bb6d1711d2..6d662ec992 100644
+--- a/Services/Compositor/PaintingSurface.cpp
++++ b/Services/Compositor/PaintingSurface.cpp
+@@ -113,7 +113,7 @@ static void release_d3d_texture(void* context)
+     texture->unref();
+ }
+ 
+-ErrorOr<NonnullRefPtr<PaintingSurface>> PaintingSurface::create_from_d3d_texture(NonnullRefPtr<SkiaBackendContext> context, NonnullRefPtr<D3DSharedTexture> texture, Origin origin)
++ErrorOr<NonnullRefPtr<PaintingSurface>> PaintingSurface::create_from_d3d_texture(NonnullRefPtr<SkiaBackendContext> context, NonnullRefPtr<D3DSharedTexture> texture, Origin origin, TextAntialiasing text_antialiasing)
+ {
+     auto size = texture->size();
+     GrD3DTextureResourceInfo info(nullptr, nullptr, D3D12_RESOURCE_STATE_COMMON, DXGI_FORMAT_R8G8B8A8_UNORM,
+@@ -124,8 +124,9 @@ ErrorOr<NonnullRefPtr<PaintingSurface>> PaintingSurface::create_from_d3d_texture
+     // Note, we're implicitly giving Skia a reference to the texture. It will eventually be released by the callback function,
+     // which is guaranteed to be invoked even if wrapping fails.
+     texture->ref();
++    auto properties = Compositor::skia_text_surface_properties(SkSurfaceProps::kDefault_Flag, text_antialiasing == TextAntialiasing::LCD);
+     sk_sp<SkSurface> surface = SkSurfaces::WrapBackendRenderTarget(context->sk_context(), render_target, origin_to_sk_origin(origin),
+-        kRGBA_8888_SkColorType, SkColorSpace::MakeSRGB(), nullptr, release_d3d_texture, texture.ptr());
++        kRGBA_8888_SkColorType, SkColorSpace::MakeSRGB(), &properties, release_d3d_texture, texture.ptr());
+     if (!surface)
+         return Error::from_string_literal("Failed to wrap shared Direct3D texture in a Skia surface");
+     return adopt_ref(*new PaintingSurface(make<Impl>(context, size, surface, nullptr, true)));
+diff --git a/Services/Compositor/PaintingSurface.h b/Services/Compositor/PaintingSurface.h
+index f309db0a98..fa8f32cfc1 100644
+--- a/Services/Compositor/PaintingSurface.h
++++ b/Services/Compositor/PaintingSurface.h
+@@ -73,7 +73,7 @@ public:
+ #endif
+ 
+ #ifdef USE_DIRECTX
+-    static ErrorOr<NonnullRefPtr<PaintingSurface>> create_from_d3d_texture(NonnullRefPtr<SkiaBackendContext>, NonnullRefPtr<D3DSharedTexture>, Origin = Origin::TopLeft);
++    static ErrorOr<NonnullRefPtr<PaintingSurface>> create_from_d3d_texture(NonnullRefPtr<SkiaBackendContext>, NonnullRefPtr<D3DSharedTexture>, Origin = Origin::TopLeft, TextAntialiasing = TextAntialiasing::Grayscale);
+ #endif
+ 
+     // The pixels of the bitmap are in the color space, which is sRGB unless one is given. The surface converts them
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index f7b026cc55..2fd72f538a 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -1422,6 +1422,12 @@ QImage Tab::render_hover_text(QString const& text) const
+     return image;
+ }
+ 
++void Tab::paintEvent(QPaintEvent*)
++{
++    QPainter painter(this);
++    painter.fillRect(rect(), Theme::panel().page);
++}
++
+ bool Tab::event(QEvent* event)
+ {
+     if ((event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate) && is_loaded()) {
+diff --git a/UI/Qt/Tab.h b/UI/Qt/Tab.h
+index 06e63dcde1..1cf43a8885 100644
+--- a/UI/Qt/Tab.h
++++ b/UI/Qt/Tab.h
+@@ -187,6 +187,7 @@ private:
+ 
+     void location_edit_return_pressed(String, Optional<URL::URL>, WebView::OmniboxDestinationKind);
+     virtual void resizeEvent(QResizeEvent*) override;
++    virtual void paintEvent(QPaintEvent*) override;
+     virtual void hideEvent(QHideEvent*) override;
+     virtual void showEvent(QShowEvent*) override;
+     virtual bool event(QEvent*) override;
+diff --git a/UI/Qt/WebContentView.cpp b/UI/Qt/WebContentView.cpp
+index a96dfcf483..a38d197c4e 100644
+--- a/UI/Qt/WebContentView.cpp
++++ b/UI/Qt/WebContentView.cpp
+@@ -148,6 +148,8 @@ WebContentView::WebContentView(QWidget* window, Optional<u64> hub_view_id, WebCo
+     setAttribute(Qt::WA_NativeWindow);
+     setParent(window);
+     setApi(QRhiWidget::Api::Direct3D11);
++    if (!hub_view_id.has_value())
++        set_page_background_color_to_system_canvas(websites_prefer_dark());
+ #elif defined(LADYBIRD_QT_USE_IOSURFACE_LAYER)
+     // The page is shown by a layer of this widget's own native view, and Qt paints the widget only while that layer does
+     // not cover it (see update_whether_qt_paints_view()).

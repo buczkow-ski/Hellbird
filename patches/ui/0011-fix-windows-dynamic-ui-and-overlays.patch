@@ -1,0 +1,400 @@
+diff --git a/UI/Qt/BookmarksBar.cpp b/UI/Qt/BookmarksBar.cpp
+index 553d37d7e0..42278d410c 100644
+--- a/UI/Qt/BookmarksBar.cpp
++++ b/UI/Qt/BookmarksBar.cpp
+@@ -444,6 +444,7 @@ void BookmarksBar::slide_out(int index, QPixmap const& image)
+             removeAction(placeholder_action);
+             placeholder_action->deleteLater();
+         }
++        QApplication::postEvent(this, new QEvent(QEvent::LayoutRequest));
+     });
+     animation->start(QAbstractAnimation::DeleteWhenStopped);
+ }
+@@ -543,6 +544,7 @@ void BookmarksBar::rebuild()
+                 slide_out(item.index, item.image);
+         }
+     }
++    QApplication::postEvent(this, new QEvent(QEvent::LayoutRequest));
+ }
+ 
+ int BookmarksBar::set_up_bookmark_button(QToolButton& button, QString const& title)
+@@ -1490,6 +1492,8 @@ BookmarksBarContainer::BookmarksBarContainer(WindowToolbar& toolbar, QWidget& pa
+ 
+     m_toolbar.installEventFilter(this);
+     m_page_stack.installEventFilter(this);
++    if (parent)
++        parent->installEventFilter(this);
+     m_bar->installEventFilter(this);
+     installEventFilter(this);
+     update_geometry();
+@@ -1612,9 +1616,10 @@ void BookmarksBarContainer::set_hover_expanded(bool expanded)
+ 
+ void BookmarksBarContainer::update_geometry()
+ {
++    auto has_bookmarks = !m_bar->actions().isEmpty();
+     auto show_bookmarks_bar = Application::settings().appearance().show_bookmarks_bar;
+     auto on_hover = show_bookmarks_bar == WebView::ShowBookmarksBar::OnHover;
+-    auto visible = !m_suppressed && !window()->isFullScreen()
++    auto visible = has_bookmarks && !m_suppressed && !window()->isFullScreen()
+         && (show_bookmarks_bar == WebView::ShowBookmarksBar::Always
+             || (show_bookmarks_bar == WebView::ShowBookmarksBar::OnHover && m_hover_expanded));
+ 
+@@ -1631,6 +1636,15 @@ void BookmarksBarContainer::update_geometry()
+     set_view_overlay_height(on_hover && visible ? height : 0);
+     setVisible(visible);
+ 
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    // A native child window inside a non-native ancestor (e.g. the page column below a dynamic tab strip) can lag
++    // behind when its ancestor moves without changing this widget's relative position.
++    if (visible && !on_hover) {
++        if (auto* handle = windowHandle())
++            handle->setPosition(mapTo(window(), QPoint {}));
++    }
++#endif
++
+     if (on_hover && visible) {
+         raise();
+ 
+@@ -1667,7 +1681,7 @@ bool BookmarksBarContainer::eventFilter(QObject* watched, QEvent* event)
+         if (static_cast<QDynamicPropertyChangeEvent*>(event)->propertyName() == "autocompleteOpen")
+             update_hover();
+     }
+-    if (watched == &m_page_stack && (event->type() == QEvent::Resize || event->type() == QEvent::Move))
++    if ((watched == &m_page_stack || watched == parentWidget()) && (event->type() == QEvent::Resize || event->type() == QEvent::Move))
+         update_geometry();
+     if (watched == this && event->type() == QEvent::Resize)
+         update_geometry();
+diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
+index 7d5a5b3809..46ba392456 100644
+--- a/UI/Qt/ChromeStyle.cpp
++++ b/UI/Qt/ChromeStyle.cpp
+@@ -1140,6 +1140,10 @@ QWidget#LadybirdTabStrip[dynamicLayout="true"] {{
+     border-bottom: 1px solid {7};
+ }}
+ 
++QWidget#LadybirdTabStrip[dynamicLayout="true"][bookmarksBarBelow="true"] {{
++    border-bottom: 0;
++}}
++
+ QWidget#LadybirdVerticalTabBar {{
+     color: {4};
+     background: {9};
+diff --git a/UI/Qt/FindInPageWidget.cpp b/UI/Qt/FindInPageWidget.cpp
+index f464d875c8..663a2186dd 100644
+--- a/UI/Qt/FindInPageWidget.cpp
++++ b/UI/Qt/FindInPageWidget.cpp
+@@ -25,7 +25,9 @@
+ #include <QKeyEvent>
+ #include <QLabel>
+ #include <QPainter>
++#include <QPainterPath>
+ #include <QPointer>
++#include <QRegion>
+ #include <QStyle>
+ #include <QVariantAnimation>
+ #include <QWindow>
+@@ -60,7 +62,7 @@ FindInPageWidget::FindInPageWidget(Tab* tab, WebContentView* content_view)
+ {
+     setObjectName("LadybirdFindInPageBar");
+     setAccessibleName("Find in page");
+-#if defined(AK_OS_MACOS)
++#if defined(AK_OS_MACOS) || defined(LADYBIRD_QT_USE_RHI_WIDGET)
+     setAttribute(Qt::WA_DontCreateNativeAncestors);
+     setAttribute(Qt::WA_NativeWindow);
+ #endif
+@@ -186,6 +188,10 @@ void FindInPageWidget::reposition()
+     auto position = QPoint(view_top_right.x() - PAGE_EDGE_INSET - BAR_WIDTH, view_top_right.y() + PAGE_TOP_INSET + qRound(m_opening_offset));
+     if (pos() != position)
+         move(position);
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    if (auto* handle = windowHandle())
++        handle->setPosition(mapTo(window(), QPoint {}));
++#endif
+ }
+ 
+ FindInPageWidget::~FindInPageWidget() = default;
+@@ -268,6 +274,20 @@ void FindInPageWidget::focusInEvent(QFocusEvent* event)
+ 
+ void FindInPageWidget::showEvent(QShowEvent*)
+ {
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    // An embedded native child window cannot fade cleanly with a graphics effect on Windows; show it immediately with
++    // rounded corners and raise its native handle above the web view.
++    m_opening_offset = 0;
++    if (!rect().isEmpty()) {
++        QPainterPath path;
++        path.addRoundedRect(QRectF(rect()), BAR_CORNER_RADIUS, BAR_CORNER_RADIUS);
++        setMask(QRegion(path.toFillPolygon().toPolygon()));
++    }
++    reposition();
++    raise();
++    if (auto* handle = windowHandle())
++        handle->raise();
++#else
+     // The bar fades in from 4 px above its place, or fades in only if the system asks for less motion.
+     auto set_opacity = [this](qreal opacity) {
+         set_floating_window_opacity(*this, opacity);
+@@ -292,8 +312,9 @@ void FindInPageWidget::showEvent(QShowEvent*)
+     m_opening_animation->start();
+     reposition();
+     raise();
+-#if defined(AK_OS_MACOS)
++#    if defined(AK_OS_MACOS)
+     round_appkit_view_corners(*this, BAR_CORNER_RADIUS, Theme::panel().edge);
++#    endif
+ #endif
+ 
+     if (m_tab && m_tab->isVisible())
+diff --git a/UI/Qt/PageCard.cpp b/UI/Qt/PageCard.cpp
+index 6531909c1e..1c2fba63ee 100644
+--- a/UI/Qt/PageCard.cpp
++++ b/UI/Qt/PageCard.cpp
+@@ -8,12 +8,17 @@
+ #include <UI/Qt/PageCard.h>
+ #include <UI/Qt/Popover.h>
+ #include <UI/Qt/Theme.h>
++#include <UI/Qt/WebContentView.h>
+ 
+ #include <QEvent>
+ #include <QHBoxLayout>
+ #include <QLabel>
++#include <QPainterPath>
+ #include <QPushButton>
++#include <QRegion>
++#include <QResizeEvent>
+ #include <QVBoxLayout>
++#include <QWindow>
+ 
+ #if defined(AK_OS_MACOS)
+ #    include <UI/Qt/MacWindow.h>
+@@ -32,7 +37,7 @@ PageCard::PageCard(QWidget& parent, QString const& title, QString const& text, V
+ {
+     setObjectName("LadybirdPageCard");
+     setAccessibleName(title);
+-#if defined(AK_OS_MACOS)
++#if defined(AK_OS_MACOS) || defined(LADYBIRD_QT_USE_RHI_WIDGET)
+     setAttribute(Qt::WA_DontCreateNativeAncestors);
+     setAttribute(Qt::WA_NativeWindow);
+ #endif
+@@ -74,13 +79,20 @@ PageCard::PageCard(QWidget& parent, QString const& title, QString const& text, V
+ 
+ void PageCard::reposition(QWidget& page, int top_offset)
+ {
+-    if (m_page != &page)
++    if (m_page != &page) {
+         raise();
++        if (auto* handle = windowHandle())
++            handle->raise();
++    }
+     m_page = &page;
+     auto page_top_left = page.mapTo(parentWidget(), QPoint(0, 0));
+     auto position = QPoint(page_top_left.x() + ((page.width() - width()) / 2), page_top_left.y() + PAGE_TOP_INSET + top_offset);
+     if (pos() != position)
+         move(position);
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    if (auto* handle = windowHandle())
++        handle->setPosition(mapTo(window(), QPoint(0, 0)));
++#endif
+ }
+ 
+ bool PageCard::event(QEvent* event)
+@@ -95,6 +107,30 @@ void PageCard::showEvent(QShowEvent* event)
+     QFrame::showEvent(event);
+ #if defined(AK_OS_MACOS)
+     round_appkit_view_corners(*this, CARD_CORNER_RADIUS, Theme::panel().edge);
++#elif defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    update_native_rounded_mask();
++    raise();
++    if (auto* handle = windowHandle()) {
++        handle->setPosition(mapTo(window(), QPoint(0, 0)));
++        handle->raise();
++    }
++#endif
++}
++
++void PageCard::resizeEvent(QResizeEvent* event)
++{
++    QFrame::resizeEvent(event);
++    update_native_rounded_mask();
++}
++
++void PageCard::update_native_rounded_mask()
++{
++#if defined(LADYBIRD_QT_USE_RHI_WIDGET)
++    if (rect().isEmpty())
++        return;
++    QPainterPath path;
++    path.addRoundedRect(QRectF(rect()), CARD_CORNER_RADIUS, CARD_CORNER_RADIUS);
++    setMask(QRegion(path.toFillPolygon().toPolygon()));
+ #endif
+ }
+ 
+diff --git a/UI/Qt/PageCard.h b/UI/Qt/PageCard.h
+index a24645f724..0c6b4bac4f 100644
+--- a/UI/Qt/PageCard.h
++++ b/UI/Qt/PageCard.h
+@@ -38,8 +38,10 @@ public:
+ private:
+     virtual bool event(QEvent*) override;
+     virtual void showEvent(QShowEvent*) override;
++    virtual void resizeEvent(QResizeEvent*) override;
+ 
+     void update_chrome_style();
++    void update_native_rounded_mask();
+ 
+     QPointer<QWidget> m_page;
+ };
+diff --git a/UI/Qt/TabBar.cpp b/UI/Qt/TabBar.cpp
+index 874547ae95..0931985be2 100644
+--- a/UI/Qt/TabBar.cpp
++++ b/UI/Qt/TabBar.cpp
+@@ -881,6 +881,7 @@ void TabBar::set_dynamic_pill_tabs(bool enabled)
+     if (m_dynamic_pill_tabs == enabled)
+         return;
+     m_dynamic_pill_tabs = enabled;
++    update_tab_button_geometry();
+     update();
+ }
+ 
+@@ -1157,7 +1158,7 @@ void TabBar::paintEvent(QPaintEvent*)
+             if (!tab_rect.isValid() || tab_rect.right() < 0 || tab_rect.left() > width())
+                 return;
+             if (m_dynamic_pill_tabs) {
+-                auto pill = horizontal_tab_card_shape_rect(QRectF(tab_rect), horizontal_tab_end_room(index)).adjusted(0, -1, 0, -2);
++                auto pill = horizontal_tab_shape_rect(index, tab_rect);
+                 painter.setBrush(horizontal_tab_hover_surface(Theme::chrome_palette(*this), hover_progress));
+                 painter.setPen(Qt::NoPen);
+                 painter.drawRoundedRect(pill, 7, 7);
+@@ -1211,7 +1212,7 @@ void TabBar::paintEvent(QPaintEvent*)
+         if (is_collapsed_vertical)
+             shape_rect = collapsed_vertical_tab_shape_rect(QRectF(tab_rect));
+         else if (!is_vertical)
+-            shape_rect = horizontal_tab_card_shape_rect(QRectF(tab_rect), horizontal_tab_end_room(index));
++            shape_rect = horizontal_tab_shape_rect(index, tab_rect);
+         else
+             shape_rect = tab_card_shape_rect(QRectF(tab_rect));
+         QRectF horizontal_body_rect;
+@@ -1267,11 +1268,10 @@ void TabBar::paintEvent(QPaintEvent*)
+             if (is_vertical) {
+                 paint_selected_vertical_tab(painter, Theme::chrome_palette(*this), shape_rect, vertical_tab_radius);
+             } else if (m_dynamic_pill_tabs) {
+-                auto pill = shape_rect.adjusted(0, -1, 0, -2);
+                 auto dark = Theme::is_dark(*this);
+                 painter.setPen(Qt::NoPen);
+                 painter.setBrush(dark ? QColor(255, 255, 255, 24) : QColor(28, 25, 23, 18));
+-                painter.drawRoundedRect(pill, 7, 7);
++                painter.drawRoundedRect(shape_rect, 7, 7);
+             } else {
+                 painter.setPen(Qt::NoPen);
+                 painter.setBrush(ChromeStyle::chrome_active_tab_surface(Theme::chrome_palette(*this)));
+@@ -2116,13 +2116,26 @@ qreal TabBar::selection_of(int index) const
+     return 0.0;
+ }
+ 
++QRectF TabBar::horizontal_tab_shape_rect(int index, QRect const& tab_rect) const
++{
++    auto end_room = horizontal_tab_end_room(index);
++    if (m_dynamic_pill_tabs) {
++        auto rect = QRectF(tab_rect);
++        auto inset = HORIZONTAL_TAB_CARD_SHAPE_HORIZONTAL_INSET * horizontal_tab_padding_scale(rect, end_room);
++        auto left_inset = inset + end_room.left;
++        auto right_inset = inset + end_room.right;
++        return rect.adjusted(left_inset, 3, -right_inset, -3);
++    }
++    return horizontal_tab_card_shape_rect(QRectF(tab_rect), end_room);
++}
++
+ // A horizontal tab's content is padded within its card, or within its body once it is selected. It moves between the
+ // two as the selection cross-fades.
+ QRectF TabBar::horizontal_tab_contents_rect(int index, QRect const& tab_rect) const
+ {
+     // NB: A tab's contents keep their place as it is selected, while only its background grows around them.
+     auto end_room = horizontal_tab_end_room(index);
+-    auto card = horizontal_tab_card_shape_rect(QRectF(tab_rect), end_room);
++    auto card = horizontal_tab_shape_rect(index, tab_rect);
+     auto padding_scale = horizontal_tab_padding_scale(QRectF(tab_rect), end_room);
+     return card.adjusted(HORIZONTAL_TAB_CONTENT_LEFT_PADDING * padding_scale, 0, -HORIZONTAL_TAB_CONTENT_RIGHT_PADDING * padding_scale, 0);
+ }
+@@ -2827,7 +2840,7 @@ void TabBar::update_tab_button_geometry()
+         for (int index = 0; index < count(); ++index) {
+             auto is_dragged = index == dragged_index;
+             auto tab_rect = shifted_tab_rect(index);
+-            auto shape_rect = horizontal_tab_card_shape_rect(QRectF(tab_rect), horizontal_tab_end_room(index));
++            auto shape_rect = horizontal_tab_shape_rect(index, tab_rect);
+             auto* left_button = tabButton(index, QTabBar::LeftSide);
+             prepare_button(left_button, TabBarButton::Placement::Tab);
+             auto* microphone = microphone_indicator(index);
+@@ -3098,6 +3111,7 @@ TabWidget::TabWidget(WebView::IsPrivate is_private, QWidget* parent)
+     m_page_column_layout->setSpacing(0);
+     m_page_column_layout->setContentsMargins(0, 0, 0, 0);
+     m_bookmarks_bar = new BookmarksBarContainer(*m_toolbar, *m_stacked_widget, m_page_column);
++    m_bookmarks_bar->installEventFilter(this);
+     m_bookmarks_bar->bar().installEventFilter(this);
+     m_notification_bar_column = new QWidget(m_page_column);
+     m_notification_bar_column->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+@@ -4111,6 +4125,9 @@ bool TabWidget::eventFilter(QObject* watched, QEvent* event)
+     if ((watched == m_page_column || watched == m_vertical_tabs_content) && (event->type() == QEvent::Move || event->type() == QEvent::Resize))
+         place_toolbar_over_page_column();
+ 
++    if (watched == m_bookmarks_bar && (event->type() == QEvent::Show || event->type() == QEvent::Hide))
++        set_dynamic_property_if_needed(*m_tab_bar_row, "bookmarksBarBelow", is_dynamic_horizontal() && !m_bookmarks_bar->isHidden() && !m_bookmarks_bar->shows_over_page());
++
+     // NB: Each step of a sidebar toggle lays out the sidebar itself, with the pictures of its buttons on top.
+     if (watched == m_toolbar && event->type() == QEvent::Resize && !slides_page_with_toggling_sidebar()) {
+         update_vertical_tabs_column_margins();
+@@ -4505,7 +4522,7 @@ void TabWidget::rebuild_layout_for_horizontal_tabs()
+     if (is_dynamic_horizontal()) {
+         m_tab_bar_row->setMinimumHeight(HORIZONTAL_TAB_STRIP_HEIGHT);
+         m_tab_bar_row_layout->setSpacing(0);
+-        m_tab_bar_row_layout->setContentsMargins(6, 0, 6, 3);
++        m_tab_bar_row_layout->setContentsMargins(6, 1, 6, 2);
+         m_new_tab_button->hide();
+         m_tab_bar_row_layout->addWidget(m_tab_bar, 0, Qt::AlignVCenter);
+         m_tab_bar_row_layout->addStretch(1);
+@@ -5338,11 +5355,17 @@ void TabWidget::update_tab_chrome_visibility()
+     auto is_horizontal = tab_layout == TabLayout::Horizontal;
+     auto dynamic_horizontal = is_dynamic_horizontal();
+     auto show_top_row = m_tab_bar_visible && is_horizontal && (!dynamic_horizontal || m_tab_bar->count() > 1);
++    auto top_row_visibility_changed = m_tab_bar_row->isVisibleTo(this) != show_top_row;
+     m_tab_bar_row->setVisible(show_top_row);
++    set_dynamic_property_if_needed(*m_tab_bar_row, "bookmarksBarBelow", dynamic_horizontal && !m_bookmarks_bar->isHidden() && !m_bookmarks_bar->shows_over_page());
+     m_toolbar->set_dynamic_tabs_below(dynamic_horizontal && show_top_row);
+     m_toolbar->setVisible(m_tab_bar_visible);
+     m_toolbar_placeholder->setVisible(m_tab_bar_visible && m_toolbar_follows_page_column);
+     m_vertical_tab_bar_column->setVisible(m_tab_bar_visible && !is_horizontal);
++    if (top_row_visibility_changed) {
++        m_main_layout->activate();
++        m_bookmarks_bar->update_geometry();
++    }
+     place_sidebar_toggle_in_corner();
+     update_vertical_tabs_content_separator();
+ 
+diff --git a/UI/Qt/TabBar.h b/UI/Qt/TabBar.h
+index f336e39af3..23486a1e4a 100644
+--- a/UI/Qt/TabBar.h
++++ b/UI/Qt/TabBar.h
+@@ -226,6 +226,7 @@ private:
+     TabMicrophoneIndicator* microphone_indicator(int index) const;
+     int horizontal_tab_min_width(int index) const;
+     int horizontal_tab_share() const;
++    QRectF horizontal_tab_shape_rect(int index, QRect const& tab_rect) const;
+ 
+     QPointer<TabWidget> m_tab_widget;
+ 
+diff --git a/UI/Qt/WindowToolbar.cpp b/UI/Qt/WindowToolbar.cpp
+index f8ba69ed6d..c5c0ec73fd 100644
+--- a/UI/Qt/WindowToolbar.cpp
++++ b/UI/Qt/WindowToolbar.cpp
+@@ -1336,10 +1336,12 @@ WindowToolbar::WindowToolbar(WebView::IsPrivate is_private, QWidget* parent)
+     setObjectName("LadybirdToolbarContainer");
+     // NB: The style sheet paints the toolbar's background, which a QWidget subclass only draws when asked to.
+     setAttribute(Qt::WA_StyledBackground);
++    setProperty(WINDOW_DRAG_REGION_PROPERTY, true);
+     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+ 
+     m_toolbar = new QWidget(this);
+     m_toolbar->setObjectName("LadybirdNavigationToolbar");
++    m_toolbar->setProperty(WINDOW_DRAG_REGION_PROPERTY, true);
+     m_toolbar->setFixedHeight(browser_chrome_layout_policy().toolbar_height);
+     m_toolbar->setSizePolicy(QSizePolicy::MinimumExpanding, QSizePolicy::Fixed);
+ 

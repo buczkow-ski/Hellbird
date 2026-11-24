@@ -1,0 +1,2329 @@
+diff --git a/Base/res/ladybird/about-pages/subscribe.html b/Base/res/ladybird/about-pages/subscribe.html
+new file mode 100644
+index 0000000000..2ef94bc39b
+--- /dev/null
++++ b/Base/res/ladybird/about-pages/subscribe.html
+@@ -0,0 +1,1030 @@
++<!doctype html>
++<!--
++Copyright (c) 2026, the Hellbird contributors.
++SPDX-License-Identifier: BSD-2-Clause
++-->
++<html lang="en">
++    <head>
++        <meta charset="UTF-8" />
++        <meta name="viewport" content="width=device-width, initial-scale=1" />
++        <meta name="color-scheme" content="light dark" />
++        <title>Hellbird Shield — Filter List Preview</title>
++        <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
++        <link rel="stylesheet" type="text/css" href="resource://ladybird/ladybird.css" />
++        <style>
++            :root {
++                --banner-bg: #1c4e91;
++                --banner-bg-end: #163d73;
++                --banner-text: #ffffff;
++                --banner-muted: rgba(255, 255, 255, 0.82);
++                --banner-pill: rgba(255, 255, 255, 0.14);
++                --gutter-bg: #f6f6f8;
++                --gutter-text: #8b8b94;
++                --code-bg: #ffffff;
++                --code-comment: #6e7681;
++                --code-section: #525866;
++                --code-cosmetic: #1d5dbf;
++                --code-exception: #1b7f37;
++                --code-option: #9a4d00;
++                --code-match-bg: rgba(255, 212, 59, 0.42);
++                --code-match-current-bg: rgba(255, 149, 0, 0.62);
++                --code-line-hover: rgba(0, 0, 0, 0.03);
++            }
++
++            @media (prefers-color-scheme: dark) {
++                :root {
++                    --banner-bg: #1a3f75;
++                    --banner-bg-end: #132d54;
++                    --gutter-bg: #232327;
++                    --gutter-text: #74747e;
++                    --code-bg: #18181b;
++                    --code-comment: #8b949e;
++                    --code-section: #b2bac4;
++                    --code-cosmetic: #79b8ff;
++                    --code-exception: #56d364;
++                    --code-option: #f2a33a;
++                    --code-match-bg: rgba(242, 163, 58, 0.28);
++                    --code-match-current-bg: rgba(242, 163, 58, 0.6);
++                    --code-line-hover: rgba(255, 255, 255, 0.035);
++                }
++            }
++
++            * {
++                box-sizing: border-box;
++            }
++
++            html,
++            body {
++                margin: 0;
++                padding: 0;
++                height: 100%;
++                background: var(--code-bg);
++                color: var(--text);
++            }
++
++            body {
++                display: flex;
++                flex-direction: column;
++                overflow: hidden;
++            }
++
++            .banner {
++                display: flex;
++                align-items: center;
++                gap: 14px;
++                padding: 12px 18px;
++                background: linear-gradient(135deg, var(--banner-bg), var(--banner-bg-end));
++                color: var(--banner-text);
++                flex-shrink: 0;
++                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
++                z-index: 2;
++            }
++
++            .shield-badge {
++                width: 36px;
++                height: 36px;
++                border-radius: 9px;
++                background: #9f1d24;
++                display: flex;
++                align-items: center;
++                justify-content: center;
++                flex-shrink: 0;
++                box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
++            }
++
++            .shield-badge svg {
++                width: 22px;
++                height: 22px;
++                color: #ffffff;
++            }
++
++            .banner-info {
++                flex: 1;
++                min-width: 0;
++            }
++
++            .banner-title {
++                margin: 0;
++                font-size: 16px;
++                font-weight: 600;
++                line-height: 1.25;
++                white-space: nowrap;
++                overflow: hidden;
++                text-overflow: ellipsis;
++            }
++
++            .banner-url {
++                display: block;
++                margin-top: 2px;
++                font-size: 12px;
++                color: var(--banner-muted);
++                text-decoration: underline;
++                text-underline-offset: 2px;
++                white-space: nowrap;
++                overflow: hidden;
++                text-overflow: ellipsis;
++            }
++
++            .banner-meta {
++                display: flex;
++                flex-wrap: wrap;
++                gap: 6px;
++                margin-top: 6px;
++            }
++
++            .meta-pill {
++                display: inline-flex;
++                align-items: center;
++                padding: 2px 8px;
++                border-radius: 999px;
++                font-size: 11px;
++                background: var(--banner-pill);
++                color: var(--banner-text);
++            }
++
++            .banner-actions {
++                display: flex;
++                align-items: center;
++                gap: 8px;
++                flex-shrink: 0;
++            }
++
++            .banner-btn {
++                height: 34px;
++                padding: 0 16px;
++                border-radius: 7px;
++                border: 1px solid rgba(255, 255, 255, 0.25);
++                font-size: 13px;
++                font-weight: 600;
++                cursor: pointer;
++                background: rgba(255, 255, 255, 0.92);
++                color: #163663;
++                transition: background-color 120ms ease, transform 80ms ease;
++            }
++
++            .banner-btn:hover:not(:disabled) {
++                background: #ffffff;
++            }
++
++            .banner-btn:disabled {
++                opacity: 0.6;
++                cursor: default;
++            }
++
++            .banner-btn.subscribed {
++                background: #1f8a42;
++                border-color: rgba(255, 255, 255, 0.22);
++                color: #ffffff;
++            }
++
++            .banner-btn.subscribed:hover:not(:disabled) {
++                background: #1b7839;
++            }
++
++            .banner-btn.secondary {
++                background: rgba(255, 255, 255, 0.12);
++                border-color: rgba(255, 255, 255, 0.24);
++                color: #ffffff;
++                font-weight: 500;
++            }
++
++            .banner-btn.secondary:hover:not(:disabled) {
++                background: rgba(255, 255, 255, 0.22);
++            }
++
++            .toolbar {
++                display: flex;
++                align-items: center;
++                gap: 8px;
++                padding: 7px 14px;
++                background: var(--surface);
++                border-bottom: 1px solid var(--separator);
++                flex-shrink: 0;
++            }
++
++            .search-wrap {
++                position: relative;
++                display: flex;
++                align-items: center;
++                width: min(320px, 55vw);
++            }
++
++            .search-wrap svg {
++                position: absolute;
++                left: 9px;
++                width: 14px;
++                height: 14px;
++                color: var(--muted);
++                pointer-events: none;
++            }
++
++            #search-input {
++                width: 100%;
++                height: 28px;
++                padding: 0 10px 0 30px;
++                border-radius: 6px;
++                border: 1px solid var(--separator);
++                background: var(--page);
++                color: var(--text);
++                font-size: 12.5px;
++            }
++
++            #search-input:focus {
++                outline: none;
++                border-color: var(--focus-edge);
++                box-shadow: 0 0 0 2px var(--focus-ring);
++            }
++
++            .tool-btn {
++                height: 28px;
++                min-width: 28px;
++                padding: 0 8px;
++                border-radius: 6px;
++                border: 1px solid transparent;
++                background: transparent;
++                color: var(--text);
++                font-size: 12.5px;
++                cursor: pointer;
++                display: inline-flex;
++                align-items: center;
++                justify-content: center;
++                gap: 5px;
++            }
++
++            .tool-btn:hover:not(:disabled) {
++                background: var(--control);
++            }
++
++            .tool-btn:disabled {
++                opacity: 0.4;
++                cursor: default;
++            }
++
++            .search-count {
++                font-size: 12px;
++                color: var(--muted);
++                font-variant-numeric: tabular-nums;
++                min-width: 48px;
++            }
++
++            .toolbar-spacer {
++                flex: 1;
++            }
++
++            .status-text {
++                font-size: 12px;
++                color: var(--muted);
++            }
++
++            .status-text.ok {
++                color: var(--success);
++                font-weight: 500;
++            }
++
++            .status-text.err {
++                color: var(--error);
++                font-weight: 500;
++            }
++
++            .viewer-container {
++                flex: 1;
++                overflow: auto;
++                position: relative;
++                background: var(--code-bg);
++            }
++
++            .code-lines {
++                font-family: ui-monospace, "Cascadia Mono", Consolas, Menlo, "Liberation Mono", monospace;
++                font-size: 12.5px;
++                line-height: 1.48;
++                padding: 8px 0 24px;
++                min-width: max-content;
++            }
++
++            .code-row {
++                display: flex;
++                padding-right: 18px;
++                content-visibility: auto;
++                contain-intrinsic-size: auto 19px;
++            }
++
++            .code-row:hover {
++                background: var(--code-line-hover);
++            }
++
++            .code-row.match-current {
++                background: var(--code-match-bg);
++            }
++
++            .line-num {
++                width: 60px;
++                padding: 0 12px 0 8px;
++                text-align: right;
++                user-select: none;
++                color: var(--gutter-text);
++                background: var(--gutter-bg);
++                border-right: 1px solid var(--separator-soft);
++                flex-shrink: 0;
++                font-variant-numeric: tabular-nums;
++            }
++
++            .line-text {
++                padding-left: 12px;
++                white-space: pre;
++            }
++
++            .tok-comment {
++                color: var(--code-comment);
++            }
++
++            .tok-section {
++                color: var(--code-section);
++                font-weight: 600;
++            }
++
++            .tok-cosmetic {
++                color: var(--code-cosmetic);
++            }
++
++            .tok-exception {
++                color: var(--code-exception);
++            }
++
++            .tok-option {
++                color: var(--code-option);
++            }
++
++            mark.hit {
++                background: var(--code-match-bg);
++                color: inherit;
++                border-radius: 2px;
++                padding: 0 1px;
++            }
++
++            mark.hit.current {
++                background: var(--code-match-current-bg);
++            }
++
++            .load-more-bar {
++                padding: 12px 72px 20px;
++                display: flex;
++                align-items: center;
++                gap: 10px;
++                color: var(--muted);
++                font-size: 12.5px;
++            }
++
++            .state-panel {
++                max-width: 560px;
++                margin: 56px auto;
++                padding: 24px;
++                border-radius: 12px;
++                background: var(--surface);
++                border: 1px solid var(--separator);
++            }
++
++            .state-panel h2 {
++                margin: 0 0 8px;
++                font-size: 17px;
++            }
++
++            .state-panel p {
++                margin: 0 0 16px;
++                color: var(--muted);
++                font-size: 13.5px;
++                line-height: 1.5;
++            }
++
++            .manual-form {
++                display: flex;
++                gap: 8px;
++            }
++
++            .manual-form input {
++                flex: 1;
++                height: 36px;
++                padding: 0 12px;
++                border-radius: 7px;
++                border: 1px solid var(--separator);
++                background: var(--page);
++                color: var(--text);
++                font-size: 13.5px;
++            }
++
++            .manual-form button,
++            .load-more-bar button {
++                height: 36px;
++                padding: 0 16px;
++                border-radius: 7px;
++                border: 0;
++                background: var(--primary);
++                color: #ffffff;
++                font-size: 13px;
++                font-weight: 600;
++                cursor: pointer;
++            }
++
++            .load-more-bar button {
++                height: 30px;
++                padding: 0 12px;
++                font-size: 12.5px;
++            }
++
++            .hidden {
++                display: none !important;
++            }
++        </style>
++    </head>
++    <body>
++        <header class="banner">
++            <div class="shield-badge" aria-hidden="true">
++                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
++                    <path d="M8 1.5l5 2v4.5c0 3-2 5-5 6.5-3-1.5-5-3.5-5-6.5V3.5z" />
++                    <path d="M5.7 8.1l1.6 1.6 3.1-3.3" stroke-linecap="round" />
++                </svg>
++            </div>
++            <div class="banner-info">
++                <h1 id="list-title" class="banner-title">Filter List Subscription</h1>
++                <a id="list-url" class="banner-url hidden" target="_blank" rel="noopener noreferrer"></a>
++                <div id="list-meta" class="banner-meta"></div>
++            </div>
++            <div class="banner-actions">
++                <button id="subscribe-btn" class="banner-btn" type="button" disabled>Subscribe</button>
++                <button id="unsubscribe-btn" class="banner-btn secondary hidden" type="button">Unsubscribe</button>
++                <a class="banner-btn secondary" href="about:settings#blocking" style="display:inline-flex;align-items:center;text-decoration:none;">Filter lists</a>
++            </div>
++        </header>
++
++        <div id="toolbar" class="toolbar hidden">
++            <div class="search-wrap">
++                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
++                    <circle cx="7" cy="7" r="4.5" />
++                    <path d="M10.5 10.5L14 14" stroke-linecap="round" />
++                </svg>
++                <input
++                    id="search-input"
++                    type="search"
++                    placeholder="Find in filter list…"
++                    aria-label="Find in filter list"
++                    spellcheck="false"
++                />
++            </div>
++            <button id="prev-match" class="tool-btn" type="button" title="Previous match (Shift+Enter)" disabled>&#9650;</button>
++            <button id="next-match" class="tool-btn" type="button" title="Next match (Enter)" disabled>&#9660;</button>
++            <span id="search-count" class="search-count"></span>
++            <div class="toolbar-spacer"></div>
++            <span id="status-text" class="status-text" role="status"></span>
++            <button id="copy-url-btn" class="tool-btn" type="button" title="Copy filter list URL">Copy URL</button>
++        </div>
++
++        <main id="viewer" class="viewer-container">
++            <div id="manual-panel" class="state-panel hidden">
++                <h2>Preview &amp; subscribe to a filter list</h2>
++                <p>
++                    Enter an HTTP or HTTPS filter list URL (Adblock Plus / uBlock Origin format) to inspect its rules
++                    before subscribing. You can also click any <code>abp:subscribe</code> link on the web to open it
++                    here automatically.
++                </p>
++                <form id="manual-form" class="manual-form">
++                    <input
++                        id="manual-url"
++                        type="url"
++                        placeholder="https://example.com/filters.txt"
++                        required
++                    />
++                    <button type="submit">Preview</button>
++                </form>
++            </div>
++
++            <div id="loading-panel" class="state-panel hidden">
++                <h2>Loading filter list…</h2>
++                <p id="loading-url"></p>
++            </div>
++
++            <div id="error-panel" class="state-panel hidden">
++                <h2>Unable to load filter list</h2>
++                <p id="error-message"></p>
++                <button id="retry-btn" class="banner-btn" type="button">Retry</button>
++            </div>
++
++            <div id="code-lines" class="code-lines hidden"></div>
++            <div id="load-more-bar" class="load-more-bar hidden">
++                <span id="load-more-text"></span>
++                <button id="load-more-btn" type="button">Show more lines</button>
++                <button id="load-all-btn" type="button">Show all</button>
++            </div>
++        </main>
++
++        <script type="module">
++            const titleEl = document.querySelector("#list-title");
++            const urlEl = document.querySelector("#list-url");
++            const metaEl = document.querySelector("#list-meta");
++            const subscribeBtn = document.querySelector("#subscribe-btn");
++            const unsubscribeBtn = document.querySelector("#unsubscribe-btn");
++            const toolbar = document.querySelector("#toolbar");
++            const searchInput = document.querySelector("#search-input");
++            const prevMatchBtn = document.querySelector("#prev-match");
++            const nextMatchBtn = document.querySelector("#next-match");
++            const searchCountEl = document.querySelector("#search-count");
++            const statusTextEl = document.querySelector("#status-text");
++            const copyUrlBtn = document.querySelector("#copy-url-btn");
++            const manualPanel = document.querySelector("#manual-panel");
++            const manualForm = document.querySelector("#manual-form");
++            const manualUrlInput = document.querySelector("#manual-url");
++            const loadingPanel = document.querySelector("#loading-panel");
++            const loadingUrlEl = document.querySelector("#loading-url");
++            const errorPanel = document.querySelector("#error-panel");
++            const errorMessageEl = document.querySelector("#error-message");
++            const retryBtn = document.querySelector("#retry-btn");
++            const codeLinesEl = document.querySelector("#code-lines");
++            const loadMoreBar = document.querySelector("#load-more-bar");
++            const loadMoreText = document.querySelector("#load-more-text");
++            const loadMoreBtn = document.querySelector("#load-more-btn");
++            const loadAllBtn = document.querySelector("#load-all-btn");
++
++            const INITIAL_RENDER_CHUNK = 2000;
++            const RENDER_STEP = 3000;
++
++            let isConnected = false;
++            let hasLoadedList = false;
++            let currentUrl = "";
++            let currentTitle = "";
++            let currentIdentifier = null;
++            let currentBuiltIn = false;
++            let currentSubscribed = false;
++            let currentEnabled = false;
++            let currentGlobalEnabled = true;
++            let allLines = [];
++            let renderedCount = 0;
++            let matchingLineIndices = [];
++            let currentMatchCursor = -1;
++            let currentQuery = "";
++
++            function parseSafeHttpUrl(raw) {
++                try {
++                    const parsed = new URL(raw);
++                    if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.href;
++                } catch {}
++                return null;
++            }
++
++            function setStatus(text, kind = "") {
++                statusTextEl.textContent = text;
++                statusTextEl.className = kind ? `status-text ${kind}` : "status-text";
++            }
++
++            function hideAllPanels() {
++                manualPanel.classList.add("hidden");
++                loadingPanel.classList.add("hidden");
++                errorPanel.classList.add("hidden");
++                codeLinesEl.classList.add("hidden");
++                loadMoreBar.classList.add("hidden");
++            }
++
++            function addMetaPill(text) {
++                const pill = document.createElement("span");
++                pill.className = "meta-pill";
++                pill.textContent = text;
++                metaEl.append(pill);
++            }
++
++            function updateSubscriptionButtons() {
++                const active = currentSubscribed && currentEnabled;
++                if (!currentUrl) {
++                    subscribeBtn.disabled = true;
++                    subscribeBtn.textContent = "Subscribe";
++                    subscribeBtn.classList.remove("subscribed");
++                    unsubscribeBtn.classList.add("hidden");
++                    return;
++                }
++
++                if (active) {
++                    subscribeBtn.textContent = "Subscribed \u2713";
++                    subscribeBtn.classList.add("subscribed");
++                    subscribeBtn.disabled = true;
++                    unsubscribeBtn.textContent = currentBuiltIn ? "Disable" : "Unsubscribe";
++                    unsubscribeBtn.classList.remove("hidden");
++                } else {
++                    subscribeBtn.textContent = currentSubscribed ? "Enable list" : "Subscribe";
++                    subscribeBtn.classList.remove("subscribed");
++                    subscribeBtn.disabled = !hasLoadedList;
++                    unsubscribeBtn.classList.add("hidden");
++                }
++            }
++
++            function appendHighlightedText(parent, text, query, isCurrentLine) {
++                if (!query) {
++                    parent.append(document.createTextNode(text));
++                    return;
++                }
++                const lower = text.toLowerCase();
++                const q = query.toLowerCase();
++                let pos = 0;
++                let idx = lower.indexOf(q, pos);
++                while (idx !== -1) {
++                    if (idx > pos) parent.append(document.createTextNode(text.slice(pos, idx)));
++                    const mark = document.createElement("mark");
++                    mark.className = isCurrentLine ? "hit current" : "hit";
++                    mark.textContent = text.slice(idx, idx + query.length);
++                    parent.append(mark);
++                    pos = idx + query.length;
++                    idx = lower.indexOf(q, pos);
++                }
++                if (pos < text.length) parent.append(document.createTextNode(text.slice(pos)));
++            }
++
++            function buildLineRow(lineIndex, lineText, query, isCurrentMatch) {
++                const row = document.createElement("div");
++                row.className = isCurrentMatch ? "code-row match-current" : "code-row";
++                row.dataset.line = String(lineIndex);
++
++                const num = document.createElement("span");
++                num.className = "line-num";
++                num.textContent = String(lineIndex + 1);
++
++                const content = document.createElement("span");
++                content.className = "line-text";
++
++                const trimmed = lineText.trimStart();
++                if (trimmed.startsWith("!#") || trimmed.startsWith("!---") || trimmed.startsWith("! ===")) {
++                    const span = document.createElement("span");
++                    span.className = "tok-section";
++                    appendHighlightedText(span, lineText, query, isCurrentMatch);
++                    content.append(span);
++                } else if (trimmed.startsWith("!") || trimmed.startsWith("[Adblock")) {
++                    const span = document.createElement("span");
++                    span.className = "tok-comment";
++                    appendHighlightedText(span, lineText, query, isCurrentMatch);
++                    content.append(span);
++                } else if (trimmed.startsWith("@@")) {
++                    const span = document.createElement("span");
++                    span.className = "tok-exception";
++                    appendHighlightedText(span, lineText, query, isCurrentMatch);
++                    content.append(span);
++                } else if (
++                    lineText.includes("##") ||
++                    lineText.includes("#@#") ||
++                    lineText.includes("#?#") ||
++                    lineText.includes("#$#")
++                ) {
++                    const span = document.createElement("span");
++                    span.className = "tok-cosmetic";
++                    appendHighlightedText(span, lineText, query, isCurrentMatch);
++                    content.append(span);
++                } else {
++                    const dollarIdx = lineText.lastIndexOf("$");
++                    if (dollarIdx > 0 && !lineText.includes(" ")) {
++                        const base = lineText.slice(0, dollarIdx);
++                        const opts = lineText.slice(dollarIdx);
++                        appendHighlightedText(content, base, query, isCurrentMatch);
++                        const optSpan = document.createElement("span");
++                        optSpan.className = "tok-option";
++                        appendHighlightedText(optSpan, opts, query, isCurrentMatch);
++                        content.append(optSpan);
++                    } else {
++                        appendHighlightedText(content, lineText, query, isCurrentMatch);
++                    }
++                }
++
++                row.append(num, content);
++                return row;
++            }
++
++            function updateLoadMoreBar() {
++                if (renderedCount < allLines.length) {
++                    loadMoreText.textContent = `Showing ${renderedCount.toLocaleString()} of ${allLines.length.toLocaleString()} lines`;
++                    loadMoreBar.classList.remove("hidden");
++                } else {
++                    loadMoreBar.classList.add("hidden");
++                }
++            }
++
++            function renderUpTo(targetCount) {
++                const clamped = Math.min(targetCount, allLines.length);
++                const fragment = document.createDocumentFragment();
++                const currentMatchLine =
++                    currentMatchCursor >= 0 ? matchingLineIndices[currentMatchCursor] : -1;
++                for (let i = renderedCount; i < clamped; i++) {
++                    fragment.append(buildLineRow(i, allLines[i], currentQuery, i === currentMatchLine));
++                }
++                codeLinesEl.append(fragment);
++                renderedCount = clamped;
++                updateLoadMoreBar();
++            }
++
++            function rerenderLines(limit = Math.max(renderedCount, INITIAL_RENDER_CHUNK)) {
++                codeLinesEl.replaceChildren();
++                renderedCount = 0;
++                renderUpTo(limit);
++            }
++
++            function runSearch() {
++                currentQuery = searchInput.value;
++                matchingLineIndices = [];
++                currentMatchCursor = -1;
++
++                if (currentQuery.length > 0) {
++                    const q = currentQuery.toLowerCase();
++                    for (let i = 0; i < allLines.length; i++) {
++                        if (allLines[i].toLowerCase().includes(q)) {
++                            matchingLineIndices.push(i);
++                        }
++                    }
++                    if (matchingLineIndices.length > 0) {
++                        currentMatchCursor = 0;
++                    }
++                }
++
++                updateSearchUI();
++                const targetLimit =
++                    currentMatchCursor >= 0
++                        ? Math.max(renderedCount, matchingLineIndices[currentMatchCursor] + 50)
++                        : Math.max(renderedCount, INITIAL_RENDER_CHUNK);
++                rerenderLines(targetLimit);
++                scrollToCurrentMatch();
++            }
++
++            function updateSearchUI() {
++                const count = matchingLineIndices.length;
++                prevMatchBtn.disabled = count === 0;
++                nextMatchBtn.disabled = count === 0;
++                if (!currentQuery) {
++                    searchCountEl.textContent = "";
++                } else if (count === 0) {
++                    searchCountEl.textContent = "0 / 0";
++                } else {
++                    searchCountEl.textContent = `${currentMatchCursor + 1} / ${count}`;
++                }
++            }
++
++            function scrollToCurrentMatch() {
++                if (currentMatchCursor < 0 || currentMatchCursor >= matchingLineIndices.length) return;
++                const lineIndex = matchingLineIndices[currentMatchCursor];
++                if (lineIndex >= renderedCount) {
++                    renderUpTo(lineIndex + 100);
++                }
++                const row = codeLinesEl.querySelector(`.code-row[data-line="${lineIndex}"]`);
++                if (row) {
++                    row.scrollIntoView({ block: "center" });
++                }
++            }
++
++            function stepMatch(delta) {
++                if (matchingLineIndices.length === 0) return;
++                const prevLine = matchingLineIndices[currentMatchCursor];
++                currentMatchCursor =
++                    (currentMatchCursor + delta + matchingLineIndices.length) % matchingLineIndices.length;
++                const nextLine = matchingLineIndices[currentMatchCursor];
++                updateSearchUI();
++
++                if (nextLine >= renderedCount) {
++                    renderUpTo(nextLine + 100);
++                }
++                const prevRow = codeLinesEl.querySelector(`.code-row[data-line="${prevLine}"]`);
++                if (prevRow) {
++                    prevRow.replaceWith(buildLineRow(prevLine, allLines[prevLine], currentQuery, false));
++                }
++                const nextRow = codeLinesEl.querySelector(`.code-row[data-line="${nextLine}"]`);
++                if (nextRow) {
++                    const replacement = buildLineRow(nextLine, allLines[nextLine], currentQuery, true);
++                    nextRow.replaceWith(replacement);
++                    replacement.scrollIntoView({ block: "center" });
++                }
++            }
++
++            function requestLoad(url, title) {
++                const safeUrl = parseSafeHttpUrl(url);
++                hasLoadedList = false;
++                currentIdentifier = null;
++                currentBuiltIn = false;
++                currentSubscribed = false;
++                currentEnabled = false;
++                allLines = [];
++                renderedCount = 0;
++                matchingLineIndices = [];
++                currentMatchCursor = -1;
++                currentQuery = "";
++                searchInput.value = "";
++                updateSearchUI();
++                metaEl.replaceChildren();
++                toolbar.classList.add("hidden");
++                setStatus("");
++
++                if (!safeUrl) {
++                    currentUrl = "";
++                    currentTitle = "";
++                    titleEl.textContent = "Filter List Subscription";
++                    document.title = "Hellbird Shield — Filter List Preview";
++                    urlEl.removeAttribute("href");
++                    urlEl.textContent = "";
++                    urlEl.classList.add("hidden");
++                    hideAllPanels();
++                    errorMessageEl.textContent = "Filter list URLs must use HTTP or HTTPS.";
++                    errorPanel.classList.remove("hidden");
++                    updateSubscriptionButtons();
++                    return;
++                }
++
++                currentUrl = safeUrl;
++                currentTitle = title || "";
++
++                titleEl.textContent = currentTitle || "Loading filter list…";
++                document.title = currentTitle
++                    ? `Hellbird Shield — ${currentTitle}`
++                    : "Hellbird Shield — Filter List Preview";
++                urlEl.textContent = currentUrl;
++                urlEl.href = currentUrl;
++                urlEl.classList.remove("hidden");
++                hideAllPanels();
++                loadingUrlEl.textContent = currentUrl;
++                loadingPanel.classList.remove("hidden");
++                updateSubscriptionButtons();
++
++                if (isConnected) {
++                    ladybird.sendMessage("loadSubscription", { url: currentUrl, title: currentTitle });
++                }
++            }
++
++            function initFromLocation() {
++                const params = new URLSearchParams(location.search);
++                const loc = (params.get("location") || params.get("url") || "").trim();
++                const title = (params.get("title") || "").trim();
++                if (!loc) {
++                    hideAllPanels();
++                    manualPanel.classList.remove("hidden");
++                    updateSubscriptionButtons();
++                    return;
++                }
++                requestLoad(loc, title);
++            }
++
++            manualForm.addEventListener("submit", event => {
++                event.preventDefault();
++                const url = manualUrlInput.value.trim();
++                if (!url) return;
++                const next = `about:subscribe?location=${encodeURIComponent(url)}`;
++                location.assign(next);
++            });
++
++            retryBtn.addEventListener("click", () => {
++                if (currentUrl) requestLoad(currentUrl, currentTitle);
++            });
++
++            subscribeBtn.addEventListener("click", () => {
++                if (!isConnected || !currentUrl) return;
++                subscribeBtn.disabled = true;
++                setStatus("Subscribing…");
++                ladybird.sendMessage("subscribe", { url: currentUrl, title: currentTitle });
++            });
++
++            unsubscribeBtn.addEventListener("click", () => {
++                if (!isConnected || !currentIdentifier) return;
++                unsubscribeBtn.disabled = true;
++                ladybird.sendMessage("unsubscribe", { identifier: currentIdentifier });
++            });
++
++            copyUrlBtn.addEventListener("click", async () => {
++                if (!currentUrl) return;
++                try {
++                    await navigator.clipboard.writeText(currentUrl);
++                    setStatus("URL copied", "ok");
++                } catch {
++                    setStatus("Copy failed", "err");
++                }
++            });
++
++            let searchTimer = null;
++            searchInput.addEventListener("input", () => {
++                clearTimeout(searchTimer);
++                searchTimer = setTimeout(runSearch, 120);
++            });
++
++            searchInput.addEventListener("keydown", event => {
++                if (event.key === "Enter") {
++                    event.preventDefault();
++                    if (searchInput.value !== currentQuery) {
++                        clearTimeout(searchTimer);
++                        runSearch();
++                    } else {
++                        stepMatch(event.shiftKey ? -1 : 1);
++                    }
++                } else if (event.key === "Escape") {
++                    clearTimeout(searchTimer);
++                    searchInput.value = "";
++                    runSearch();
++                    searchInput.blur();
++                }
++            });
++
++            prevMatchBtn.addEventListener("click", () => stepMatch(-1));
++            nextMatchBtn.addEventListener("click", () => stepMatch(1));
++            loadMoreBtn.addEventListener("click", () => renderUpTo(renderedCount + RENDER_STEP));
++            loadAllBtn.addEventListener("click", () => renderUpTo(allLines.length));
++
++            document.addEventListener("keydown", event => {
++                if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && !toolbar.classList.contains("hidden")) {
++                    event.preventDefault();
++                    searchInput.focus();
++                    searchInput.select();
++                }
++            });
++
++            document.addEventListener("WebUILoaded", () => {
++                isConnected = true;
++                if (currentUrl) {
++                    ladybird.sendMessage("loadSubscription", { url: currentUrl, title: currentTitle });
++                }
++            });
++
++            document.addEventListener("WebUIMessage", event => {
++                const { name, data } = event.detail;
++                if (name === "subscriptionState") {
++                    currentIdentifier = data.identifier ?? null;
++                    currentBuiltIn = !!data.builtIn;
++                    currentSubscribed = !!data.subscribed;
++                    currentEnabled = !!data.enabled;
++                    currentGlobalEnabled = data.globalEnabled !== false;
++                    unsubscribeBtn.disabled = false;
++                    updateSubscriptionButtons();
++                    if (hasLoadedList) {
++                        if (currentSubscribed && currentEnabled) {
++                            setStatus(
++                                currentGlobalEnabled
++                                    ? "Active in Hellbird Shield"
++                                    : "Subscribed (Hellbird Shield is turned off)",
++                                currentGlobalEnabled ? "ok" : ""
++                            );
++                        } else {
++                            setStatus("");
++                        }
++                    }
++                } else if (name === "subscriptionLoaded") {
++                    hasLoadedList = true;
++                    currentTitle = data.resolvedTitle || currentTitle || data.url;
++                    currentIdentifier = data.identifier ?? null;
++                    currentBuiltIn = !!data.builtIn;
++                    currentSubscribed = !!data.subscribed;
++                    currentEnabled = !!data.enabled;
++                    currentGlobalEnabled = data.globalEnabled !== false;
++
++                    titleEl.textContent = currentTitle;
++                    document.title = `Hellbird Shield — ${currentTitle}`;
++
++                    metaEl.replaceChildren();
++                    if (typeof data.ruleCount === "number") {
++                        addMetaPill(`${data.ruleCount.toLocaleString()} rules`);
++                    }
++                    if (typeof data.lineCount === "number") {
++                        addMetaPill(`${data.lineCount.toLocaleString()} lines`);
++                    }
++                    if (data.metadata?.version) {
++                        addMetaPill(`v${data.metadata.version}`);
++                    }
++                    if (data.metadata?.lastModified) {
++                        addMetaPill(`Updated: ${data.metadata.lastModified}`);
++                    }
++                    if (data.truncated) {
++                        addMetaPill("Preview truncated (full list saved on subscribe)");
++                    }
++
++                    const raw = data.content || "";
++                    allLines = raw.length > 0 ? raw.replace(/\r\n/g, "\n").split("\n") : [];
++                    hideAllPanels();
++                    toolbar.classList.remove("hidden");
++                    codeLinesEl.classList.remove("hidden");
++                    rerenderLines(INITIAL_RENDER_CHUNK);
++                    updateSubscriptionButtons();
++                    if (currentSubscribed && currentEnabled) {
++                        setStatus(
++                            currentGlobalEnabled
++                                ? "Active in Hellbird Shield"
++                                : "Subscribed (Hellbird Shield is turned off)",
++                            currentGlobalEnabled ? "ok" : ""
++                        );
++                    }
++                } else if (name === "subscriptionError") {
++                    hasLoadedList = false;
++                    hideAllPanels();
++                    errorMessageEl.textContent = data.message || "Failed to fetch filter list.";
++                    errorPanel.classList.remove("hidden");
++                    updateSubscriptionButtons();
++                } else if (name === "subscriptionUpdated") {
++                    currentIdentifier = data.identifier ?? null;
++                    currentBuiltIn = !!data.builtIn;
++                    currentSubscribed = !!data.subscribed;
++                    currentEnabled = !!data.enabled;
++                    currentGlobalEnabled = data.globalEnabled !== false;
++                    unsubscribeBtn.disabled = false;
++                    updateSubscriptionButtons();
++                    if (data.error) {
++                        setStatus(data.error, "err");
++                    } else if (data.message) {
++                        setStatus(data.message, "ok");
++                    }
++                }
++            });
++
++            initFromLocation();
++        </script>
++    </body>
++</html>
+diff --git a/Base/res/ladybird/about-pages/welcome.html b/Base/res/ladybird/about-pages/welcome.html
+index c06863cf76..009fbca828 100644
+--- a/Base/res/ladybird/about-pages/welcome.html
++++ b/Base/res/ladybird/about-pages/welcome.html
+@@ -136,8 +136,9 @@ SPDX-License-Identifier: BSD-2-Clause
+                         <label for="enable-content-blocking">
+                             <h2 id="ad-blocking-title">Block ads, trackers and more</h2>
+                             <p class="muted small description">
+-                                Downloads EasyList and EasyPrivacy from easylist.to once you start browsing, and keeps
+-                                them up to date. If a site breaks, turn it off for that site from the address bar.
++                                Downloads uBlock filters, EasyList, EasyPrivacy, and Peter Lowe's list once you start
++                                browsing, and keeps them up to date. If a site breaks, pause Hellbird Shield for that
++                                site from the toolbar.
+                             </p>
+                         </label>
+                         <input
+diff --git a/Base/res/ladybird/about-pages/welcome.js b/Base/res/ladybird/about-pages/welcome.js
+index 5a35460f40..8bf0107412 100644
+--- a/Base/res/ladybird/about-pages/welcome.js
++++ b/Base/res/ladybird/about-pages/welcome.js
+@@ -172,7 +172,16 @@ searchSuggestionsEnabled.addEventListener("change", () => {
+ function applyContentBlocking() {
+     // Enable the lists before the content blocker, which then downloads every enabled list.
+     if (enableContentBlocking.checked) {
+-        for (const identifier of ["easyList", "easyPrivacy"])
++        for (const identifier of [
++            "uBlockFilters",
++            "uBlockBadware",
++            "uBlockPrivacy",
++            "uBlockQuickFixes",
++            "uBlockUnbreak",
++            "easyList",
++            "easyPrivacy",
++            "peterLowe",
++        ])
+             ladybird.sendMessage("setContentBlockerListEnabled", { identifier, enabled: true });
+     }
+ 
+diff --git a/Libraries/LibWebView/Application.cpp b/Libraries/LibWebView/Application.cpp
+index 896912f30c..c38f7614be 100644
+--- a/Libraries/LibWebView/Application.cpp
++++ b/Libraries/LibWebView/Application.cpp
+@@ -761,6 +761,7 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
+         m_stats_log->start_sampling();
+     TRY(launch_services());
+ 
++    m_content_blocker_was_enabled = content_blocking_enabled();
+     if (m_browser_options.enable_content_blocker == EnableContentBlocker::Yes) {
+         m_content_blocker_list_update_timer = Core::Timer::create_repeating(AK::Duration::from_seconds(24 * 60 * 60), [this] {
+             start_content_blocker_list_update(ContentBlockerListUpdateTrigger::Automatic);
+@@ -1102,6 +1103,52 @@ ErrorOr<void> Application::save_content_blocker_list(ByteString const& path, Rea
+     return FileSystem::move_file(path, temporary_path);
+ }
+ 
++ErrorOr<String> Application::add_content_blocker_subscription(Badge<SettingsUI, SubscribeUI>, String name, URL::URL url, Optional<ReadonlyBytes> preloaded_contents)
++{
++    if (!url.scheme().is_one_of("http"sv, "https"sv))
++        return Error::from_string_literal("Subscription URL must use HTTP or HTTPS");
++    if (preloaded_contents.has_value() && preloaded_contents->size() > maximum_content_blocker_list_size)
++        return Error::from_string_literal("Content blocker list exceeds 64 MiB");
++
++    for (auto const& existing : m_settings->content_blocker_lists()) {
++        if (existing.url == url) {
++            auto identifier = existing.identifier;
++            if (preloaded_contents.has_value() && !preloaded_contents->is_empty()) {
++                TRY(save_content_blocker_list(content_blocker_list_path(identifier), *preloaded_contents));
++                if (!existing.enabled)
++                    m_settings->set_content_blocker_list_enabled(identifier, true);
++                else
++                    apply_content_blocker_settings();
++            } else {
++                if (!existing.enabled)
++                    m_settings->set_content_blocker_list_enabled(identifier, true);
++                if (!content_blocker_list_last_updated_at(identifier).has_value())
++                    start_content_blocker_list_update(ContentBlockerListUpdateTrigger::UserInitiated, identifier);
++            }
++            return identifier;
++        }
++    }
++
++    auto trimmed_name = name.bytes_as_string_view().trim_whitespace();
++    auto resolved_name = trimmed_name.is_empty() ? url.serialize() : MUST(String::from_utf8(trimmed_name));
++
++    if (preloaded_contents.has_value() && !preloaded_contents->is_empty()) {
++        // Add disabled first so saving finishes before any observer sees an enabled list without a file on disk.
++        auto identifier = m_settings->add_content_blocker_list(move(resolved_name), move(url), false);
++        auto result = save_content_blocker_list(content_blocker_list_path(identifier), *preloaded_contents);
++        if (result.is_error()) {
++            m_settings->remove_content_blocker_list(identifier);
++            return result.release_error();
++        }
++        m_settings->set_content_blocker_list_enabled(identifier, true);
++        return identifier;
++    }
++
++    auto identifier = m_settings->add_content_blocker_list(move(resolved_name), move(url));
++    start_content_blocker_list_update(ContentBlockerListUpdateTrigger::UserInitiated, identifier);
++    return identifier;
++}
++
+ ErrorOr<void> Application::import_local_content_blocker_list(String name, String contents)
+ {
+     if (contents.bytes().size() > maximum_content_blocker_list_size)
+@@ -1118,7 +1165,7 @@ ErrorOr<void> Application::import_local_content_blocker_list(String name, String
+     return {};
+ }
+ 
+-void Application::remove_content_blocker_list(Badge<SettingsUI>, StringView identifier)
++void Application::remove_content_blocker_list(Badge<SettingsUI, SubscribeUI>, StringView identifier)
+ {
+     if (!m_settings->remove_content_blocker_list(identifier))
+         return;
+@@ -3201,7 +3248,17 @@ void Application::apply_content_blocking_policy(WebContentPage& page)
+ 
+ void Application::content_blocker_settings_changed(Badge<ApplicationSettingsObserver>)
+ {
++    auto const was_enabled = m_content_blocker_was_enabled;
++    auto const is_enabled = content_blocking_enabled();
++    m_content_blocker_was_enabled = is_enabled;
++
+     apply_content_blocker_settings();
++    if (!was_enabled && is_enabled && m_settings->first_run_complete()) {
++        for (auto const& list : m_settings->content_blocker_lists()) {
++            if (list.enabled && list.url.has_value())
++                download_content_blocker_list_if_needed({}, list.identifier);
++        }
++    }
+ }
+ 
+ void Application::apply_content_blocker_settings()
+@@ -3242,7 +3299,7 @@ void Application::update_content_blocker_lists(Badge<SettingsUI>)
+     start_content_blocker_list_update(ContentBlockerListUpdateTrigger::UserInitiated);
+ }
+ 
+-void Application::download_content_blocker_list_if_needed(Badge<Application, SettingsUI>, StringView identifier)
++void Application::download_content_blocker_list_if_needed(Badge<Application, SettingsUI, SubscribeUI>, StringView identifier)
+ {
+     if (content_blocker_list_last_updated_at(identifier).has_value())
+         return;
+diff --git a/Libraries/LibWebView/Application.h b/Libraries/LibWebView/Application.h
+index 974b368d60..7ff6b55a22 100644
+--- a/Libraries/LibWebView/Application.h
++++ b/Libraries/LibWebView/Application.h
+@@ -195,9 +195,10 @@ public:
+ 
+     bool content_blocker_list_update_in_progress() const;
+     void update_content_blocker_lists(Badge<SettingsUI>);
+-    void download_content_blocker_list_if_needed(Badge<Application, SettingsUI>, StringView identifier);
++    void download_content_blocker_list_if_needed(Badge<Application, SettingsUI, SubscribeUI>, StringView identifier);
++    ErrorOr<String> add_content_blocker_subscription(Badge<SettingsUI, SubscribeUI>, String name, URL::URL url, Optional<ReadonlyBytes> preloaded_contents = {});
+     ErrorOr<void> import_local_content_blocker_list(String name, String contents);
+-    void remove_content_blocker_list(Badge<SettingsUI>, StringView identifier);
++    void remove_content_blocker_list(Badge<SettingsUI, SubscribeUI>, StringView identifier);
+     Optional<UnixDateTime> content_blocker_list_last_updated_at(StringView identifier) const;
+ 
+     static BrowsingSession& default_session() { return *the().m_default_session; }
+@@ -643,6 +644,7 @@ private:
+     RefPtr<Requests::Request> m_content_blocker_list_update_request;
+     bool m_content_blocker_list_update_cancelled { false };
+     bool m_content_blocker_list_update_had_success { false };
++    bool m_content_blocker_was_enabled { false };
+ 
+     RefPtr<WebDriverBrowserConnection> m_webdriver_browser_connection;
+     bool m_webdriver_browser_connection_failed { false };
+diff --git a/Libraries/LibWebView/CMakeLists.txt b/Libraries/LibWebView/CMakeLists.txt
+index 2ef5c2214b..a1dec6e3e7 100644
+--- a/Libraries/LibWebView/CMakeLists.txt
++++ b/Libraries/LibWebView/CMakeLists.txt
+@@ -98,6 +98,7 @@ set(SOURCES
+     WebUI/ApplicationWebUI.cpp
+     WebUI/CrashReportsUI.cpp
+     WebUI/NewTabUI.cpp
++    WebUI/SubscribeUI.cpp
+     WebUI/SupportUI.cpp
+     WebUI/SettingsUI.cpp
+     WebWorkerClient.cpp
+diff --git a/Libraries/LibWebView/CanonicalNavigable.cpp b/Libraries/LibWebView/CanonicalNavigable.cpp
+index cbdf8afa03..dfcf0cb279 100644
+--- a/Libraries/LibWebView/CanonicalNavigable.cpp
++++ b/Libraries/LibWebView/CanonicalNavigable.cpp
+@@ -25,6 +25,7 @@
+ #include <LibWebView/CanonicalTraversable.h>
+ #include <LibWebView/CanonicalWindow.h>
+ #include <LibWebView/PictureInPictureManager.h>
++#include <LibWebView/URL.h>
+ #include <LibWebView/ViewImplementation.h>
+ #include <LibWebView/WebContentClient.h>
+ #include <LibWebView/WebDriverBiDi.h>
+@@ -187,6 +188,21 @@ Web::HTML::PreparedNavigationDescriptor CanonicalNavigable::prepare_navigation(U
+ void CanonicalNavigable::begin_navigation(Web::HTML::PreparedNavigationDescriptor navigation, RefPtr<WebContentPage> source_page)
+ {
+     auto& traversable = top_level_traversable();
++    if (is_top_level_traversable()) {
++        if (auto subscribe_url = filter_list_subscription_about_url(navigation.url); subscribe_url.has_value()) {
++            if (navigation.user_involvement == Web::HTML::UserNavigationInvolvement::BrowserUI) {
++                navigation.url = subscribe_url.release_value();
++            } else if (navigation.user_involvement == Web::HTML::UserNavigationInvolvement::Activation) {
++                if (auto view = traversable.view(); view.has_value()) {
++                    if (active_document().is_initial_about_blank())
++                        view->load(*subscribe_url);
++                    else
++                        view->open_url_in_new_tab(*subscribe_url, Web::HTML::ActivateTab::Yes);
++                    return;
++                }
++            }
++        }
++    }
+     auto const& url = navigation.url;
+     auto user_involvement = navigation.user_involvement;
+     auto const& navigation_id = navigation.navigation_id;
+diff --git a/Libraries/LibWebView/Forward.h b/Libraries/LibWebView/Forward.h
+index eac3b6fc5c..284130b775 100644
+--- a/Libraries/LibWebView/Forward.h
++++ b/Libraries/LibWebView/Forward.h
+@@ -62,6 +62,7 @@ class PermissionManager;
+ class Settings;
+ class SettingsUI;
+ class SpellChecker;
++class SubscribeUI;
+ class Translator;
+ class StorageJar;
+ class SystemProbeClient;
+diff --git a/Libraries/LibWebView/Settings.cpp b/Libraries/LibWebView/Settings.cpp
+index 9f4ea30c46..fe7362eede 100644
+--- a/Libraries/LibWebView/Settings.cpp
++++ b/Libraries/LibWebView/Settings.cpp
+@@ -561,13 +561,16 @@ void Settings::load_from_json(JsonValue const& json_value)
+                 auto source = value.as_object().get_string(key == CONTENT_BLOCKER_CUSTOM_SUBSCRIPTIONS_KEY ? CONTENT_BLOCKER_URL_KEY : CONTENT_BLOCKER_NAME_KEY);
+                 if (!identifier.has_value() || !is_valid_content_blocker_list_identifier(*identifier) || !enabled.has_value() || !source.has_value() || content_blocker_list(*identifier).has_value())
+                     continue;
++                auto name = *source;
+                 Optional<URL::URL> url;
+                 if (key == CONTENT_BLOCKER_CUSTOM_SUBSCRIPTIONS_KEY) {
+                     url = URL::Parser::basic_parse(*source);
+                     if (!url.has_value() || !(url->scheme() == "http"sv || url->scheme() == "https"sv))
+                         continue;
++                    if (auto saved_name = value.as_object().get_string(CONTENT_BLOCKER_NAME_KEY); saved_name.has_value() && !saved_name->is_empty())
++                        name = saved_name.release_value();
+                 }
+-                m_content_blocker_lists.append({ *identifier, *source, move(url), *enabled });
++                m_content_blocker_lists.append({ *identifier, move(name), move(url), *enabled });
+             }
+         }
+ 
+@@ -770,12 +773,27 @@ void Settings::reset_to_defaults()
+     // NB: The lists that block ads and trackers are chosen from the start, but are only downloaded once the user finishes
+     //     the welcome page with content blocking on, updates the lists, or turns on automatic updates for them.
+     auto add_list = [&](StringView identifier, StringView name, StringView description, StringView url, ListCategory category = ListCategory::General) {
+-        auto enabled_by_default = identifier.is_one_of("easyList"sv, "easyPrivacy"sv);
++        auto enabled_by_default = identifier.is_one_of(
++            "uBlockFilters"sv,
++            "uBlockBadware"sv,
++            "uBlockPrivacy"sv,
++            "uBlockQuickFixes"sv,
++            "uBlockUnbreak"sv,
++            "easyList"sv,
++            "easyPrivacy"sv,
++            "peterLowe"sv);
+         m_content_blocker_lists.append({ MUST(String::from_utf8(identifier)), MUST(String::from_utf8(name)),
+             URL::Parser::basic_parse(url), enabled_by_default, true, category == ListCategory::Language, MUST(String::from_utf8(description)) });
+     };
++    add_list("uBlockFilters"sv, "uBlock filters \u2013 Ads"sv, "uBlock Origin's primary ad-blocking rules and site fixes."sv, "https://ublockorigin.github.io/uAssets/filters/filters.min.txt"sv);
++    add_list("uBlockBadware"sv, "uBlock filters \u2013 Badware risks"sv, "Blocks known malware, scam, and badware domains."sv, "https://ublockorigin.github.io/uAssets/filters/badware.min.txt"sv);
++    add_list("uBlockPrivacy"sv, "uBlock filters \u2013 Privacy"sv, "Blocks tracking scripts, telemetry, and analytics."sv, "https://ublockorigin.github.io/uAssets/filters/privacy.min.txt"sv);
++    add_list("uBlockQuickFixes"sv, "uBlock filters \u2013 Quick fixes"sv, "Rapid site fixes and anti-adblock workarounds."sv, "https://ublockorigin.github.io/uAssets/filters/quick-fixes.min.txt"sv);
++    add_list("uBlockUnbreak"sv, "uBlock filters \u2013 Unbreak"sv, "Prevents websites from breaking when content blocking is active."sv, "https://ublockorigin.github.io/uAssets/filters/unbreak.min.txt"sv);
++    add_list("uBlockAnnoyances"sv, "uBlock filters \u2013 Annoyances"sv, "Blocks cookie banners, overlays, and other page annoyances."sv, "https://ublockorigin.github.io/uAssets/filters/annoyances.min.txt"sv);
+     add_list("easyList"sv, "EasyList"sv, "Blocks advertising on English-language websites."sv, "https://easylist.to/easylist/easylist.txt"sv);
+     add_list("easyPrivacy"sv, "EasyPrivacy"sv, "Blocks tracking scripts, pixels, and other tracking requests."sv, "https://easylist.to/easylist/easyprivacy.txt"sv);
++    add_list("peterLowe"sv, "Peter Lowe's Ad and tracking server list"sv, "Blocks known advertising and tracking hostnames."sv, "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=1&mimetype=plaintext"sv);
+     add_list("easyListCookie"sv, "EasyList Cookie List"sv, "Blocks cookie banners and other cookie notices."sv, "https://secure.fanboy.co.nz/fanboy-cookiemonster.txt"sv);
+     add_list("fanboyAnnoyances"sv, "Fanboy's Annoyance List"sv, "Blocks pop-ups, social widgets, newsletters, and other annoyances."sv, "https://secure.fanboy.co.nz/fanboy-annoyance.txt"sv);
+     add_list("fanboySocial"sv, "Fanboy's Social Blocking List"sv, "Blocks social media widgets and other social content."sv, "https://easylist.to/easylist/fanboy-social.txt"sv);
+@@ -951,7 +969,10 @@ JsonValue Settings::serialize_json() const
+         object.set(CONTENT_BLOCKER_IDENTIFIER_KEY, list.identifier);
+         object.set(CONTENT_BLOCKER_ENABLED_KEY, list.enabled);
+         if (list.url.has_value()) {
+-            object.set(CONTENT_BLOCKER_URL_KEY, list.url->serialize());
++            auto serialized_url = list.url->serialize();
++            object.set(CONTENT_BLOCKER_URL_KEY, serialized_url);
++            if (!list.name.is_empty() && list.name != serialized_url)
++                object.set(CONTENT_BLOCKER_NAME_KEY, list.name);
+             custom_content_blocker_subscriptions.must_append(move(object));
+         } else {
+             object.set(CONTENT_BLOCKER_NAME_KEY, list.name);
+@@ -1639,13 +1660,13 @@ void Settings::set_content_blocker_list_enabled(StringView identifier, bool enab
+     }
+ }
+ 
+-String Settings::add_content_blocker_list(String name, Optional<URL::URL> url)
++String Settings::add_content_blocker_list(String name, Optional<URL::URL> url, bool enabled)
+ {
+     String identifier;
+     do {
+         identifier = MUST(String::formatted("list-{:016x}", get_random<u64>()));
+     } while (content_blocker_list(identifier).has_value());
+-    m_content_blocker_lists.append({ identifier, move(name), move(url) });
++    m_content_blocker_lists.append({ identifier, move(name), move(url), enabled });
+     persist_settings();
+     for (auto& observer : m_observers)
+         observer.content_blocker_settings_changed();
+diff --git a/Libraries/LibWebView/Settings.h b/Libraries/LibWebView/Settings.h
+index e1eaff1f01..545f35d033 100644
+--- a/Libraries/LibWebView/Settings.h
++++ b/Libraries/LibWebView/Settings.h
+@@ -368,7 +368,7 @@ public:
+ 
+     Vector<ContentBlockerList> const& content_blocker_lists() const { return m_content_blocker_lists; }
+     Optional<ContentBlockerList const&> content_blocker_list(StringView identifier) const;
+-    String add_content_blocker_list(String name, Optional<URL::URL> = {});
++    String add_content_blocker_list(String name, Optional<URL::URL> = {}, bool enabled = true);
+     void set_content_blocker_list_enabled(StringView identifier, bool);
+     bool remove_content_blocker_list(StringView identifier);
+     String const& custom_content_blocker_filters() const { return m_custom_content_blocker_filters; }
+diff --git a/Libraries/LibWebView/URL.cpp b/Libraries/LibWebView/URL.cpp
+index 367083c7d6..88ae4bd680 100644
+--- a/Libraries/LibWebView/URL.cpp
++++ b/Libraries/LibWebView/URL.cpp
+@@ -29,6 +29,68 @@ bool is_url_handled_internally(URL::URL const& url)
+     return Web::Fetch::Infrastructure::is_fetch_scheme(url.scheme());
+ }
+ 
++static ByteString decode_query_component(StringView raw)
++{
++    StringBuilder replaced;
++    for (auto ch : raw)
++        replaced.append(ch == '+' ? ' ' : ch);
++    return URL::percent_decode(replaced.string_view());
++}
++
++Optional<URL::URL> filter_list_subscription_about_url(URL::URL const& url)
++{
++    bool is_subscription_link = false;
++    auto host = url.host().has_value() ? url.serialized_host() : StringView {};
++    if (url.scheme().is_one_of("abp"sv, "ubo"sv, "adguard"sv)) {
++        auto path = url.serialize_path().trim("/"sv);
++        is_subscription_link = path.equals_ignoring_ascii_case("subscribe"sv)
++            || host.equals_ignoring_ascii_case("subscribe"sv);
++    } else if (url.scheme().is_one_of("http"sv, "https"sv)) {
++        is_subscription_link = host.equals_ignoring_ascii_case("subscribe.adblockplus.org"sv);
++    }
++
++    if (!is_subscription_link)
++        return {};
++
++    auto query = url.query();
++    if (!query.has_value() || query->is_empty())
++        return {};
++
++    Optional<ByteString> location;
++    Optional<ByteString> title;
++    query->for_each_split_view('&', SplitBehavior::Nothing, [&](StringView pair) {
++        auto equals = pair.find('=');
++        if (!equals.has_value())
++            return;
++        auto key = decode_query_component(pair.substring_view(0, *equals));
++        auto value = decode_query_component(pair.substring_view(*equals + 1));
++        if (key.equals_ignoring_ascii_case("location"sv) && !location.has_value())
++            location = move(value);
++        else if (key.equals_ignoring_ascii_case("title"sv) && !title.has_value())
++            title = move(value);
++    });
++
++    if (!location.has_value() || location->is_empty())
++        return {};
++
++    auto parsed_location = URL::Parser::basic_parse(*location);
++    if (!parsed_location.has_value() || !parsed_location->scheme().is_one_of("http"sv, "https"sv))
++        return {};
++
++    StringBuilder about_url;
++    about_url.append("about:subscribe?location="sv);
++    about_url.append(URL::percent_encode(parsed_location->serialize(), URL::PercentEncodeSet::Component));
++    if (title.has_value()) {
++        auto trimmed_title = title->view().trim_whitespace();
++        if (!trimmed_title.is_empty()) {
++            about_url.append("&title="sv);
++            about_url.append(URL::percent_encode(trimmed_title, URL::PercentEncodeSet::Component));
++        }
++    }
++
++    return URL::Parser::basic_parse(about_url.string_view());
++}
++
+ static bool has_valid_explicit_port(StringView input)
+ {
+     auto authority_end = input.find_any_of("/\\?#"sv).value_or(input.length());
+diff --git a/Libraries/LibWebView/URL.h b/Libraries/LibWebView/URL.h
+index 55b759786e..92e2034d36 100644
+--- a/Libraries/LibWebView/URL.h
++++ b/Libraries/LibWebView/URL.h
+@@ -38,6 +38,7 @@ WEBVIEW_API ClassifiedUserInput classify_user_input_ignoring_local_files(StringV
+ WEBVIEW_API Optional<URL::URL> sanitize_url(StringView, Optional<SearchEngine> const& search_engine = {}, AppendTLD = AppendTLD::No);
+ WEBVIEW_API bool location_looks_like_url(StringView, AppendTLD = AppendTLD::No);
+ WEBVIEW_API bool is_url_handled_internally(URL::URL const&);
++WEBVIEW_API Optional<URL::URL> filter_list_subscription_about_url(URL::URL const&);
+ WEBVIEW_API Optional<URL::URL> url_from_text(StringView);
+ WEBVIEW_API Vector<URL::URL> sanitize_urls(ReadonlySpan<ByteString> raw_urls);
+ // The user info, host and port of an http(s) URL, without "www.". This is how url_for_display() starts.
+diff --git a/Libraries/LibWebView/ViewImplementation.cpp b/Libraries/LibWebView/ViewImplementation.cpp
+index aa51a58693..37263dfe61 100644
+--- a/Libraries/LibWebView/ViewImplementation.cpp
++++ b/Libraries/LibWebView/ViewImplementation.cpp
+@@ -650,6 +650,11 @@ void ViewImplementation::open_url_in_new_tab(URL::URL const& url, Web::HTML::Act
+ 
+ void ViewImplementation::open_navigation_in_new_tab(Web::HTML::PreparedNavigationDescriptor navigation, Web::HTML::ActivateTab activate_tab)
+ {
++    if (auto subscribe_url = filter_list_subscription_about_url(navigation.url); subscribe_url.has_value()) {
++        open_url_in_new_tab(*subscribe_url, activate_tab);
++        return;
++    }
++
+     if (!is_url_handled_internally(navigation.url)) {
+         handle_external_url_from_user_input(navigation.url);
+         return;
+@@ -665,6 +670,11 @@ void ViewImplementation::open_navigation_in_new_tab(Web::HTML::PreparedNavigatio
+ 
+ void ViewImplementation::open_navigation_in_new_window(Web::HTML::PreparedNavigationDescriptor navigation, IsPrivate is_private)
+ {
++    if (auto subscribe_url = filter_list_subscription_about_url(navigation.url); subscribe_url.has_value()) {
++        open_url_in_new_window(*subscribe_url, is_private);
++        return;
++    }
++
+     if (!is_url_handled_internally(navigation.url)) {
+         handle_external_url_from_user_input(navigation.url);
+         return;
+@@ -1215,6 +1225,25 @@ void ViewImplementation::complete_external_url_request()
+ 
+ void ViewImplementation::handle_external_url(URL::URL url, URL::Origin initiator_origin, bool has_transient_activation)
+ {
++    if (auto subscribe_url = filter_list_subscription_about_url(url); subscribe_url.has_value()) {
++        auto action = m_external_url_request_policy.decide(url, has_transient_activation);
++        if (action != ExternalURLAction::Block) {
++            auto request_source = m_external_url_request_policy.take_request_allowance();
++            if (!request_source.has_value())
++                return;
++            if (!has_transient_activation && *request_source != ExternalURLRequestSource::BrowserUI)
++                return;
++        } else if (!has_transient_activation || !traversable().active_document().is_initial_about_blank()) {
++            return;
++        }
++
++        if (traversable().active_document().is_initial_about_blank())
++            load(*subscribe_url);
++        else
++            open_url_in_new_tab(*subscribe_url, Web::HTML::ActivateTab::Yes);
++        return;
++    }
++
+     if (m_external_url_confirmation_pending)
+         return;
+ 
+diff --git a/Libraries/LibWebView/WebContentPage.cpp b/Libraries/LibWebView/WebContentPage.cpp
+index 2313e38b54..c6673b5dec 100644
+--- a/Libraries/LibWebView/WebContentPage.cpp
++++ b/Libraries/LibWebView/WebContentPage.cpp
+@@ -2678,6 +2678,21 @@ void WebContentPage::did_request_navigation_start(Web::HTML::CrossProcessId navi
+         return;
+     }
+ 
++    if (target == Web::NavigationTarget::TopLevel && target_navigable->is_top_level_traversable()) {
++        if (auto subscribe_url = filter_list_subscription_about_url(url); subscribe_url.has_value()) {
++            if (start_request->user_involvement != Web::HTML::UserNavigationInvolvement::None) {
++                if (auto view = target_navigable->top_level_traversable().view(); view.has_value()) {
++                    async_cancel_navigation_params_creation(navigable_id, navigation_id);
++                    if (target_navigable->active_document().is_initial_about_blank())
++                        view->load(*subscribe_url);
++                    else
++                        view->open_url_in_new_tab(*subscribe_url, Web::HTML::ActivateTab::Yes);
++                    return;
++                }
++            }
++        }
++    }
++
+     auto retry = prepare_navigation_to_retry(*start_request);
+     target_navigable->set_ongoing_navigation(CanonicalNavigation::Start {
+         .url = move(url),
+diff --git a/Libraries/LibWebView/WebUI.cpp b/Libraries/LibWebView/WebUI.cpp
+index e6139b0579..220698b083 100644
+--- a/Libraries/LibWebView/WebUI.cpp
++++ b/Libraries/LibWebView/WebUI.cpp
+@@ -15,6 +15,7 @@
+ #include <LibWebView/WebUI/CrashReportsUI.h>
+ #include <LibWebView/WebUI/NewTabUI.h>
+ #include <LibWebView/WebUI/SettingsUI.h>
++#include <LibWebView/WebUI/SubscribeUI.h>
+ #include <LibWebView/WebUI/SupportUI.h>
+ 
+ namespace WebView {
+@@ -26,6 +27,7 @@ static constexpr auto s_pages = to_array<WebUI::Page>({
+     { "licenses"sv, "Licenses"sv, WebUI::PageType::Static },
+     { "newtab"sv, "New Tab"sv, WebUI::PageType::Dynamic },
+     { "settings"sv, "Settings"sv, WebUI::PageType::Dynamic },
++    { "subscribe"sv, "Filter List Subscription"sv, WebUI::PageType::Dynamic },
+     { "support"sv, "Support"sv, WebUI::PageType::Dynamic },
+     { "welcome"sv, "Welcome"sv, WebUI::PageType::Dynamic },
+ });
+@@ -103,6 +105,8 @@ ErrorOr<RefPtr<WebUI>> WebUI::create(WebContentClient& client, Web::PageId page_
+         web_ui = TRY(create_web_ui<NewTabUI>(client, page_id, move(host)));
+     else if (page->host.is_one_of("settings"sv, "welcome"sv))
+         web_ui = TRY(create_web_ui<SettingsUI>(client, page_id, move(host)));
++    else if (page->host == "subscribe"sv)
++        web_ui = TRY(create_web_ui<SubscribeUI>(client, page_id, move(host)));
+     else if (page->host == "support"sv)
+         web_ui = TRY(create_web_ui<SupportUI>(client, page_id, move(host)));
+ 
+diff --git a/Libraries/LibWebView/WebUI/SettingsUI.cpp b/Libraries/LibWebView/WebUI/SettingsUI.cpp
+index e690c5bd69..a92c33dd9a 100644
+--- a/Libraries/LibWebView/WebUI/SettingsUI.cpp
++++ b/Libraries/LibWebView/WebUI/SettingsUI.cpp
+@@ -832,10 +832,21 @@ void SettingsUI::set_content_blocker_list_enabled(JsonValue const& value)
+ 
+ void SettingsUI::add_custom_content_blocker_subscription(JsonValue const& value)
+ {
+-    if (!value.is_string())
++    Optional<String> raw_url;
++    Optional<String> raw_name;
++    if (value.is_string()) {
++        raw_url = value.as_string();
++    } else if (value.is_object()) {
++        raw_url = value.as_object().get_string("url"sv).copy();
++        raw_name = value.as_object().get_string("name"sv).copy();
++    } else {
++        return;
++    }
++
++    if (!raw_url.has_value())
+         return;
+ 
+-    auto url = URL::Parser::basic_parse(value.as_string());
++    auto url = URL::Parser::basic_parse(*raw_url);
+     if (!url.has_value() || !url->scheme().is_one_of("http"sv, "https"sv)) {
+         report_content_blocker_result("subscription"_string, "Enter an HTTP or HTTPS URL."_string);
+         return;
+@@ -848,8 +859,13 @@ void SettingsUI::add_custom_content_blocker_subscription(JsonValue const& value)
+         }
+     }
+ 
+-    auto identifier = Application::settings().add_content_blocker_list(url->serialize(), url);
+-    Application::the().download_content_blocker_list_if_needed({}, identifier);
++    auto name = raw_name.has_value() && !raw_name->bytes_as_string_view().trim_whitespace().is_empty()
++        ? raw_name.release_value()
++        : url->serialize();
++    if (auto result = Application::the().add_content_blocker_subscription({}, move(name), url.release_value()); result.is_error()) {
++        report_content_blocker_result("subscription"_string, MUST(String::formatted("Unable to add subscription: {}", result.error())));
++        return;
++    }
+     report_content_blocker_result("subscription"_string, "Subscription added."_string);
+ }
+ 
+diff --git a/Libraries/LibWebView/WebUI/SubscribeUI.cpp b/Libraries/LibWebView/WebUI/SubscribeUI.cpp
+new file mode 100644
+index 0000000000..55d4d573b2
+--- /dev/null
++++ b/Libraries/LibWebView/WebUI/SubscribeUI.cpp
+@@ -0,0 +1,522 @@
++/*
++ * Copyright (c) 2026, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/JsonObject.h>
++#include <AK/Utf8View.h>
++#include <LibCore/EventLoop.h>
++#include <LibCore/Timer.h>
++#include <LibHTTP/Cache/CacheMode.h>
++#include <LibHTTP/Cookie/IncludeCredentials.h>
++#include <LibHTTP/HeaderList.h>
++#include <LibRequests/NetworkError.h>
++#include <LibRequests/RequestClient.h>
++#include <LibURL/Parser.h>
++#include <LibWebCommon/Fetch/Infrastructure/HTTP/Statuses.h>
++#include <LibWebCommon/Loader/UserAgent.h>
++#include <LibWebView/Application.h>
++#include <LibWebView/WebContentClient.h>
++#include <LibWebView/WebUI/SubscribeUI.h>
++
++namespace WebView {
++
++static constexpr size_t maximum_filter_list_bytes = 64 * MiB;
++static constexpr size_t maximum_preview_bytes = 4 * MiB;
++static constexpr size_t maximum_redirects = 10;
++static constexpr size_t maximum_title_bytes = 200;
++
++struct FilterListMetadata {
++    Optional<String> title;
++    Optional<String> homepage;
++    Optional<String> last_modified;
++    Optional<String> version;
++    Optional<String> expires;
++    Optional<String> description;
++    size_t line_count { 0 };
++    size_t rule_count { 0 };
++};
++
++static String clamp_title(StringView raw)
++{
++    auto trimmed = raw.trim_whitespace();
++    if (trimmed.length() <= maximum_title_bytes)
++        return String::from_utf8_with_replacement_character(trimmed);
++
++    auto sanitized = String::from_utf8_with_replacement_character(trimmed);
++    size_t cut = 0;
++    Utf8View utf8 { sanitized.bytes_as_string_view() };
++    for (auto it = utf8.begin(); it != utf8.end(); ++it) {
++        auto next_offset = utf8.byte_offset_of(it) + it.underlying_code_point_length_in_bytes();
++        if (next_offset > maximum_title_bytes)
++            break;
++        cut = next_offset;
++    }
++    return MUST(String::from_utf8(sanitized.bytes_as_string_view().substring_view(0, cut).trim_whitespace()));
++}
++
++static bool looks_like_markup_document(StringView text)
++{
++    if (text.starts_with("\xEF\xBB\xBF"sv))
++        text = text.substring_view(3);
++    auto trimmed = text.trim_whitespace(TrimMode::Left);
++    return trimmed.starts_with("<!doctype"sv, CaseSensitivity::CaseInsensitive)
++        || trimmed.starts_with("<html"sv, CaseSensitivity::CaseInsensitive)
++        || trimmed.starts_with("<head"sv, CaseSensitivity::CaseInsensitive)
++        || trimmed.starts_with("<body"sv, CaseSensitivity::CaseInsensitive)
++        || trimmed.starts_with("<?xml"sv, CaseSensitivity::CaseInsensitive)
++        || trimmed.starts_with("<script"sv, CaseSensitivity::CaseInsensitive);
++}
++
++static Optional<String> parse_header_field(StringView line, StringView prefix)
++{
++    if (!line.starts_with(prefix, CaseSensitivity::CaseInsensitive))
++        return {};
++    auto value = line.substring_view(prefix.length()).trim_whitespace();
++    if (value.is_empty())
++        return {};
++    return String::from_utf8_with_replacement_character(value);
++}
++
++static FilterListMetadata analyze_filter_list(StringView text)
++{
++    FilterListMetadata metadata;
++    if (text.starts_with("\xEF\xBB\xBF"sv))
++        text = text.substring_view(3);
++    if (text.ends_with('\n'))
++        text = text.substring_view(0, text.length() - 1);
++    if (text.is_empty())
++        return metadata;
++
++    text.for_each_split_view('\n', SplitBehavior::KeepEmpty, [&](StringView raw_line) {
++        ++metadata.line_count;
++        auto line = raw_line.trim("\r"sv, TrimMode::Right);
++        auto trimmed = line.trim_whitespace();
++        if (trimmed.is_empty())
++            return;
++
++        if (metadata.line_count <= 80 && trimmed.starts_with('!')) {
++            if (!metadata.title.has_value())
++                metadata.title = parse_header_field(trimmed, "! Title:"sv);
++            if (!metadata.homepage.has_value())
++                metadata.homepage = parse_header_field(trimmed, "! Homepage:"sv);
++            if (!metadata.last_modified.has_value())
++                metadata.last_modified = parse_header_field(trimmed, "! Last modified:"sv);
++            if (!metadata.version.has_value())
++                metadata.version = parse_header_field(trimmed, "! Version:"sv);
++            if (!metadata.expires.has_value())
++                metadata.expires = parse_header_field(trimmed, "! Expires:"sv);
++            if (!metadata.description.has_value())
++                metadata.description = parse_header_field(trimmed, "! Description:"sv);
++            return;
++        }
++
++        if (trimmed.starts_with('!')
++            || trimmed.starts_with("[Adblock"sv, CaseSensitivity::CaseInsensitive)
++            || trimmed.starts_with("[uBlock"sv, CaseSensitivity::CaseInsensitive)) {
++            return;
++        }
++
++        ++metadata.rule_count;
++    });
++
++    return metadata;
++}
++
++static Optional<ContentBlockerList> find_list_for_url(URL::URL const& url)
++{
++    for (auto const& list : Application::settings().content_blocker_lists()) {
++        if (list.url == url)
++            return list;
++    }
++    return {};
++}
++
++static void populate_subscription_fields(JsonObject& object, Optional<ContentBlockerList> const& existing)
++{
++    object.set("subscribed"sv, existing.has_value());
++    object.set("enabled"sv, existing.has_value() && existing->enabled);
++    object.set("builtIn"sv, existing.has_value() && existing->built_in);
++    object.set("globalEnabled"sv, Application::settings().content_blocker_enabled());
++    object.set("identifier"sv, existing.has_value() ? JsonValue(existing->identifier) : JsonValue {});
++}
++
++SubscribeUI::~SubscribeUI()
++{
++    m_alive->alive = false;
++    ++m_fetch_generation;
++    if (m_active_request) {
++        m_active_request->stop();
++        m_active_request = nullptr;
++    }
++}
++
++void SubscribeUI::register_interfaces()
++{
++    register_interface("loadSubscription"sv, [this](auto const& data) {
++        load_subscription(data);
++    });
++    register_interface("subscribe"sv, [this](auto const& data) {
++        subscribe(data);
++    });
++    register_interface("unsubscribe"sv, [this](auto const& data) {
++        unsubscribe(data);
++    });
++}
++
++void SubscribeUI::content_blocker_settings_changed()
++{
++    if (!has_client() || !m_requested_url.has_value())
++        return;
++    send_subscription_state();
++}
++
++void SubscribeUI::send_subscription_state()
++{
++    if (!has_client() || !m_requested_url.has_value())
++        return;
++    JsonObject state;
++    state.set("url"sv, m_requested_url->serialize());
++    populate_subscription_fields(state, find_list_for_url(*m_requested_url));
++    async_send_message("subscriptionState"sv, move(state));
++}
++
++void SubscribeUI::cancel_fetch()
++{
++    ++m_fetch_generation;
++    if (m_active_request) {
++        auto request = move(m_active_request);
++        request->stop();
++        // Keep the Request alive until the current callback frame unwinds.
++        Core::deferred_invoke([request = move(request)] { });
++    }
++    m_pending_payload.clear();
++    m_response_ok = false;
++    m_response_code.clear();
++}
++
++void SubscribeUI::load_subscription(JsonValue const& data)
++{
++    if (!data.is_object() || !has_client())
++        return;
++
++    auto raw_url = data.as_object().get_string("url"sv);
++    if (!raw_url.has_value())
++        return;
++
++    auto parsed_url = URL::Parser::basic_parse(*raw_url);
++    if (!parsed_url.has_value() || !parsed_url->scheme().is_one_of("http"sv, "https"sv)) {
++        JsonObject err;
++        err.set("url"sv, *raw_url);
++        err.set("message"sv, "Filter list URLs must use HTTP or HTTPS."sv);
++        async_send_message("subscriptionError"sv, move(err));
++        return;
++    }
++
++    cancel_fetch();
++    m_requested_url = *parsed_url;
++    m_requested_title = data.as_object().get_string("title"sv).copy().value_or(String {});
++    m_loaded_url.clear();
++    m_loaded_payload.clear();
++    m_resolved_title = {};
++
++    send_subscription_state();
++    start_fetch(*parsed_url, *parsed_url, 0);
++}
++
++void SubscribeUI::start_fetch(URL::URL original_url, URL::URL fetch_url, size_t redirect_count)
++{
++    cancel_fetch();
++    auto const generation = m_fetch_generation;
++
++    auto send_error = [&](String message) {
++        if (!has_client())
++            return;
++        JsonObject err;
++        err.set("url"sv, original_url.serialize());
++        err.set("message"sv, move(message));
++        async_send_message("subscriptionError"sv, move(err));
++    };
++
++    if (!has_client())
++        return;
++
++    auto request_headers = HTTP::HeaderList::create();
++    request_headers->set({ "User-Agent"sv, Web::default_user_agent });
++
++    auto client_result = Application::request_server_client(client().is_private());
++    if (client_result.is_error()) {
++        send_error(MUST(String::formatted("Unable to connect to RequestServer: {}", client_result.error())));
++        return;
++    }
++
++    m_active_request = client_result.value()->start_request(
++        "GET"sv, fetch_url, {}, *request_headers, {}, HTTP::CacheMode::NoStore,
++        HTTP::Cookie::IncludeCredentials::No);
++    if (!m_active_request) {
++        send_error("Unable to start filter list download."_string);
++        return;
++    }
++
++    auto alive = m_alive;
++    auto timeout = Core::Timer::create_single_shot(AK::Duration::from_seconds(30), [this, alive, generation, original_url] {
++        if (!alive->alive || generation != m_fetch_generation)
++            return;
++        cancel_fetch();
++        if (has_client()) {
++            JsonObject err;
++            err.set("url"sv, original_url.serialize());
++            err.set("message"sv, "Filter list request timed out."sv);
++            async_send_message("subscriptionError"sv, move(err));
++        }
++    });
++    m_active_request->set_stop_callback([timeout] { timeout->stop(); });
++    timeout->start();
++
++    auto append_data = [this, alive, generation, original_url](ReadonlyBytes bytes) {
++        if (!alive->alive || generation != m_fetch_generation)
++            return;
++        if (bytes.size() > maximum_filter_list_bytes - m_pending_payload.size()) {
++            cancel_fetch();
++            if (has_client()) {
++                JsonObject err;
++                err.set("url"sv, original_url.serialize());
++                err.set("message"sv, "Filter list exceeds the 64 MiB size limit."sv);
++                async_send_message("subscriptionError"sv, move(err));
++            }
++            return;
++        }
++        if (m_pending_payload.try_append(bytes).is_error()) {
++            cancel_fetch();
++            if (has_client()) {
++                JsonObject err;
++                err.set("url"sv, original_url.serialize());
++                err.set("message"sv, "Out of memory while reading filter list."sv);
++                async_send_message("subscriptionError"sv, move(err));
++            }
++        }
++    };
++
++    m_active_request->set_unbuffered_request_callbacks(
++        [this, alive, generation, original_url, fetch_url, redirect_count](NonnullRefPtr<HTTP::HeaderList> headers, Optional<u32> response_code, Optional<String> const& reason_phrase, Requests::CacheState) {
++            if (!alive->alive || generation != m_fetch_generation)
++                return;
++            m_response_code = response_code;
++            if (response_code.has_value() && Web::Fetch::Infrastructure::is_redirect_status(*response_code)) {
++                auto location = headers->get("Location"sv);
++                auto next_url = location.has_value() ? URL::Parser::basic_parse(*location, fetch_url) : Optional<URL::URL> {};
++                if (next_url.has_value()
++                    && (next_url->scheme() == "https"sv || (next_url->scheme() == "http"sv && fetch_url.scheme() == "http"sv))
++                    && redirect_count < maximum_redirects) {
++                    cancel_fetch();
++                    auto const redirect_generation = m_fetch_generation;
++                    Core::deferred_invoke([this, alive, redirect_generation, original_url, next_url = next_url.release_value(), next_redirect = redirect_count + 1]() mutable {
++                        if (!alive->alive || redirect_generation != m_fetch_generation)
++                            return;
++                        start_fetch(move(original_url), move(next_url), next_redirect);
++                    });
++                    return;
++                }
++            }
++
++            m_response_ok = response_code.has_value() && *response_code >= 200 && *response_code < 300;
++            if (!m_response_ok) {
++                auto reason = reason_phrase.value_or(String {});
++                auto message = reason.is_empty()
++                    ? MUST(String::formatted("Server returned HTTP {}", response_code.value_or(0)))
++                    : MUST(String::formatted("Server returned HTTP {} {}", response_code.value_or(0), reason));
++                cancel_fetch();
++                if (has_client()) {
++                    JsonObject err;
++                    err.set("url"sv, original_url.serialize());
++                    err.set("message"sv, move(message));
++                    async_send_message("subscriptionError"sv, move(err));
++                }
++            }
++        },
++        [append_data](Requests::ResponseData data) {
++            append_data(data.bytes());
++        },
++        [append_data](Core::ImmutableBytes data) {
++            append_data(data.bytes());
++        },
++        [this, alive, generation, timeout, original_url](u64, Requests::RequestTimingInfo const&, Optional<Requests::NetworkError> network_error) {
++            timeout->stop();
++            if (!alive->alive || generation != m_fetch_generation)
++                return;
++            handle_fetch_finished(generation, original_url, network_error);
++        });
++}
++
++void SubscribeUI::handle_fetch_finished(u64 generation, URL::URL const& original_url, Optional<Requests::NetworkError> network_error)
++{
++    if (generation != m_fetch_generation)
++        return;
++
++    if (m_active_request) {
++        auto finished_request = move(m_active_request);
++        Core::deferred_invoke([finished_request = move(finished_request)] { });
++    }
++    if (!has_client())
++        return;
++
++    if (network_error.has_value()) {
++        JsonObject err;
++        err.set("url"sv, original_url.serialize());
++        err.set("message"sv, MUST(String::formatted("Network error: {}", Requests::network_error_to_string(*network_error))));
++        async_send_message("subscriptionError"sv, move(err));
++        return;
++    }
++
++    if (!m_response_ok) {
++        JsonObject err;
++        err.set("url"sv, original_url.serialize());
++        err.set("message"sv, MUST(String::formatted("Server returned HTTP {}", m_response_code.value_or(0))));
++        async_send_message("subscriptionError"sv, move(err));
++        return;
++    }
++
++    StringView candidate_view { m_pending_payload.bytes() };
++    if (looks_like_markup_document(candidate_view)) {
++        m_pending_payload.clear();
++        JsonObject err;
++        err.set("url"sv, original_url.serialize());
++        err.set("message"sv, "This URL returned an HTML/XML page instead of a filter list."sv);
++        async_send_message("subscriptionError"sv, move(err));
++        return;
++    }
++
++    m_loaded_url = original_url;
++    m_loaded_payload = move(m_pending_payload);
++    m_pending_payload.clear();
++
++    StringView full_view { m_loaded_payload.bytes() };
++    auto metadata = analyze_filter_list(full_view);
++
++    // Prefer the filter list's own "! Title:" header over an untrusted link query parameter.
++    String resolved_title;
++    if (metadata.title.has_value() && !metadata.title->bytes_as_string_view().trim_whitespace().is_empty())
++        resolved_title = clamp_title(metadata.title->bytes_as_string_view());
++    else if (!m_requested_title.bytes_as_string_view().trim_whitespace().is_empty())
++        resolved_title = clamp_title(m_requested_title.bytes_as_string_view());
++    else
++        resolved_title = original_url.serialize();
++    m_resolved_title = resolved_title;
++
++    bool truncated = false;
++    StringView preview_view = full_view;
++    if (preview_view.length() > maximum_preview_bytes) {
++        truncated = true;
++        preview_view = preview_view.substring_view(0, maximum_preview_bytes);
++        if (auto last_newline = preview_view.find_last('\n'); last_newline.has_value())
++            preview_view = preview_view.substring_view(0, *last_newline);
++    }
++
++    auto preview_string = String::from_utf8_with_replacement_character(preview_view);
++
++    JsonObject metadata_json;
++    if (metadata.homepage.has_value())
++        metadata_json.set("homepage"sv, *metadata.homepage);
++    if (metadata.last_modified.has_value())
++        metadata_json.set("lastModified"sv, *metadata.last_modified);
++    if (metadata.version.has_value())
++        metadata_json.set("version"sv, *metadata.version);
++    if (metadata.expires.has_value())
++        metadata_json.set("expires"sv, *metadata.expires);
++    if (metadata.description.has_value())
++        metadata_json.set("description"sv, *metadata.description);
++
++    JsonObject response;
++    response.set("url"sv, original_url.serialize());
++    response.set("resolvedTitle"sv, move(resolved_title));
++    response.set("lineCount"sv, static_cast<u64>(metadata.line_count));
++    response.set("ruleCount"sv, static_cast<u64>(metadata.rule_count));
++    response.set("metadata"sv, move(metadata_json));
++    response.set("content"sv, move(preview_string));
++    response.set("truncated"sv, truncated);
++    populate_subscription_fields(response, find_list_for_url(original_url));
++
++    async_send_message("subscriptionLoaded"sv, move(response));
++}
++
++void SubscribeUI::subscribe(JsonValue const& data)
++{
++    if (!data.is_object() || !has_client())
++        return;
++
++    auto raw_url = data.as_object().get_string("url"sv);
++    if (!raw_url.has_value())
++        return;
++
++    auto parsed_url = URL::Parser::basic_parse(*raw_url);
++    if (!parsed_url.has_value() || !parsed_url->scheme().is_one_of("http"sv, "https"sv)) {
++        JsonObject reply;
++        reply.set("error"sv, "Filter list URL must use HTTP or HTTPS."sv);
++        async_send_message("subscriptionUpdated"sv, move(reply));
++        return;
++    }
++
++    if (m_loaded_url != parsed_url) {
++        JsonObject reply;
++        populate_subscription_fields(reply, find_list_for_url(*parsed_url));
++        reply.set("error"sv, "Wait for the filter list to finish loading before subscribing."sv);
++        async_send_message("subscriptionUpdated"sv, move(reply));
++        return;
++    }
++
++    auto requested_title = data.as_object().get_string("title"sv).copy().value_or(String {});
++    String name;
++    if (!m_resolved_title.is_empty())
++        name = m_resolved_title;
++    else if (!requested_title.bytes_as_string_view().trim_whitespace().is_empty())
++        name = clamp_title(requested_title.bytes_as_string_view());
++    else
++        name = parsed_url->serialize();
++
++    Optional<ReadonlyBytes> preloaded;
++    if (!m_loaded_payload.is_empty())
++        preloaded = m_loaded_payload.bytes();
++
++    auto result = Application::the().add_content_blocker_subscription({}, move(name), *parsed_url, preloaded);
++
++    JsonObject reply;
++    populate_subscription_fields(reply, find_list_for_url(*parsed_url));
++    if (result.is_error()) {
++        reply.set("error"sv, MUST(String::formatted("Unable to subscribe: {}", result.error())));
++    } else if (Application::settings().content_blocker_enabled()) {
++        reply.set("message"sv, "Subscribed and activated in Hellbird Shield."sv);
++    } else {
++        reply.set("message"sv, "Subscribed (enable Hellbird Shield to activate)."sv);
++    }
++    async_send_message("subscriptionUpdated"sv, move(reply));
++}
++
++void SubscribeUI::unsubscribe(JsonValue const& data)
++{
++    if (!data.is_object() || !has_client())
++        return;
++
++    auto identifier = data.as_object().get_string("identifier"sv);
++    if (!identifier.has_value() || identifier->is_empty())
++        return;
++
++    auto existing = Application::settings().content_blocker_list(*identifier);
++    bool const was_built_in = existing.has_value() && existing->built_in;
++    if (existing.has_value()) {
++        if (was_built_in)
++            Application::settings().set_content_blocker_list_enabled(*identifier, false);
++        else
++            Application::the().remove_content_blocker_list({}, *identifier);
++    }
++
++    JsonObject reply;
++    if (m_requested_url.has_value())
++        populate_subscription_fields(reply, find_list_for_url(*m_requested_url));
++    else
++        populate_subscription_fields(reply, {});
++    reply.set("message"sv, was_built_in ? "Filter list disabled."sv : "Unsubscribed from filter list."sv);
++    async_send_message("subscriptionUpdated"sv, move(reply));
++}
++
++}
+diff --git a/Libraries/LibWebView/WebUI/SubscribeUI.h b/Libraries/LibWebView/WebUI/SubscribeUI.h
+new file mode 100644
+index 0000000000..6945f8fd66
+--- /dev/null
++++ b/Libraries/LibWebView/WebUI/SubscribeUI.h
+@@ -0,0 +1,63 @@
++/*
++ * Copyright (c) 2026, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/ByteBuffer.h>
++#include <AK/NonnullRefPtr.h>
++#include <AK/Optional.h>
++#include <AK/RefCounted.h>
++#include <AK/RefPtr.h>
++#include <AK/String.h>
++#include <LibRequests/Request.h>
++#include <LibURL/URL.h>
++#include <LibWebView/Settings.h>
++#include <LibWebView/WebUI.h>
++
++namespace WebView {
++
++// about:subscribe, a uBlock Origin-style filter list preview and one-click subscription page.
++class SubscribeUI final
++    : public WebUI
++    , public SettingsObserver {
++    WEB_UI(SubscribeUI);
++
++public:
++    virtual ~SubscribeUI() override;
++
++private:
++    struct AliveFlag final : public RefCounted<AliveFlag> {
++        bool alive { true };
++    };
++
++    virtual void register_interfaces() override;
++    virtual void content_blocker_settings_changed() override;
++
++    void load_subscription(JsonValue const&);
++    void subscribe(JsonValue const&);
++    void unsubscribe(JsonValue const&);
++
++    void start_fetch(URL::URL original_url, URL::URL fetch_url, size_t redirect_count = 0);
++    void cancel_fetch();
++    void send_subscription_state();
++    void handle_fetch_finished(u64 generation, URL::URL const& original_url, Optional<Requests::NetworkError> network_error);
++
++    NonnullRefPtr<AliveFlag> m_alive { adopt_ref(*new AliveFlag) };
++
++    Optional<URL::URL> m_requested_url;
++    String m_requested_title;
++    Optional<URL::URL> m_loaded_url;
++    String m_resolved_title;
++    ByteBuffer m_loaded_payload;
++
++    RefPtr<Requests::Request> m_active_request;
++    ByteBuffer m_pending_payload;
++    u64 m_fetch_generation { 0 };
++    bool m_response_ok { false };
++    Optional<u32> m_response_code;
++};
++
++}
+diff --git a/Tests/LibWebView/TestBackgroundNetworking.cpp b/Tests/LibWebView/TestBackgroundNetworking.cpp
+index 94bf41e94d..10c5e9ec06 100644
+--- a/Tests/LibWebView/TestBackgroundNetworking.cpp
++++ b/Tests/LibWebView/TestBackgroundNetworking.cpp
+@@ -35,11 +35,20 @@ TEST_CASE(content_blocker_list_registry)
+     remove_settings_file();
+     auto settings = WebView::Settings::create(settings_path());
+     auto const& definitions = settings.content_blocker_lists();
+-    EXPECT_EQ(definitions.size(), 27u);
++    EXPECT_EQ(definitions.size(), 34u);
+ 
+     for (size_t i = 0; i < definitions.size(); ++i) {
+         auto const& definition = definitions[i];
+-        EXPECT(!definition.enabled);
++        auto const expected_enabled = definition.identifier.is_one_of(
++            "uBlockFilters"sv,
++            "uBlockBadware"sv,
++            "uBlockPrivacy"sv,
++            "uBlockQuickFixes"sv,
++            "uBlockUnbreak"sv,
++            "easyList"sv,
++            "easyPrivacy"sv,
++            "peterLowe"sv);
++        EXPECT_EQ(definition.enabled, expected_enabled);
+         EXPECT(!definition.identifier.is_empty());
+         EXPECT(!definition.name.is_empty());
+         EXPECT(!definition.description.is_empty());
+@@ -128,8 +137,8 @@ TEST_CASE(content_blocker_list_settings_are_persistent)
+     String local_identifier;
+     {
+         auto settings = WebView::Settings::create(settings_path());
+-        EXPECT(!settings.content_blocker_list("easyList"sv)->enabled);
+-        EXPECT(!settings.content_blocker_list("easyPrivacy"sv)->enabled);
++        EXPECT(settings.content_blocker_list("easyList"sv)->enabled);
++        EXPECT(settings.content_blocker_list("easyPrivacy"sv)->enabled);
+ 
+         settings.set_content_blocker_list_enabled("easyList"sv, false);
+         settings.set_content_blocker_list_enabled("easyPrivacy"sv, true);
+@@ -143,7 +152,7 @@ TEST_CASE(content_blocker_list_settings_are_persistent)
+     auto settings = WebView::Settings::create(settings_path());
+     EXPECT(!settings.content_blocker_list("easyList"sv)->enabled);
+     EXPECT(settings.content_blocker_list("easyPrivacy"sv)->enabled);
+-    EXPECT_EQ(settings.content_blocker_lists().size(), 27u + 2);
++    EXPECT_EQ(settings.content_blocker_lists().size(), 34u + 2);
+     auto const& subscription = settings.content_blocker_list(subscription_identifier).value();
+     EXPECT_EQ(subscription.url->serialize(), "https://example.com/filters.txt"sv);
+     EXPECT(!subscription.enabled);
+@@ -157,7 +166,7 @@ TEST_CASE(content_blocker_list_settings_are_persistent)
+     EXPECT(!settings.remove_content_blocker_list("unknown"sv));
+     EXPECT(settings.remove_content_blocker_list(subscription_identifier));
+     EXPECT(settings.remove_content_blocker_list(local_identifier));
+-    EXPECT_EQ(settings.content_blocker_lists().size(), 27u);
++    EXPECT_EQ(settings.content_blocker_lists().size(), 34u);
+ 
+     remove_settings_file();
+ }
+@@ -179,7 +188,7 @@ TEST_CASE(content_blocker_list_settings_reject_built_in_identifiers)
+     })"sv);
+ 
+     auto settings = WebView::Settings::create(settings_path());
+-    EXPECT_EQ(settings.content_blocker_lists().size(), 27u + 2);
++    EXPECT_EQ(settings.content_blocker_lists().size(), 34u + 2);
+     EXPECT(settings.content_blocker_list("custom-list"sv).has_value());
+     EXPECT(settings.content_blocker_list("local-list"sv).has_value());
+     EXPECT(settings.content_blocker_list("easyList"sv)->built_in);
+diff --git a/UI/Qt/RemoteView.cpp b/UI/Qt/RemoteView.cpp
+index 010f4ae384..b82348fab7 100644
+--- a/UI/Qt/RemoteView.cpp
++++ b/UI/Qt/RemoteView.cpp
+@@ -654,6 +654,11 @@ void RemoteView::load_from_user_input(URL::URL const& url)
+     if (on_load_from_user_input)
+         on_load_from_user_input();
+ 
++    if (auto subscribe_url = WebView::filter_list_subscription_about_url(url); subscribe_url.has_value()) {
++        load(*subscribe_url);
++        return;
++    }
++
+     if (!WebView::is_url_handled_internally(url)) {
+         open_external_url_from_user_input(url);
+         return;
+@@ -674,16 +679,25 @@ void RemoteView::load_from_user_input(StringView input, Optional<URL::URL> fallb
+     auto classified_input = WebView::classify_user_input(input);
+ 
+     if (classified_input.classification != WebView::UserInputClassification::ExternalURL) {
+-        if (fallback_url.has_value())
+-            load(*fallback_url);
+-        else
++        if (fallback_url.has_value()) {
++            if (auto subscribe_url = WebView::filter_list_subscription_about_url(*fallback_url); subscribe_url.has_value())
++                load(*subscribe_url);
++            else
++                load(*fallback_url);
++        } else {
+             load_navigation_error_page(input);
++        }
+         return;
+     }
+ 
+     VERIFY(classified_input.url.has_value());
+     auto external_url = classified_input.url.release_value();
+ 
++    if (auto subscribe_url = WebView::filter_list_subscription_about_url(external_url); subscribe_url.has_value()) {
++        load(*subscribe_url);
++        return;
++    }
++
+     if (fallback_url.has_value() && *fallback_url == external_url) {
+         open_external_url_from_user_input(external_url);
+         return;
+@@ -702,6 +716,10 @@ void RemoteView::load_from_user_input(StringView input, Optional<URL::URL> fallb
+ 
+ void RemoteView::open_url_in_new_tab(URL::URL const& url, Web::HTML::ActivateTab activate_tab)
+ {
++    if (auto subscribe_url = WebView::filter_list_subscription_about_url(url); subscribe_url.has_value()) {
++        HubConnection::the().async_view_open_url_in_new_tab(view_id(), *subscribe_url, activate_tab);
++        return;
++    }
+     if (!WebView::is_url_handled_internally(url)) {
+         open_external_url_from_user_input(url);
+         return;
+@@ -711,6 +729,10 @@ void RemoteView::open_url_in_new_tab(URL::URL const& url, Web::HTML::ActivateTab
+ 
+ void RemoteView::open_url_in_new_window(URL::URL const& url, WebView::IsPrivate is_private)
+ {
++    if (auto subscribe_url = WebView::filter_list_subscription_about_url(url); subscribe_url.has_value()) {
++        HubConnection::the().async_view_open_url_in_new_window(view_id(), *subscribe_url, is_private);
++        return;
++    }
+     if (!WebView::is_url_handled_internally(url)) {
+         open_external_url_from_user_input(url);
+         return;
+diff --git a/UI/cmake/ResourceFiles.cmake b/UI/cmake/ResourceFiles.cmake
+index 603fc400c6..f1c01aeacc 100644
+--- a/UI/cmake/ResourceFiles.cmake
++++ b/UI/cmake/ResourceFiles.cmake
+@@ -35,6 +35,7 @@ set(ABOUT_PAGES
+     licenses.html
+     newtab.html
+     settings.html
++    subscribe.html
+     support.html
+     version.html
+     webui.css

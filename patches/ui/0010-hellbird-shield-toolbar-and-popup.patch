@@ -1,0 +1,1343 @@
+diff --git a/UI/Qt/CMakeLists.txt b/UI/Qt/CMakeLists.txt
+index f03130a7dd..7e291cdf29 100644
+--- a/UI/Qt/CMakeLists.txt
++++ b/UI/Qt/CMakeLists.txt
+@@ -63,6 +63,7 @@ add_library(ladybird_impl STATIC
+     SessionHistorySnapshotStorage.cpp
+     SessionStore.cpp
+     SelectDropdown.cpp
++    ShieldPopover.cpp
+     SiteSettingsPopover.cpp
+     StringUtils.cpp
+     SuggestionProvider.cpp
+diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
+index 872c5b02ff..e8b2bedfe9 100644
+--- a/UI/Qt/ChromeStyle.cpp
++++ b/UI/Qt/ChromeStyle.cpp
+@@ -1803,6 +1803,194 @@ QToolButton#LadybirdPopoverIconButton {{
+         style_sheet_color(panel.separator), style_sheet_color(panel.warning), style_sheet_color(panel.control), style_sheet_color(panel.pressed));
+ }
+ 
++QString shield_popover_style_sheet(QPalette const&)
++{
++    auto const& panel = Theme::panel();
++    return qformatted(R"(
++QFrame#LadybirdShieldPopover {{
++    color: {0};
++    background: {1};
++    border: 1px solid {2};
++    border-radius: 12px;
++}}
++
++QFrame#LadybirdShieldPopover QLabel {{
++    color: {0};
++    background: transparent;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldTitle {{
++    font-size: 14px;
++    font-weight: 600;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldDetail {{
++    color: {3};
++    font-size: 12px;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldHostCount {{
++    color: {3};
++    font-size: 12px;
++    font-weight: 600;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldHost,
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldGlobalLabel {{
++    font-size: 12px;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldCaption {{
++    font-size: 13px;
++    font-weight: 500;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldStatus {{
++    color: {3};
++    background: {6};
++    border: 0;
++    border-radius: 9px;
++    min-height: 18px;
++    max-height: 18px;
++    padding: 0 8px;
++    font-size: 11px;
++    font-weight: 600;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldStatus[shieldState="active"] {{
++    color: #ffffff;
++    background: {8};
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldStatus[shieldState="paused"] {{
++    color: {5};
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldFeedback {{
++    font-size: 12px;
++    font-weight: 500;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldFeedback[failed="true"] {{
++    color: {5};
++}}
++
++QFrame#LadybirdShieldStat {{
++    background: {6};
++    border: 0;
++    border-radius: 8px;
++}}
++
++QFrame#LadybirdShieldPopover QLabel#LadybirdShieldStatValue {{
++    font-size: 20px;
++    font-weight: 700;
++}}
++
++QScrollArea#LadybirdShieldDomains,
++QWidget#LadybirdShieldDomainRows {{
++    background: transparent;
++    border: 0;
++}}
++
++QScrollArea#LadybirdShieldDomains QScrollBar:vertical {{
++    background: transparent;
++    width: 8px;
++    margin: 0;
++}}
++
++QScrollArea#LadybirdShieldDomains QScrollBar::handle:vertical {{
++    background: {7};
++    border-radius: 4px;
++    min-height: 20px;
++}}
++
++QScrollArea#LadybirdShieldDomains QScrollBar::add-line:vertical,
++QScrollArea#LadybirdShieldDomains QScrollBar::sub-line:vertical {{
++    height: 0;
++}}
++
++QScrollArea#LadybirdShieldDomains QScrollBar::add-page:vertical,
++QScrollArea#LadybirdShieldDomains QScrollBar::sub-page:vertical {{
++    background: transparent;
++}}
++
++QFrame#LadybirdPopoverSeparator {{
++    background: {4};
++    border: 0;
++}}
++
++QPushButton#LadybirdPopoverRow {{
++    background: transparent;
++    border: 0;
++    border-radius: 6px;
++}}
++
++QPushButton#LadybirdPopoverRow:hover,
++QPushButton#LadybirdPopoverRow:focus {{
++    background: {6};
++}}
++
++QPushButton#LadybirdPopoverRow:pressed {{
++    background: {7};
++}}
++
++QLineEdit#LadybirdShieldFilter {{
++    color: {0};
++    background: {9};
++    border: 1px solid {4};
++    border-radius: 7px;
++    min-height: 26px;
++    max-height: 26px;
++    padding: 0 8px;
++    font-size: 12px;
++}}
++
++QLineEdit#LadybirdShieldFilter:focus {{
++    border-color: {10};
++}}
++
++QPushButton#LadybirdShieldAdd {{
++    color: {0};
++    background: {6};
++    border: 1px solid transparent;
++    border-radius: 7px;
++    min-height: 26px;
++    max-height: 26px;
++    padding: 0 12px;
++    font-size: 12px;
++    font-weight: 500;
++}}
++
++QPushButton#LadybirdShieldAdd:hover,
++QPushButton#LadybirdShieldAdd:pressed {{
++    background: {7};
++}}
++
++QPushButton#LadybirdShieldAdd:focus {{
++    border-color: {10};
++}}
++
++QPushButton#LadybirdPopoverLink {{
++    color: {0};
++    background: transparent;
++    border: 0;
++    border-radius: 5px;
++    padding: 4px 0;
++    font-size: 12px;
++    font-weight: 500;
++}}
++
++QPushButton#LadybirdPopoverLink:hover,
++QPushButton#LadybirdPopoverLink:focus {{
++    text-decoration: underline;
++}}
++)",
++               style_sheet_color(panel.text), style_sheet_color(panel.surface), style_sheet_color(over(panel.edge, panel.surface)), style_sheet_color(panel.muted),
++               style_sheet_color(panel.separator), style_sheet_color(panel.warning), style_sheet_color(panel.control), style_sheet_color(panel.pressed),
++               style_sheet_color(Theme::accent_fill()), style_sheet_color(panel.page), style_sheet_color(Theme::focus_edge()))
++        + panel_text_selection_style_sheet({ "QLineEdit#LadybirdShieldFilter" }, panel.text);
++}
++
+ QString feedback_popover_style_sheet(QPalette const&)
+ {
+     auto const& panel = Theme::panel();
+diff --git a/UI/Qt/ChromeStyle.h b/UI/Qt/ChromeStyle.h
+index 4b7c05f323..1c6086e6f7 100644
+--- a/UI/Qt/ChromeStyle.h
++++ b/UI/Qt/ChromeStyle.h
+@@ -110,6 +110,7 @@ QString autocomplete_popup_style_sheet(QPalette const&);
+ QString downloads_popover_style_sheet(QPalette const&);
+ QString message_popover_style_sheet(QPalette const&);
+ QString site_settings_popover_style_sheet(QPalette const&);
++QString shield_popover_style_sheet(QPalette const&);
+ QString feedback_popover_style_sheet(QPalette const&);
+ QString permission_prompt_style_sheet(QPalette const&);
+ QString all_tabs_popover_style_sheet(QPalette const&);
+diff --git a/UI/Qt/ShieldPopover.cpp b/UI/Qt/ShieldPopover.cpp
+new file mode 100644
+index 0000000000..aa190007a3
+--- /dev/null
++++ b/UI/Qt/ShieldPopover.cpp
+@@ -0,0 +1,575 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/HashMap.h>
++#include <AK/QuickSort.h>
++#include <AK/StdLibExtras.h>
++#include <AK/String.h>
++#include <AK/StringBuilder.h>
++#include <UI/Qt/ChromeStyle.h>
++#include <UI/Qt/ElidedLabel.h>
++#include <UI/Qt/Icon.h>
++#include <UI/Qt/ShieldPopover.h>
++#include <UI/Qt/StringUtils.h>
++#include <UI/Qt/Theme.h>
++
++#include <QFrame>
++#include <QHBoxLayout>
++#include <QLabel>
++#include <QLineEdit>
++#include <QPainter>
++#include <QPen>
++#include <QPushButton>
++#include <QScreen>
++#include <QScrollArea>
++#include <QSignalBlocker>
++#include <QStyle>
++#include <QTimer>
++#include <QVBoxLayout>
++#include <QVariant>
++
++namespace Ladybird {
++
++static constexpr int POPOVER_WIDTH = 330;
++static constexpr int POPOVER_PADDING = 14;
++static constexpr int HEADER_ICON_SIZE = 20;
++static constexpr int POWER_BUTTON_SIZE = 76;
++static constexpr int BLOCKED_HOST_ROW_HEIGHT = 28;
++static constexpr int BLOCKED_LIST_MAX_HEIGHT = 180;
++static constexpr int BLOCKED_LIST_MIN_HEIGHT = 2 * BLOCKED_HOST_ROW_HEIGHT;
++// What the popover shows besides the list of blocked domains takes about this much of a low screen's height.
++static constexpr int HEIGHT_BESIDES_BLOCKED_LIST = 480;
++static constexpr int FILTER_FEEDBACK_DURATION_MS = 2500;
++// NB: The settings page, which edits the same filters, takes no more than this either.
++static constexpr size_t MAX_CUSTOM_FILTERS_SIZE = 4 * MiB;
++
++// The round button that pauses and resumes protection on the site: a power symbol on the accent while the site is
++// protected, and on a quiet surface while it is not.
++class ShieldPowerButton final : public QPushButton {
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    explicit ShieldPowerButton(QWidget* parent)
++        : QPushButton(parent)
++    {
++        setObjectName("LadybirdShieldPowerButton");
++        setFixedSize(POWER_BUTTON_SIZE, POWER_BUTTON_SIZE);
++        setAttribute(Qt::WA_LayoutUsesWidgetRect);
++        setAttribute(Qt::WA_Hover);
++        // NB: A click does not focus the button, so only the keyboard's focus is ringed.
++        setFocusPolicy(Qt::TabFocus);
++    }
++
++    virtual QSize sizeHint() const override { return { POWER_BUTTON_SIZE, POWER_BUTTON_SIZE }; }
++
++    void set_protecting(bool protecting)
++    {
++        if (m_protecting == protecting)
++            return;
++        m_protecting = protecting;
++        update();
++    }
++
++private:
++    static constexpr qreal CIRCLE_INSET = 7;
++    static constexpr qreal SYMBOL_RADIUS = 13;
++    static constexpr qreal SYMBOL_LINE_WIDTH = 3.5;
++    static constexpr int SYMBOL_GAP_DEGREES = 80;
++
++    QRectF circle_rect() const { return QRectF(rect()).adjusted(CIRCLE_INSET, CIRCLE_INSET, -CIRCLE_INSET, -CIRCLE_INSET); }
++
++    virtual bool hitButton(QPoint const& position) const override
++    {
++        auto circle = circle_rect();
++        auto offset = QPointF(position) - circle.center();
++        auto radius = circle.width() / 2;
++        return (offset.x() * offset.x()) + (offset.y() * offset.y()) <= radius * radius;
++    }
++
++    virtual void paintEvent(QPaintEvent*) override
++    {
++        QPainter painter(this);
++        painter.setRenderHint(QPainter::Antialiasing, true);
++        auto const& panel = Theme::panel();
++        auto circle = circle_rect();
++        auto hovered = isEnabled() && underMouse();
++        auto pressed = isEnabled() && isDown();
++
++        // A button that can't be clicked fades, so it doesn't look as though it could.
++        if (!isEnabled())
++            painter.setOpacity(0.55);
++
++        QColor symbol_color;
++        if (m_protecting) {
++            auto glow = Theme::accent();
++            glow.setAlpha(pressed ? 36 : (hovered ? 84 : 56));
++            painter.setPen(Qt::NoPen);
++            painter.setBrush(glow);
++            painter.drawEllipse(QRectF(rect()).adjusted(1, 1, -1, -1));
++
++            auto fill = Theme::accent_fill();
++            if (pressed)
++                fill = fill.darker(115);
++            else if (hovered)
++                fill = ChromeStyle::mix(fill, QColor(Qt::white), 0.08);
++            painter.setBrush(fill);
++            painter.drawEllipse(circle);
++            symbol_color = Qt::white;
++        } else {
++            painter.setPen(QPen(panel.separator, 1));
++            painter.setBrush(pressed || hovered ? panel.pressed : panel.control);
++            painter.drawEllipse(circle.adjusted(0.5, 0.5, -0.5, -0.5));
++            symbol_color = hovered ? panel.text : panel.muted;
++        }
++
++        // The power symbol is a circle that is open at the top, with a bar through the opening. Qt measures an arc in
++        // sixteenths of a degree, counterclockwise from three o'clock.
++        painter.setBrush(Qt::NoBrush);
++        painter.setPen(QPen(symbol_color, SYMBOL_LINE_WIDTH, Qt::SolidLine, Qt::RoundCap));
++        auto center = circle.center();
++        QRectF symbol(center.x() - SYMBOL_RADIUS, center.y() - SYMBOL_RADIUS, 2 * SYMBOL_RADIUS, 2 * SYMBOL_RADIUS);
++        painter.drawArc(symbol, (90 + (SYMBOL_GAP_DEGREES / 2)) * 16, (360 - SYMBOL_GAP_DEGREES) * 16);
++        painter.drawLine(QPointF(center.x(), center.y() - SYMBOL_RADIUS - 2), QPointF(center.x(), center.y() - 1));
++
++        if (hasFocus()) {
++            painter.setOpacity(1);
++            ChromeStyle::paint_focus_ring(painter, circle, circle.width() / 2);
++        }
++    }
++
++    bool m_protecting { false };
++};
++
++static QLabel* create_label(QWidget& parent, char const* object_name, QString const& text = {})
++{
++    auto* label = new QLabel(&parent);
++    label->setObjectName(QString::fromLatin1(object_name));
++    label->setTextFormat(Qt::PlainText);
++    label->setText(text);
++    return label;
++}
++
++static void add_separator(QWidget& parent, QVBoxLayout& layout, int margin)
++{
++    layout.addSpacing(margin);
++    auto* separator = new QFrame(&parent);
++    separator->setObjectName("LadybirdPopoverSeparator");
++    separator->setFixedHeight(1);
++    layout.addWidget(separator);
++    layout.addSpacing(margin);
++}
++
++// A tile with a number, and what it counts below it.
++static QLabel* add_stat_tile(QWidget& parent, QHBoxLayout& layout, QString const& caption)
++{
++    auto* tile = new QFrame(&parent);
++    tile->setObjectName("LadybirdShieldStat");
++    tile->setFixedHeight(58);
++    auto* tile_layout = new QVBoxLayout(tile);
++    tile_layout->setContentsMargins(12, 7, 12, 7);
++    tile_layout->setSpacing(0);
++    auto* value = create_label(*tile, "LadybirdShieldStatValue", "0");
++    tile_layout->addWidget(value);
++    tile_layout->addWidget(create_label(*tile, "LadybirdShieldDetail", caption));
++    layout.addWidget(tile, 1);
++    return value;
++}
++
++// A style sheet's rules for a property apply once the widget that has it is polished again.
++static void set_style_property(QWidget& widget, char const* name, QString const& value)
++{
++    if (widget.property(name).toString() == value)
++        return;
++    widget.setProperty(name, value);
++    widget.style()->unpolish(&widget);
++    widget.style()->polish(&widget);
++}
++
++ShieldPopover::ShieldPopover(QWidget* parent, WebView::Settings& settings)
++    : Popover(parent)
++    , m_settings(settings)
++{
++    setAccessibleName("Hellbird Shield");
++    card().setObjectName("LadybirdShieldPopover");
++    card().setFixedWidth(POPOVER_WIDTH);
++
++    auto* layout = new QVBoxLayout(&card());
++    layout->setContentsMargins(POPOVER_PADDING, 12, POPOVER_PADDING, 10);
++    layout->setSpacing(0);
++
++    // The site.
++    auto* header = new QHBoxLayout;
++    header->setContentsMargins(0, 0, 0, 0);
++    header->setSpacing(10);
++    m_icon = new QLabel(&card());
++    m_icon->setFixedSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE);
++    header->addWidget(m_icon, 0, Qt::AlignVCenter);
++    auto* header_text = new QVBoxLayout;
++    header_text->setContentsMargins(0, 0, 0, 0);
++    header_text->setSpacing(1);
++    header_text->addWidget(create_label(card(), "LadybirdShieldTitle", "Hellbird Shield"));
++    m_site_label = new ElidedLabel({}, Qt::ElideMiddle, &card());
++    m_site_label->setObjectName("LadybirdShieldDetail");
++    header_text->addWidget(m_site_label);
++    header->addLayout(header_text, 1);
++    m_status_badge = create_label(card(), "LadybirdShieldStatus");
++    m_status_badge->setAlignment(Qt::AlignCenter);
++    header->addWidget(m_status_badge, 0, Qt::AlignVCenter);
++    layout->addLayout(header);
++
++    add_separator(card(), *layout, 10);
++
++    // Whether the site is protected.
++    m_power_button = new ShieldPowerButton(&card());
++    QObject::connect(m_power_button, &QPushButton::clicked, this, [this] {
++        if (on_toggle_site)
++            on_toggle_site(!m_is_protecting);
++    });
++    layout->addWidget(m_power_button, 0, Qt::AlignHCenter);
++    layout->addSpacing(6);
++    m_caption = new ElidedLabel({}, Qt::ElideMiddle, &card());
++    m_caption->setObjectName("LadybirdShieldCaption");
++    m_caption->setAlignment(Qt::AlignCenter);
++    layout->addWidget(m_caption);
++    layout->addSpacing(12);
++
++    // What was blocked on the page.
++    auto* stats = new QHBoxLayout;
++    stats->setContentsMargins(0, 0, 0, 0);
++    stats->setSpacing(8);
++    m_blocked_count = add_stat_tile(card(), *stats, "Blocked on page");
++    m_domain_count = add_stat_tile(card(), *stats, "Blocked domains");
++    layout->addLayout(stats);
++    layout->addSpacing(8);
++
++    m_empty_label = create_label(card(), "LadybirdShieldDetail");
++    m_empty_label->setAlignment(Qt::AlignCenter);
++    m_empty_label->setFixedHeight(BLOCKED_HOST_ROW_HEIGHT);
++    layout->addWidget(m_empty_label);
++
++    m_blocked_scroll = new QScrollArea(&card());
++    m_blocked_scroll->setObjectName("LadybirdShieldDomains");
++    m_blocked_scroll->setAccessibleName("Blocked domains");
++    m_blocked_scroll->setFrameShape(QFrame::NoFrame);
++    m_blocked_scroll->setWidgetResizable(true);
++    m_blocked_scroll->setFocusPolicy(Qt::NoFocus);
++    m_blocked_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
++    m_blocked_scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
++    auto* rows = new QWidget(m_blocked_scroll);
++    rows->setObjectName("LadybirdShieldDomainRows");
++    m_blocked_rows = new QVBoxLayout(rows);
++    m_blocked_rows->setContentsMargins(0, 0, 0, 0);
++    m_blocked_rows->setSpacing(0);
++    m_blocked_rows->setAlignment(Qt::AlignTop);
++    m_blocked_scroll->setWidget(rows);
++    m_blocked_scroll->hide();
++    layout->addWidget(m_blocked_scroll);
++
++    add_separator(card(), *layout, 8);
++
++    // A filter of the user's own.
++    auto* filter_heading = new QHBoxLayout;
++    filter_heading->setContentsMargins(0, 0, 0, 0);
++    filter_heading->setSpacing(8);
++    filter_heading->addWidget(create_label(card(), "LadybirdShieldDetail", "Quick filter"));
++    filter_heading->addStretch(1);
++    // NB: The feedback shares the heading's line, so the popover keeps its size as it comes and goes.
++    m_filter_feedback = create_label(card(), "LadybirdShieldFeedback");
++    filter_heading->addWidget(m_filter_feedback);
++    layout->addLayout(filter_heading);
++    layout->addSpacing(5);
++
++    auto* filter_row = new QHBoxLayout;
++    filter_row->setContentsMargins(0, 0, 0, 0);
++    filter_row->setSpacing(6);
++    m_filter_field = new QLineEdit(&card());
++    m_filter_field->setObjectName("LadybirdShieldFilter");
++    m_filter_field->setAccessibleName("Custom filter");
++    m_filter_field->setPlaceholderText("Add custom filter (e.g. ||ads.site.com^)");
++    QObject::connect(m_filter_field, &QLineEdit::returnPressed, this, [this] { add_custom_filter(); });
++    filter_row->addWidget(m_filter_field, 1);
++    auto* add_button = new QPushButton("Add", &card());
++    add_button->setObjectName("LadybirdShieldAdd");
++    add_button->setAccessibleName("Add custom filter");
++    add_button->setAttribute(Qt::WA_LayoutUsesWidgetRect);
++    // NB: A click leaves the focus in the field, so that another filter can be typed right away.
++    add_button->setFocusPolicy(Qt::TabFocus);
++    QObject::connect(add_button, &QPushButton::clicked, this, [this] { add_custom_filter(); });
++    filter_row->addWidget(add_button);
++    layout->addLayout(filter_row);
++
++    m_filter_feedback_timer = new QTimer(this);
++    m_filter_feedback_timer->setSingleShot(true);
++    m_filter_feedback_timer->setInterval(FILTER_FEEDBACK_DURATION_MS);
++    QObject::connect(m_filter_feedback_timer, &QTimer::timeout, this, [this] { clear_filter_feedback(); });
++
++    add_separator(card(), *layout, 10);
++
++    // Whether any site is protected, and where the filters come from.
++    auto* footer = new QHBoxLayout;
++    footer->setContentsMargins(0, 0, 0, 0);
++    footer->setSpacing(8);
++    m_global_switch = new PopoverSwitch(&card());
++    m_global_switch->setAccessibleName("Global shield");
++    QObject::connect(m_global_switch, &QCheckBox::toggled, this, [this](bool enabled) {
++        m_settings.set_content_blocker_enabled(enabled);
++    });
++    footer->addWidget(m_global_switch);
++    footer->addWidget(create_label(card(), "LadybirdShieldGlobalLabel", "Global shield"));
++    footer->addStretch(1);
++    // NB: A lone ampersand would underline the character after it, as a shortcut.
++    auto* filter_lists_link = new QPushButton("Filter lists && rules", &card());
++    filter_lists_link->setObjectName("LadybirdPopoverLink");
++    filter_lists_link->setAccessibleName("Filter lists and rules");
++    filter_lists_link->setCursor(Qt::PointingHandCursor);
++    filter_lists_link->setAttribute(Qt::WA_LayoutUsesWidgetRect);
++    QObject::connect(filter_lists_link, &QPushButton::clicked, this, [this] {
++        close();
++        if (on_open_filter_lists)
++            on_open_filter_lists();
++    });
++    footer->addWidget(filter_lists_link);
++    layout->addLayout(footer);
++
++    update_icons();
++}
++
++void ShieldPopover::set_page(WebView::ContentBlockingSnapshot const& blocking, bool protection_enabled)
++{
++    auto host = blocking.site.has_value() ? qstring_from_ak_string(*blocking.site) : QString {};
++    m_is_protecting = blocking.enabled();
++
++    QString status;
++    QString status_style;
++    QString caption;
++    switch (blocking.state) {
++    case WebView::ContentBlockingState::Enabled:
++        status = QStringLiteral("Active");
++        status_style = QStringLiteral("active");
++        caption = QStringLiteral("Protection active on %1").arg(host);
++        break;
++    case WebView::ContentBlockingState::NoRules:
++        status = QStringLiteral("Active");
++        status_style = QStringLiteral("active");
++        caption = QStringLiteral("No filter lists are loaded yet");
++        break;
++    case WebView::ContentBlockingState::SiteDisabled:
++        status = QStringLiteral("Paused");
++        status_style = QStringLiteral("paused");
++        caption = QStringLiteral("Paused on %1 \u2014 click to resume").arg(host);
++        break;
++    case WebView::ContentBlockingState::Disabled:
++    case WebView::ContentBlockingState::Unavailable:
++        status_style = QStringLiteral("off");
++        if (blocking.state == WebView::ContentBlockingState::Unavailable && protection_enabled) {
++            status = QStringLiteral("Standby");
++            caption = QStringLiteral("Standby on internal page");
++        } else {
++            status = QStringLiteral("Off");
++            caption = QStringLiteral("Protection disabled globally");
++        }
++        break;
++    }
++
++    m_site_label->setText(host.isEmpty() ? QStringLiteral("Not a website") : host);
++    m_site_label->setToolTip(host);
++    m_status_badge->setText(status);
++    set_style_property(*m_status_badge, "shieldState", status_style);
++    m_caption->setText(caption);
++    m_caption->setToolTip(caption);
++
++    auto can_toggle = blocking.can_toggle();
++    m_power_button->set_protecting(m_is_protecting);
++    m_power_button->setEnabled(can_toggle);
++    m_power_button->setCursor(can_toggle ? Qt::PointingHandCursor : Qt::ArrowCursor);
++    auto action = caption;
++    if (can_toggle)
++        action = (m_is_protecting ? QStringLiteral("Pause protection on %1") : QStringLiteral("Resume protection on %1")).arg(host);
++    m_power_button->setToolTip(action);
++    m_power_button->setAccessibleName(action);
++
++    {
++        QSignalBlocker blocker(m_global_switch);
++        m_global_switch->setChecked(m_settings.content_blocker_enabled());
++    }
++
++    // What was blocked is only listed while content blocking is on.
++    Vector<BlockedHost> blocked_hosts;
++    size_t blocked_count = 0;
++    if (m_is_protecting) {
++        blocked_hosts = group_by_host(blocking.blocked_resources);
++        blocked_count = blocking.blocked_resources.size();
++    }
++    m_blocked_count->setText(QString::number(blocked_count));
++    m_domain_count->setText(QString::number(blocked_hosts.size()));
++    m_empty_label->setText(m_is_protecting
++            ? QStringLiteral("No trackers or ads blocked on this page yet.")
++            : QStringLiteral("Nothing is being blocked on this page."));
++    set_blocked_hosts(AK::move(blocked_hosts));
++    update_icons();
++}
++
++// The hosts with the most blocked on the page come first.
++Vector<ShieldPopover::BlockedHost> ShieldPopover::group_by_host(Vector<WebView::BlockedResource> const& resources)
++{
++    Vector<BlockedHost> hosts;
++    HashMap<String, size_t> index_by_host;
++    for (auto const& resource : resources) {
++        auto index = index_by_host.get(resource.host).value_or(hosts.size());
++        if (index == hosts.size()) {
++            index_by_host.set(resource.host, index);
++            hosts.append({ .host = qstring_from_ak_string(resource.host), .kinds = {}, .count = 0 });
++        }
++        auto& host = hosts[index];
++        ++host.count;
++        auto kind = qstring_from_ak_string(resource.kind).toLower();
++        if (!host.kinds.contains(kind))
++            host.kinds.append(kind);
++    }
++    quick_sort(hosts, [](BlockedHost const& a, BlockedHost const& b) {
++        if (a.count != b.count)
++            return a.count > b.count;
++        return a.host < b.host;
++    });
++    return hosts;
++}
++
++void ShieldPopover::set_blocked_hosts(Vector<BlockedHost> blocked_hosts)
++{
++    // NB: What is shown is hidden first, so that the popover never has to fit both.
++    (blocked_hosts.is_empty() ? static_cast<QWidget*>(m_blocked_scroll) : m_empty_label)->hide();
++    (blocked_hosts.is_empty() ? static_cast<QWidget*>(m_empty_label) : m_blocked_scroll)->show();
++
++    // NB: The rows are left alone while what they show is the same, so that they keep their hover and scroll position.
++    if (m_blocked_hosts == blocked_hosts)
++        return;
++    m_blocked_hosts = AK::move(blocked_hosts);
++
++    // The rows go once the event loop is back, as one of them may be handling a press.
++    while (auto* item = m_blocked_rows->takeAt(0)) {
++        if (auto* widget = item->widget()) {
++            widget->hide();
++            widget->deleteLater();
++        }
++        delete item;
++    }
++
++    auto& rows = *m_blocked_scroll->widget();
++    for (auto const& blocked : m_blocked_hosts) {
++        auto kinds = blocked.kinds.join(QStringLiteral(", "));
++
++        auto* row = new QPushButton(&rows);
++        row->setObjectName("LadybirdPopoverRow");
++        row->setFixedHeight(BLOCKED_HOST_ROW_HEIGHT);
++        row->setAttribute(Qt::WA_LayoutUsesWidgetRect);
++        row->setFocusPolicy(Qt::TabFocus);
++        row->setToolTip(QStringLiteral("%1 (%2)\nClick to write a filter for it").arg(blocked.host, kinds));
++        row->setAccessibleName(QStringLiteral("%1, %2 blocked: %3").arg(blocked.host, QString::number(blocked.count), kinds));
++        auto* row_layout = new QHBoxLayout(row);
++        row_layout->setContentsMargins(8, 0, 8, 0);
++        row_layout->setSpacing(8);
++
++        auto* host_label = new ElidedLabel(blocked.host, Qt::ElideMiddle, row);
++        host_label->setObjectName("LadybirdShieldHost");
++        host_label->setAttribute(Qt::WA_TransparentForMouseEvents);
++        row_layout->addWidget(host_label, 3);
++        auto* kinds_label = new ElidedLabel(kinds, Qt::ElideRight, row);
++        kinds_label->setObjectName("LadybirdShieldDetail");
++        kinds_label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
++        kinds_label->setAttribute(Qt::WA_TransparentForMouseEvents);
++        row_layout->addWidget(kinds_label, 2);
++        auto* count_label = create_label(*row, "LadybirdShieldHostCount", QString::number(blocked.count));
++        count_label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
++        count_label->setMinimumWidth(14);
++        count_label->setAttribute(Qt::WA_TransparentForMouseEvents);
++        row_layout->addWidget(count_label);
++
++        QObject::connect(row, &QPushButton::clicked, this, [this, host = blocked.host] {
++            clear_filter_feedback();
++            m_filter_field->setText(QStringLiteral("||%1^").arg(host));
++            m_filter_field->setFocus(Qt::OtherFocusReason);
++        });
++        m_blocked_rows->addWidget(row);
++    }
++    fit_blocked_list();
++}
++
++// The list grows with what it lists, up to a limit that leaves room for the rest of the popover on a low screen.
++void ShieldPopover::fit_blocked_list()
++{
++    auto max_height = BLOCKED_LIST_MAX_HEIGHT;
++    if (auto const* popover_screen = screen())
++        max_height = clamp(popover_screen->availableGeometry().height() - HEIGHT_BESIDES_BLOCKED_LIST, BLOCKED_LIST_MIN_HEIGHT, BLOCKED_LIST_MAX_HEIGHT);
++    auto list_height = static_cast<int>(m_blocked_hosts.size()) * BLOCKED_HOST_ROW_HEIGHT;
++    m_blocked_scroll->setFixedHeight(min(list_height, max_height));
++}
++
++void ShieldPopover::fit_to_contents()
++{
++    fit_blocked_list();
++    card().layout()->activate();
++    layout()->activate();
++    adjustSize();
++}
++
++void ShieldPopover::add_custom_filter()
++{
++    auto filter = ak_string_from_qstring(m_filter_field->text().trimmed());
++    if (filter.is_empty())
++        return;
++
++    auto const& filters = m_settings.custom_content_blocker_filters();
++    for (auto line : filters.bytes_as_string_view().split_view('\n')) {
++        if (line.trim_whitespace() == filter.bytes_as_string_view()) {
++            show_filter_feedback(QStringLiteral("Rule already exists"), FeedbackTone::Failure);
++            return;
++        }
++    }
++
++    StringBuilder builder;
++    builder.append(filters);
++    if (!filters.is_empty() && !filters.bytes_as_string_view().ends_with('\n'))
++        builder.append('\n');
++    builder.append(filter);
++    if (builder.length() > MAX_CUSTOM_FILTERS_SIZE) {
++        show_filter_feedback(QStringLiteral("Custom filters are full"), FeedbackTone::Failure);
++        return;
++    }
++
++    m_settings.set_custom_content_blocker_filters(MUST(builder.to_string()));
++    m_filter_field->clear();
++    show_filter_feedback(QStringLiteral("Rule added"), FeedbackTone::Success);
++}
++
++void ShieldPopover::show_filter_feedback(QString const& text, FeedbackTone tone)
++{
++    m_filter_feedback->setText(text);
++    set_style_property(*m_filter_feedback, "failed", tone == FeedbackTone::Failure ? QStringLiteral("true") : QStringLiteral("false"));
++    m_filter_feedback_timer->start();
++}
++
++void ShieldPopover::clear_filter_feedback()
++{
++    m_filter_feedback_timer->stop();
++    m_filter_feedback->clear();
++}
++
++void ShieldPopover::update_chrome_style(QPalette const& palette)
++{
++    setPalette(palette);
++    setStyleSheet(ChromeStyle::shield_popover_style_sheet(palette));
++    // NB: The popover is kept for its window, so its icons are drawn again in the colors of the current theme.
++    update_icons();
++    m_power_button->update();
++}
++
++void ShieldPopover::update_icons()
++{
++    auto color = m_is_protecting ? Theme::accent() : Theme::panel().muted;
++    m_icon->setPixmap(create_chrome_icon(ChromeIcon::ContentBlocking, color).pixmap(QSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE), devicePixelRatioF()));
++}
++
++}
+diff --git a/UI/Qt/ShieldPopover.h b/UI/Qt/ShieldPopover.h
+new file mode 100644
+index 0000000000..c0f2627d71
+--- /dev/null
++++ b/UI/Qt/ShieldPopover.h
+@@ -0,0 +1,91 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/Function.h>
++#include <AK/Types.h>
++#include <AK/Vector.h>
++#include <AK/kmalloc.h>
++#include <LibWebView/ContentBlocking.h>
++#include <LibWebView/Settings.h>
++#include <UI/Qt/Popover.h>
++
++#include <QString>
++#include <QStringList>
++
++class QLabel;
++class QLineEdit;
++class QPushButton;
++class QScrollArea;
++class QTimer;
++class QVBoxLayout;
++
++namespace Ladybird {
++
++class ElidedLabel;
++class ShieldPowerButton;
++
++// What the content blocker did on the page, and the controls for pausing it on the site, turning it off everywhere, and
++// adding a filter.
++class ShieldPopover final : public Popover {
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    ShieldPopover(QWidget* parent, WebView::Settings&);
++
++    // Whether protection is enabled at all is told apart from the snapshot's state, which a page that is not from a
++    // website leaves unavailable either way.
++    void set_page(WebView::ContentBlockingSnapshot const&, bool protection_enabled);
++    void clear_filter_feedback();
++    void fit_to_contents();
++    void update_chrome_style(QPalette const&);
++
++    Function<void(bool)> on_toggle_site;
++    Function<void()> on_open_filter_lists;
++
++private:
++    struct BlockedHost {
++        QString host;
++        QStringList kinds;
++        size_t count { 0 };
++
++        bool operator==(BlockedHost const&) const = default;
++    };
++    static Vector<BlockedHost> group_by_host(Vector<WebView::BlockedResource> const&);
++
++    enum class FeedbackTone : u8 {
++        Success,
++        Failure,
++    };
++
++    void set_blocked_hosts(Vector<BlockedHost>);
++    void fit_blocked_list();
++    void add_custom_filter();
++    void show_filter_feedback(QString const&, FeedbackTone);
++    void update_icons();
++
++    WebView::Settings& m_settings;
++    Vector<BlockedHost> m_blocked_hosts;
++    bool m_is_protecting { false };
++
++    QLabel* m_icon { nullptr };
++    ElidedLabel* m_site_label { nullptr };
++    QLabel* m_status_badge { nullptr };
++    ShieldPowerButton* m_power_button { nullptr };
++    ElidedLabel* m_caption { nullptr };
++    QLabel* m_blocked_count { nullptr };
++    QLabel* m_domain_count { nullptr };
++    QLabel* m_empty_label { nullptr };
++    QScrollArea* m_blocked_scroll { nullptr };
++    QVBoxLayout* m_blocked_rows { nullptr };
++    QLineEdit* m_filter_field { nullptr };
++    QLabel* m_filter_feedback { nullptr };
++    QTimer* m_filter_feedback_timer { nullptr };
++    PopoverSwitch* m_global_switch { nullptr };
++};
++
++}
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index f41e20eb87..b0694f1df5 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -242,8 +242,8 @@ void Tab::initialize(Optional<u64> hub_view_id)
+ 
+     tab_layout->addWidget(m_view);
+ 
+-    // NB: A page can block many requests in a burst while it loads, so the open popover catches up with them at most
+-    //     ten times a second rather than for each one.
++    // NB: A page can block many requests in a burst while it loads, so the toolbar and the open popover catch up
++    //     with them at most ten times a second rather than for each one.
+     m_content_blocking_update_timer = new QTimer(this);
+     m_content_blocking_update_timer->setSingleShot(true);
+     m_content_blocking_update_timer->setInterval(100);
+@@ -251,9 +251,10 @@ void Tab::initialize(Optional<u64> hub_view_id)
+         // NB: A page that is not from a website has no content blocking settings to show.
+         if (m_site_settings_popover && m_site_settings_popover->isVisible() && m_site_settings_popover_origin.has_value())
+             m_site_settings_popover->set_content_blocking(view().content_blocking_snapshot());
++        emit content_blocking_changed();
+     });
+     view().on_content_blocking_change = [this](auto const&) {
+-        if (m_site_settings_popover && m_site_settings_popover->isVisible() && !m_content_blocking_update_timer->isActive())
++        if (!m_content_blocking_update_timer->isActive())
+             m_content_blocking_update_timer->start();
+     };
+ 
+@@ -359,6 +360,8 @@ void Tab::initialize(Optional<u64> hub_view_id)
+         m_suppress_javascript_dialogs_until_navigation = false;
+         m_javascript_dialogs_shown_by_document = 0;
+         m_javascript_dialogs_blocked_for_document = false;
++        // NB: What was blocked is counted per page, so the toolbar does not wait to show a new page's count.
++        emit content_blocking_changed();
+     };
+ 
+     view().on_browser_history_traversal_complete = [this] {
+@@ -369,6 +372,7 @@ void Tab::initialize(Optional<u64> hub_view_id)
+ 
+     view().on_url_change = [this](auto const& url) {
+         m_location_edit->set_url(url);
++        emit content_blocking_changed();
+     };
+ 
+     m_location_edit->on_navigation = [this](auto input, auto fallback_url, auto destination_kind) {
+diff --git a/UI/Qt/Tab.h b/UI/Qt/Tab.h
+index 06e63dcde1..62e159b117 100644
+--- a/UI/Qt/Tab.h
++++ b/UI/Qt/Tab.h
+@@ -178,6 +178,7 @@ signals:
+     void microphone_in_use_changed();
+     void loading_changed();
+     void performance_stats_changed();
++    void content_blocking_changed();
+     void loaded();
+ 
+ private:
+diff --git a/UI/Qt/WindowToolbar.cpp b/UI/Qt/WindowToolbar.cpp
+index 179223319e..f8ba69ed6d 100644
+--- a/UI/Qt/WindowToolbar.cpp
++++ b/UI/Qt/WindowToolbar.cpp
+@@ -9,6 +9,7 @@
+ 
+ #include <AK/GenericShorthands.h>
+ #include <AK/kmalloc.h>
++#include <LibURL/Parser.h>
+ #include <LibWebView/Application.h>
+ #include <LibWebView/CrashReportOutbox.h>
+ #include <LibWebView/WebCompatReport.h>
+@@ -31,6 +32,7 @@
+ #include <UI/Qt/PerformanceMonitorWidget.h>
+ #include <UI/Qt/Popover.h>
+ #include <UI/Qt/RemoteDownloads.h>
++#include <UI/Qt/ShieldPopover.h>
+ #include <UI/Qt/StringUtils.h>
+ #include <UI/Qt/SystemAppearance.h>
+ #include <UI/Qt/Theme.h>
+@@ -686,6 +688,127 @@ private:
+     qreal m_dot_scale { 1 };
+ };
+ 
++// The shield button tells how much the content blocker kept the page from loading, and opens the shield's popover. While
++// protection is paused on the site or off, the shield is dimmed and struck through.
++class ShieldButton final : public ToolbarButton {
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    explicit ShieldButton(QWidget* parent)
++        : ToolbarButton(parent)
++    {
++        setObjectName("LadybirdShieldButton");
++        setToolTip("Hellbird Shield");
++        setAccessibleName("Hellbird Shield");
++        // NB: The button stays checked while the popover is open.
++        setCheckable(true);
++        setAutoRaise(true);
++        setFocusPolicy(Qt::NoFocus);
++        setIconSize({ TOOLBAR_ICON_SIZE, TOOLBAR_ICON_SIZE });
++        setFixedSize(TOOLBAR_BUTTON_SIZE);
++        setAttribute(Qt::WA_LayoutUsesWidgetRect);
++    }
++
++    // Whether protection is enabled at all is told apart from the state, which a page that is not from a website leaves
++    // unavailable either way.
++    void set_content_blocking(WebView::ContentBlockingSnapshot const& blocking, bool protection_enabled)
++    {
++        auto host = blocking.site.has_value() ? qstring_from_ak_string(*blocking.site) : QString {};
++        auto blocked_count = blocking.enabled() ? blocking.blocked_resources.size() : 0;
++        auto is_dimmed = false;
++        auto description = QStringLiteral("Hellbird Shield");
++        switch (blocking.state) {
++        case WebView::ContentBlockingState::Enabled:
++        case WebView::ContentBlockingState::NoRules:
++            if (blocked_count > 0) {
++                description = host.isEmpty()
++                    ? QStringLiteral("Hellbird Shield \u2014 %1 blocked").arg(QString::number(blocked_count))
++                    : QStringLiteral("Hellbird Shield \u2014 %1 blocked on %2").arg(QString::number(blocked_count), host);
++            }
++            break;
++        case WebView::ContentBlockingState::SiteDisabled:
++            is_dimmed = true;
++            description = QStringLiteral("Hellbird Shield \u2014 Paused on %1").arg(host);
++            break;
++        case WebView::ContentBlockingState::Disabled:
++        case WebView::ContentBlockingState::Unavailable:
++            if (blocking.state == WebView::ContentBlockingState::Disabled || !protection_enabled) {
++                is_dimmed = true;
++                description = QStringLiteral("Hellbird Shield \u2014 Disabled");
++            }
++            break;
++        }
++
++        if (toolTip() != description) {
++            setToolTip(description);
++            setAccessibleName(description);
++        }
++        if (m_blocked_count == blocked_count && m_is_dimmed == is_dimmed)
++            return;
++        m_blocked_count = blocked_count;
++        m_is_dimmed = is_dimmed;
++        update();
++    }
++
++private:
++    virtual void paintEvent(QPaintEvent*) override
++    {
++        QPainter painter(this);
++        ChromeStyle::paint_control_frame(painter, *this);
++
++        auto palette = Theme::chrome_palette(*this);
++        auto const& chrome = Theme::chrome(palette);
++
++        // NB: The shield's icon is as quiet at rest as the icons inside the address field. A shield that is up is drawn
++        //     like the toolbar's other icons instead.
++        auto mode = icon_mode();
++        if (mode == QIcon::Normal && !m_is_dimmed && ChromeStyle::window_activity(*this) == ChromeStyle::WindowActivity::Active)
++            mode = QIcon::Active;
++        painter.setOpacity(m_is_dimmed ? DIMMED_OPACITY : 1.0);
++        icon().paint(&painter, icon_rect(), Qt::AlignCenter, mode);
++        painter.setRenderHint(QPainter::Antialiasing, true);
++        if (m_is_dimmed) {
++            auto strike = QRectF(icon_rect()).adjusted(2.5, 2.5, -3.5, -3.5);
++            painter.setPen(QPen(chrome.icon, 1.5, Qt::SolidLine, Qt::RoundCap));
++            painter.drawLine(strike.topLeft(), strike.bottomRight());
++            return;
++        }
++        if (m_blocked_count == 0)
++            return;
++
++        auto text = m_blocked_count > MAX_SHOWN_COUNT ? QStringLiteral("99+") : QString::number(m_blocked_count);
++        auto badge_font = font();
++        badge_font.setPixelSize(BADGE_FONT_SIZE);
++        badge_font.setWeight(QFont::Bold);
++        auto badge_width = max(BADGE_HEIGHT, QFontMetrics(badge_font).horizontalAdvance(text) + (2 * BADGE_HORIZONTAL_PADDING));
++        QRectF badge(width() - badge_width - BADGE_MARGIN, height() - BADGE_HEIGHT - BADGE_MARGIN, badge_width, BADGE_HEIGHT);
++
++        // NB: An outline in the color of what is below sets the badge apart from the shield, which it overlaps.
++        auto is_in_sidebar = parentWidget() && parentWidget()->objectName() == QLatin1StringView("LadybirdSidebarFooter");
++        auto outline = badge.adjusted(-BADGE_OUTLINE, -BADGE_OUTLINE, BADGE_OUTLINE, BADGE_OUTLINE);
++        painter.setPen(Qt::NoPen);
++        painter.setBrush(is_in_sidebar ? chrome.sidebar : chrome.toolbar);
++        painter.drawRoundedRect(outline, outline.height() / 2, outline.height() / 2);
++        painter.setBrush(Theme::accent_fill());
++        painter.drawRoundedRect(badge, badge.height() / 2, badge.height() / 2);
++
++        painter.setFont(badge_font);
++        painter.setPen(Qt::white);
++        painter.drawText(badge, Qt::AlignCenter, text);
++    }
++
++    static constexpr qreal DIMMED_OPACITY = 0.42;
++    static constexpr size_t MAX_SHOWN_COUNT = 99;
++    static constexpr int BADGE_FONT_SIZE = 9;
++    static constexpr int BADGE_HEIGHT = 12;
++    static constexpr int BADGE_HORIZONTAL_PADDING = 3;
++    static constexpr int BADGE_MARGIN = 1;
++    static constexpr qreal BADGE_OUTLINE = 1;
++
++    size_t m_blocked_count { 0 };
++    bool m_is_dimmed { false };
++};
++
+ template<typename ButtonType = ToolbarButton>
+ static ButtonType* create_toolbar_button(QWidget& parent, QAction& action)
+ {
+@@ -1231,6 +1354,13 @@ WindowToolbar::WindowToolbar(WebView::IsPrivate is_private, QWidget* parent)
+         show_downloads_popover();
+     });
+ 
++    m_shield_button = new ShieldButton(m_toolbar);
++    QObject::connect(m_shield_button, &QToolButton::clicked, this, [this] {
++        // NB: The button only stays checked while the popover is open, which showing it sees to.
++        m_shield_button->setChecked(m_shield_popover && m_shield_popover->isVisible());
++        show_shield_popover();
++    });
++
+     if constexpr (has_feedback_button) {
+         m_feedback_button = new FeedbackButton(m_toolbar);
+         QObject::connect(m_feedback_button, &QToolButton::clicked, this, [this] {
+@@ -1372,6 +1502,7 @@ WindowToolbar::WindowToolbar(WebView::IsPrivate is_private, QWidget* parent)
+     update_chrome_style();
+     set_window_controls_visible(false);
+     update_feedback_button();
++    update_shield_button();
+     config_variable_changed(WebView::ConfigVariableID::ShowFeedbackButton);
+ }
+ 
+@@ -1460,6 +1591,7 @@ void WindowToolbar::lay_out_as_row()
+     }
+     toolbar_layout->addWidget(m_dynamic_new_tab_button, 0, Qt::AlignVCenter);
+     m_dynamic_new_tab_button->setVisible(m_dynamic_layout);
++    toolbar_layout->addWidget(m_shield_button, 0, Qt::AlignVCenter);
+     toolbar_layout->addWidget(m_downloads_button, 0, Qt::AlignVCenter);
+     if (m_feedback_button)
+         toolbar_layout->addWidget(m_feedback_button, 0, Qt::AlignVCenter);
+@@ -1502,6 +1634,7 @@ void WindowToolbar::lay_out_in_sidebar()
+     m_window_controls_separator->hide();
+ 
+     auto* footer_layout = static_cast<QBoxLayout*>(m_sidebar_footer->layout());
++    footer_layout->addWidget(m_shield_button, 0, Qt::AlignVCenter);
+     footer_layout->addWidget(m_downloads_button, 0, Qt::AlignVCenter);
+     if (m_feedback_button)
+         footer_layout->addWidget(m_feedback_button, 0, Qt::AlignVCenter);
+@@ -1783,6 +1916,9 @@ void WindowToolbar::bind(Tab* tab)
+ {
+     if (m_tab)
+         QObject::disconnect(m_tab, nullptr, this, nullptr);
++    // The shield popover is about the tab it was opened for.
++    if (m_tab != tab && m_shield_popover)
++        m_shield_popover->close();
+     m_tab = tab;
+ 
+     // A tab that hasn't loaded has no page yet, so it is shown once it has one.
+@@ -1791,6 +1927,7 @@ void WindowToolbar::bind(Tab* tab)
+         m_reload_button->show_loading_at_once(false);
+         if (tab)
+             QObject::connect(tab, &Tab::loaded, this, [this, tab] { show_tab(*tab); }, Qt::SingleShotConnection);
++        update_shield_button();
+         return;
+     }
+     show_tab(*tab);
+@@ -1815,6 +1952,8 @@ void WindowToolbar::show_tab(Tab& tab)
+     QObject::connect(&tab, &Tab::performance_stats_changed, this, [this] {
+         m_performance_monitor->set_stats(m_tab->performance_stats());
+     });
++    QObject::connect(&tab, &Tab::content_blocking_changed, this, &WindowToolbar::update_shield_button);
++    update_shield_button();
+ }
+ 
+ void WindowToolbar::show_location_edit(LocationEdit* location_edit)
+@@ -2042,6 +2181,11 @@ void WindowToolbar::tab_settings_changed()
+     recreate_icons();
+ }
+ 
++void WindowToolbar::content_blocker_settings_changed()
++{
++    update_shield_button();
++}
++
+ void WindowToolbar::config_variable_changed(WebView::ConfigVariableID variable)
+ {
+     if (variable == WebView::ConfigVariableID::ShowFeedbackButton && m_feedback_button) {
+@@ -2085,6 +2229,8 @@ void WindowToolbar::update_chrome_style()
+         m_downloads_popover->update_chrome_style(palette());
+     if (m_feedback_popover)
+         m_feedback_popover->update_chrome_style(palette());
++    if (m_shield_popover)
++        m_shield_popover->update_chrome_style(palette());
+     m_is_updating_chrome_style = false;
+ }
+ 
+@@ -2097,6 +2243,7 @@ void WindowToolbar::recreate_icons()
+     m_stop_action->setIcon(create_chrome_icon(ChromeIcon::Stop, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+     if (m_dynamic_new_tab_button)
+         m_dynamic_new_tab_button->setIcon(create_chrome_icon(ChromeIcon::NewTab, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
++    m_shield_button->setIcon(create_chrome_icon(ChromeIcon::ContentBlocking, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+     m_downloads_button->setIcon(create_chrome_icon(ChromeIcon::Download, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+     if (m_feedback_button)
+         m_feedback_button->setIcon(create_chrome_icon(ChromeIcon::Feedback, Theme::chrome_palette(*this), activity, TOOLBAR_ICON_SIZE));
+@@ -2196,6 +2343,81 @@ void WindowToolbar::show_feedback_popover()
+     m_feedback_popover->raise();
+ }
+ 
++// A tab that hasn't loaded has no page for anything to be blocked on.
++// NB: The Hub reports how a page is blocked, some time after the settings change here. What the settings turned off or
++//     paused shows right away, and so does what they resumed. Blocking that the Hub reports as off altogether stays off
++//     until it says otherwise, as the command line can turn it off too.
++WebView::ContentBlockingSnapshot WindowToolbar::content_blocking_of_tab() const
++{
++    if (!m_tab || !m_tab->is_loaded())
++        return {};
++    auto blocking = m_tab->view().content_blocking_snapshot();
++    if (!blocking.site.has_value() || blocking.state == WebView::ContentBlockingState::Disabled)
++        return blocking;
++    auto const& settings = Application::settings();
++    if (!settings.content_blocker_enabled())
++        blocking.state = WebView::ContentBlockingState::Disabled;
++    else if (!settings.content_blocker_enabled_for_site(*blocking.site))
++        blocking.state = WebView::ContentBlockingState::SiteDisabled;
++    else if (blocking.state == WebView::ContentBlockingState::SiteDisabled)
++        blocking.state = WebView::ContentBlockingState::Enabled;
++    return blocking;
++}
++
++void WindowToolbar::update_shield_button()
++{
++    auto blocking = content_blocking_of_tab();
++    m_shield_button->set_content_blocking(blocking, Application::settings().content_blocker_enabled());
++
++    if (m_shield_popover && m_shield_popover->isVisible())
++        show_content_blocking_in_popover(blocking);
++}
++
++void WindowToolbar::show_content_blocking_in_popover(WebView::ContentBlockingSnapshot const& blocking)
++{
++    m_shield_popover_site = blocking.site;
++    m_shield_popover->set_page(blocking, Application::settings().content_blocker_enabled());
++    m_shield_popover->fit_to_contents();
++    move_popover_to_button(*m_shield_popover, *m_shield_button);
++}
++
++void WindowToolbar::show_shield_popover()
++{
++    if (!m_shield_popover) {
++        m_shield_popover = new ShieldPopover(this, Application::settings());
++        m_shield_popover->on_visibility_change = [this](bool visible) {
++            m_shield_button->setChecked(visible);
++        };
++        m_shield_popover->on_toggle_site = [this](bool enabled) {
++            toggle_protection_on_site(enabled);
++        };
++        m_shield_popover->on_open_filter_lists = [this] {
++            browser_window().new_tab_from_url(URL::Parser::basic_parse("about:settings#blocking"sv).release_value(), Web::HTML::ActivateTab::Yes, BrowserWindow::TabLocation::after_current_tab());
++        };
++    }
++
++    m_shield_popover->update_chrome_style(palette());
++    m_shield_popover->clear_filter_feedback();
++    show_content_blocking_in_popover(content_blocking_of_tab());
++    m_shield_popover->show();
++    move_popover_to_button(*m_shield_popover, *m_shield_button);
++    m_shield_popover->raise();
++}
++
++// The page is loaded again, as what was blocked on it, or let through, stays so until then.
++void WindowToolbar::toggle_protection_on_site(bool enabled)
++{
++    auto blocking = content_blocking_of_tab();
++    // NB: The tab may have moved on to another site since the popover last caught up with it.
++    if (!blocking.can_toggle() || blocking.site != m_shield_popover_site) {
++        update_shield_button();
++        return;
++    }
++    if (Application::settings().set_content_blocker_enabled_for_site(*blocking.site, enabled).is_error())
++        return;
++    m_tab->view().reload();
++}
++
+ // The downloads hang from the downloads button. Without any, the downloads page opens instead.
+ void WindowToolbar::show_downloads_popover()
+ {
+diff --git a/UI/Qt/WindowToolbar.h b/UI/Qt/WindowToolbar.h
+index 22d6812a4d..8d1e461d6a 100644
+--- a/UI/Qt/WindowToolbar.h
++++ b/UI/Qt/WindowToolbar.h
+@@ -7,7 +7,9 @@
+ #pragma once
+ 
+ #include <AK/Optional.h>
++#include <AK/String.h>
+ #include <AK/kmalloc.h>
++#include <LibWebView/ContentBlocking.h>
+ #include <LibWebView/FileDownloader.h>
+ #include <LibWebView/Forward.h>
+ #include <LibWebView/Settings.h>
+@@ -33,6 +35,8 @@ class LocationEdit;
+ class PerformanceMonitorWidget;
+ class Popover;
+ class ReloadButton;
++class ShieldButton;
++class ShieldPopover;
+ class ToolbarButton;
+ class FieldPanel;
+ class Tab;
+@@ -105,12 +109,14 @@ public:
+     void show_downloads_popover();
+     void update_downloads_button();
+     void update_feedback_button();
++    void update_shield_button();
+ 
+ private:
+     virtual bool event(QEvent*) override;
+     virtual bool eventFilter(QObject*, QEvent*) override;
+ 
+     virtual void tab_settings_changed() override;
++    virtual void content_blocker_settings_changed() override;
+     virtual void config_variable_changed(WebView::ConfigVariableID) override;
+ 
+     virtual void download_added(WebView::FileDownloader::Download const&) override;
+@@ -127,6 +133,10 @@ private:
+     void position_downloads_popover();
+     void show_feedback_popover();
+     void fit_feedback_popover();
++    WebView::ContentBlockingSnapshot content_blocking_of_tab() const;
++    void show_shield_popover();
++    void show_content_blocking_in_popover(WebView::ContentBlockingSnapshot const&);
++    void toggle_protection_on_site(bool enabled);
+     void move_popover_to_button(Popover&, QWidget& button);
+     void size_navigation_buttons(QSize, int spacing);
+     void lay_out_as_row();
+@@ -186,6 +196,12 @@ private:
+     ReloadButton* m_reload_button { nullptr };
+ 
+     ToolbarButton* m_dynamic_new_tab_button { nullptr };
++
++    ShieldButton* m_shield_button { nullptr };
++    QPointer<ShieldPopover> m_shield_popover;
++    // The site the shield popover shows, which its power button applies to.
++    Optional<String> m_shield_popover_site;
++
+     DownloadsButton* m_downloads_button { nullptr };
+     QPointer<DownloadsPopover> m_downloads_popover;
+     size_t m_completed_download_count { 0 };

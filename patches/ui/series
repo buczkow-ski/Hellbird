@@ -7,3 +7,6 @@
 0006-windows-second-instance-and-runtime-dir-fix.patch
 0007-windows-crisp-fonts-and-smooth-new-tab.patch
 0008-helium-dynamic-layout.patch
+0009-ublock-filter-lists-and-subscribe.patch
+0010-hellbird-shield-toolbar-and-popup.patch
+0011-fix-windows-dynamic-ui-and-overlays.patch
