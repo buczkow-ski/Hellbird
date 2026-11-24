@@ -223,7 +223,7 @@ index 17c6e2756a..ed6cb2d4a9 100644
  # The binaries are stripped and their debug symbols laid out by CPack already, so keep rpmbuild from doing it again.
  # rpmbuild compresses on a single thread by default, which takes many minutes for packages of our size.
 diff --git a/UI/CMakeLists.txt b/UI/CMakeLists.txt
-index 1f8f475c07..0e376a6503 100644
+index 1f8f475c07..ce87fa08e9 100644
 --- a/UI/CMakeLists.txt
 +++ b/UI/CMakeLists.txt
 @@ -44,8 +44,12 @@ if (APPLE AND LADYBIRD_ENABLE_SPARKLE)
@@ -254,6 +254,19 @@ index 1f8f475c07..0e376a6503 100644
      if (APPLE)
          set(bundle_dir "$<TARGET_BUNDLE_DIR:${target_name}>")
  
+@@ -171,6 +182,12 @@ else()
+ endif()
+ target_link_libraries(${LADYBIRD_TARGET} ${LADYBIRD_LIBS})
+ target_link_libraries(${LADYBIRD_TARGET} OpenSSL::Crypto OpenSSL::SSL)
++if (NOT HELLBIRD_FULL_VERSION STREQUAL "")
++    target_compile_definitions(${LADYBIRD_TARGET} HELLBIRD_VERSION="${HELLBIRD_FULL_VERSION}")
++endif()
++if (NOT LADYBIRD_VERSION STREQUAL "")
++    target_compile_definitions(${LADYBIRD_TARGET} HELLBIRD_ENGINE_VERSION="${LADYBIRD_VERSION}")
++endif()
+ 
+ target_include_directories(${LADYBIRD_TARGET} ${CMAKE_CURRENT_BINARY_DIR})
+ target_include_directories(${LADYBIRD_TARGET} ${LADYBIRD_SOURCE_DIR})
 diff --git a/UI/cmake/InstallRules.cmake b/UI/cmake/InstallRules.cmake
 index a8b2bc483e..e3ff68273c 100644
 --- a/UI/cmake/InstallRules.cmake

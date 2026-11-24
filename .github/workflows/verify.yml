@@ -36,3 +36,17 @@ jobs:
 
       - name: Verify full prepare (patches + resource overlays)
         run: python3 tools/hellbird.py prepare --upstream upstream/ladybird --no-fetch
+
+      - name: Verify JavaScript syntax & Linux desktop ID consistency
+        run: |
+          for js in upstream/ladybird/Base/res/ladybird/about-pages/*.js upstream/ladybird/Base/res/ladybird/about-pages/settings/*.js; do
+            node --check "${js}"
+          done
+          if grep -rn "org\.ladybird\.Ladybird" \
+              upstream/ladybird/UI/Qt/Application.cpp \
+              upstream/ladybird/UI/Qt/ExternalURLHandler.cpp \
+              upstream/ladybird/Libraries/LibWebView/NotificationFreedesktopArguments.cpp \
+              upstream/ladybird/UI/cmake/InstallRules.cmake; then
+            echo "Found unaligned org.ladybird.Ladybird desktop ID!" >&2
+            exit 1
+          fi

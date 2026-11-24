@@ -329,7 +329,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     vcpkg_root = upstream_dir / "Build" / f"vcpkg-{vcpkg_type}"
 
     hellbird_version = read_text_pin("version.txt")
-    cmake_version = hellbird_version.split("-", 1)[0]
+    ladybird_version = read_text_pin("ladybird_version.txt")
     deb_version = format_debian_version(hellbird_version)
 
     env = os.environ.copy()
@@ -344,7 +344,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         preset,
         "-B",
         str(build_dir),
-        f"-DLADYBIRD_VERSION={cmake_version}",
+        f"-DLADYBIRD_VERSION={ladybird_version}",
         f"-DHELLBIRD_FULL_VERSION={hellbird_version}",
         f"-DHELLBIRD_PACKAGE_VERSION={deb_version}",
         "-DLADYBIRD_ENABLE_UPDATE_CHECK=OFF",

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generate Hellbird vector SVG, PNG, ICO, and Windows RC branding assets without external deps."""
+"""Generate unified Hellbird SVG, PNG, ICO, and Windows RC branding assets without external deps.
+
+Uses the exact symmetrical raised-wings-and-flame emblem from UI/Qt/Icon.cpp and about: pages
+with Hellbird's Ember warm-gray palette (#1a1918 / #d95a1e / #ff8a4c).
+"""
 
 from __future__ import annotations
 
@@ -10,43 +14,50 @@ import zlib
 
 BRANDING_DIR = Path(__file__).resolve().parent.parent / "resources" / "branding"
 
-SVG_NORMAL = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+# Exact vector mark matching UI/Qt/Icon.cpp, newtab.html, version.html, and welcome.html
+MARK_PATH = (
+    "M0 1.6 C-1.2 -2.6 -5.2 -5.2 -10 -5.4 C-9.4 1 -5.6 6.2 0 8.2 "
+    "C5.6 6.2 9.4 1 10 -5.4 C5.2 -5.2 1.2 -2.6 0 1.6 Z "
+    "M0 1.6 C-2.6 -1.2 -2.2 -4.6 0.4 -8.2 C2.6 -4.8 2.4 -1.4 0 1.6 Z"
+)
+
+SVG_NORMAL = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
   <defs>
-    <linearGradient id="bg" x1="24" y1="20" x2="232" y2="236" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1E1B20"/>
-      <stop offset="100%" stop-color="#111014"/>
+    <linearGradient id="bg" x1="20" y1="16" x2="236" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#262523"/>
+      <stop offset="100%" stop-color="#141312"/>
     </linearGradient>
-    <linearGradient id="ember" x1="56" y1="54" x2="206" y2="204" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#FF7A45"/>
-      <stop offset="55%" stop-color="#E84A27"/>
-      <stop offset="100%" stop-color="#B8291A"/>
+    <linearGradient id="ember" x1="-10" y1="-8.2" x2="10" y2="8.2" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF8A4C"/>
+      <stop offset="55%" stop-color="#D95A1E"/>
+      <stop offset="100%" stop-color="#B3430F"/>
     </linearGradient>
   </defs>
   <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#bg)"/>
-  <rect x="17.5" y="17.5" width="221" height="221" rx="52.5" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="3"/>
-  <path d="M62 174 C76 116, 114 78, 186 68 C164 96, 154 114, 152 132 C170 120, 186 118, 202 122 C176 154, 144 178, 98 188 C84 191, 70 185, 62 174 Z" fill="url(#ember)"/>
-  <path d="M96 164 C110 132, 134 108, 174 96 C158 118, 150 136, 148 152 C132 162, 114 167, 96 164 Z" fill="#FFF3EC" fill-opacity="0.92"/>
-  <circle cx="154" cy="94" r="6" fill="#161418"/>
+  <rect x="17.5" y="17.5" width="221" height="221" rx="52.5" stroke="#F1EFED" stroke-opacity="0.10" stroke-width="3"/>
+  <g transform="translate(128 130) scale(7.8)">
+    <path d="{MARK_PATH}" fill="url(#ember)" fill-opacity="0.18" stroke="url(#ember)" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>
 """
 
-SVG_PRIVATE = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+SVG_PRIVATE = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
   <defs>
-    <linearGradient id="bgPriv" x1="24" y1="20" x2="232" y2="236" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1E182B"/>
-      <stop offset="100%" stop-color="#100D18"/>
+    <linearGradient id="bgPriv" x1="20" y1="16" x2="236" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#281F33"/>
+      <stop offset="100%" stop-color="#0F0B14"/>
     </linearGradient>
-    <linearGradient id="violet" x1="56" y1="54" x2="206" y2="204" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#B794F6"/>
-      <stop offset="55%" stop-color="#7C4DFF"/>
-      <stop offset="100%" stop-color="#4A27B8"/>
+    <linearGradient id="violet" x1="-10" y1="-8.2" x2="10" y2="8.2" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#C9B5FF"/>
+      <stop offset="55%" stop-color="#8A64E5"/>
+      <stop offset="100%" stop-color="#5B38B8"/>
     </linearGradient>
   </defs>
   <rect x="16" y="16" width="224" height="224" rx="54" fill="url(#bgPriv)"/>
-  <rect x="17.5" y="17.5" width="221" height="221" rx="52.5" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="3"/>
-  <path d="M62 174 C76 116, 114 78, 186 68 C164 96, 154 114, 152 132 C170 120, 186 118, 202 122 C176 154, 144 178, 98 188 C84 191, 70 185, 62 174 Z" fill="url(#violet)"/>
-  <path d="M96 164 C110 132, 134 108, 174 96 C158 118, 150 136, 148 152 C132 162, 114 167, 96 164 Z" fill="#F4EEFF" fill-opacity="0.92"/>
-  <circle cx="154" cy="94" r="6" fill="#14101E"/>
+  <rect x="17.5" y="17.5" width="221" height="221" rx="52.5" stroke="#F3F0FA" stroke-opacity="0.12" stroke-width="3"/>
+  <g transform="translate(128 130) scale(7.8)">
+    <path d="{MARK_PATH}" fill="url(#violet)" fill-opacity="0.20" stroke="url(#violet)" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>
 """
 
@@ -113,6 +124,37 @@ def _rounded_rect_sdf(px: float, py: float, half: float, radius: float) -> float
     return math.hypot(max(qx, 0.0), max(qy, 0.0)) + min(max(qx, qy), 0.0) - radius
 
 
+def _sample_cubic(
+    p0: tuple[float, float],
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    p3: tuple[float, float],
+    steps: int = 24,
+) -> list[tuple[float, float]]:
+    pts: list[tuple[float, float]] = []
+    for i in range(steps + 1):
+        t = i / steps
+        mt = 1.0 - t
+        x = mt**3 * p0[0] + 3 * mt**2 * t * p1[0] + 3 * mt * t**2 * p2[0] + t**3 * p3[0]
+        y = mt**3 * p0[1] + 3 * mt**2 * t * p1[1] + 3 * mt * t**2 * p2[1] + t**3 * p3[1]
+        pts.append((x, y))
+    return pts
+
+
+def _build_mark_contours() -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    wings = (
+        _sample_cubic((0.0, 1.6), (-1.2, -2.6), (-5.2, -5.2), (-10.0, -5.4))[:-1]
+        + _sample_cubic((-10.0, -5.4), (-9.4, 1.0), (-5.6, 6.2), (0.0, 8.2))[:-1]
+        + _sample_cubic((0.0, 8.2), (5.6, 6.2), (9.4, 1.0), (10.0, -5.4))[:-1]
+        + _sample_cubic((10.0, -5.4), (5.2, -5.2), (1.2, -2.6), (0.0, 1.6))[:-1]
+    )
+    flame = (
+        _sample_cubic((0.0, 1.6), (-2.6, -1.2), (-2.2, -4.6), (0.4, -8.2))[:-1]
+        + _sample_cubic((0.4, -8.2), (2.6, -4.8), (2.4, -1.4), (0.0, 1.6))[:-1]
+    )
+    return wings, flame
+
+
 def _point_in_poly(x: float, y: float, poly: list[tuple[float, float]]) -> bool:
     inside = False
     n = len(poly)
@@ -124,41 +166,35 @@ def _point_in_poly(x: float, y: float, poly: list[tuple[float, float]]) -> bool:
     return inside
 
 
+def _dist_to_polyline(x: float, y: float, poly: list[tuple[float, float]]) -> float:
+    best = 1e9
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        dx = x2 - x1
+        dy = y2 - y1
+        denom = dx * dx + dy * dy
+        t = 0.0 if denom == 0.0 else max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / denom))
+        px = x1 + t * dx
+        py = y1 + t * dy
+        d = math.hypot(x - px, y - py)
+        if d < best:
+            best = d
+    return best
+
+
 def _render_icon(size: int, *, private: bool = False) -> bytes:
     rgba = bytearray(size * size * 4)
+    wings, flame = _build_mark_contours()
 
-    # Stylized phoenix-wing polygons normalized in [0, 1]
-    outer_wing = [
-        (0.24, 0.68),
-        (0.31, 0.50),
-        (0.45, 0.35),
-        (0.73, 0.26),
-        (0.63, 0.40),
-        (0.59, 0.51),
-        (0.70, 0.46),
-        (0.79, 0.48),
-        (0.67, 0.62),
-        (0.54, 0.71),
-        (0.38, 0.74),
-        (0.29, 0.72),
-    ]
-    inner_feather = [
-        (0.37, 0.64),
-        (0.45, 0.50),
-        (0.56, 0.41),
-        (0.68, 0.37),
-        (0.61, 0.48),
-        (0.57, 0.59),
-        (0.47, 0.64),
-    ]
+    bg_top = (40, 31, 51) if private else (38, 37, 35)
+    bg_bot = (15, 11, 20) if private else (20, 19, 18)
+    fg_top = (201, 181, 255) if private else (255, 138, 76)
+    fg_bot = (91, 56, 184) if private else (179, 67, 15)
 
-    bg_top = (30, 24, 43) if private else (30, 27, 32)
-    bg_bot = (16, 13, 24) if private else (17, 16, 20)
-    fg_top = (183, 148, 246) if private else (255, 122, 69)
-    fg_bot = (74, 39, 184) if private else (184, 41, 26)
-    hi_col = (244, 238, 255) if private else (255, 243, 236)
-
-    # 2x2 supersampling for clean anti-aliased edges
+    # Stroke width in mark units (~22x18.4 box) scaled slightly thicker at tiny sizes
+    half_stroke = 0.78 if size >= 48 else 1.05
     offsets = (0.25, 0.75)
 
     for py in range(size):
@@ -177,25 +213,31 @@ def _render_icon(size: int, *, private: bool = False) -> bytes:
                     g = _lerp(bg_top[1], bg_bot[1], t)
                     b = _lerp(bg_top[2], bg_bot[2], t)
 
-                    # Subtle top-left rim highlight
                     if -0.015 < sdf <= 0.0:
-                        r = _lerp(r, 255.0, 0.12)
-                        g = _lerp(g, 255.0, 0.12)
-                        b = _lerp(b, 255.0, 0.12)
+                        r = _lerp(r, 241.0, 0.12)
+                        g = _lerp(g, 239.0, 0.12)
+                        b = _lerp(b, 237.0, 0.12)
 
-                    if _point_in_poly(u, v, outer_wing):
-                        r = _lerp(fg_top[0], fg_bot[0], t)
-                        g = _lerp(fg_top[1], fg_bot[1], t)
-                        b = _lerp(fg_top[2], fg_bot[2], t)
+                    # Transform pixel [0,1] into mark coordinate space (centered at (128, 130)/256, scale 7.8/256)
+                    mx = (u * 256.0 - 128.0) / 7.8
+                    my = (v * 256.0 - 130.0) / 7.8
 
-                    if _point_in_poly(u, v, inner_feather):
-                        r = _lerp(r, hi_col[0], 0.90)
-                        g = _lerp(g, hi_col[1], 0.90)
-                        b = _lerp(b, hi_col[2], 0.90)
+                    grad_t = max(0.0, min(1.0, ((mx + 10.0) / 20.0 + (my + 8.2) / 16.4) * 0.5))
+                    fr = _lerp(fg_top[0], fg_bot[0], grad_t)
+                    fg = _lerp(fg_top[1], fg_bot[1], grad_t)
+                    fb = _lerp(fg_top[2], fg_bot[2], grad_t)
 
-                    # Eye dot
-                    if math.hypot(u - 0.60, v - 0.37) < 0.024:
-                        r, g, b = bg_bot
+                    in_wings = _point_in_poly(mx, my, wings)
+                    in_flame = _point_in_poly(mx, my, flame)
+                    if in_wings or in_flame:
+                        alpha = 0.24 if in_flame else 0.18
+                        r = _lerp(r, fr, alpha)
+                        g = _lerp(g, fg, alpha)
+                        b = _lerp(b, fb, alpha)
+
+                    d_mark = min(_dist_to_polyline(mx, my, wings), _dist_to_polyline(mx, my, flame))
+                    if d_mark <= half_stroke:
+                        r, g, b = fr, fg, fb
 
                     r_acc += r
                     g_acc += g
@@ -247,7 +289,7 @@ def main() -> None:
         (256, png_256),
     ]
     (BRANDING_DIR / "hellbird.ico").write_bytes(_encode_ico(ico_frames))
-    print(f"Generated Hellbird branding assets in {BRANDING_DIR}")
+    print(f"Generated unified Hellbird branding assets in {BRANDING_DIR}")
 
 
 if __name__ == "__main__":

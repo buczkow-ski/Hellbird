@@ -1,0 +1,60 @@
+diff --git a/Libraries/LibWebView/Autocomplete.cpp b/Libraries/LibWebView/Autocomplete.cpp
+index 380d555af2..6fe38fd200 100644
+--- a/Libraries/LibWebView/Autocomplete.cpp
++++ b/Libraries/LibWebView/Autocomplete.cpp
+@@ -472,7 +472,7 @@ void Autocomplete::query_autocomplete_engine(AutocompleteQueryID query_id, Strin
+ 
+     // NB: Text with a bang goes to the website the bang names, so the search engine has no business knowing of it. The
+     //     start of a bang is kept from it too.
+-    if (settings.search_engine_settings().bangs && (m_trimmed_query.bytes_as_string_view().starts_with('!') || match_bang(m_trimmed_query).has_value())) {
++    if (settings.search_engine_settings().bangs && (input_contains_bang_prefix(m_trimmed_query) || match_bang(m_trimmed_query).has_value())) {
+         m_remote_suggestions.clear();
+         m_remote_query_complete = true;
+         dbgln_if(WEBVIEW_HISTORY_DEBUG, "[History] Skipping remote autocomplete for bang query '{}'", m_trimmed_query);
+diff --git a/Libraries/LibWebView/Bang.cpp b/Libraries/LibWebView/Bang.cpp
+index dc450512f9..efbbb3eb49 100644
+--- a/Libraries/LibWebView/Bang.cpp
++++ b/Libraries/LibWebView/Bang.cpp
+@@ -141,6 +141,20 @@ Optional<BangMatch> match_bang(StringView input)
+     return {};
+ }
+ 
++bool input_contains_bang_prefix(StringView input)
++{
++    input = input.trim_whitespace();
++    if (input.is_empty())
++        return false;
++    if (input.starts_with('!'))
++        return true;
++
++    auto last_separator = input.find_any_of(ASCII_WHITESPACE, StringView::SearchDirection::Backward);
++    if (!last_separator.has_value())
++        return false;
++    return input.substring_view(*last_separator + 1).starts_with('!');
++}
++
+ Optional<URL::URL> url_for_bang(BangMatch const& match)
+ {
+     if (match.query.is_empty())
+diff --git a/Libraries/LibWebView/Bang.h b/Libraries/LibWebView/Bang.h
+index e1ebdf1a74..d362fb5a32 100644
+--- a/Libraries/LibWebView/Bang.h
++++ b/Libraries/LibWebView/Bang.h
+@@ -12,6 +12,7 @@
+ #include <AK/StringView.h>
+ #include <AK/Types.h>
+ #include <LibURL/URL.h>
++#include <LibWebView/Export.h>
+ #include <LibWebView/Forward.h>
+ 
+ namespace WebView {
+@@ -44,6 +45,9 @@ WEBVIEW_API ReadonlySpan<Bang> builtin_bangs();
+ // bangs does not match, so it is searched for as it is.
+ WEBVIEW_API Optional<BangMatch> match_bang(StringView input);
+ 
++// True when the first or last token begins with '!', including partially typed suffix bangs.
++WEBVIEW_API bool input_contains_bang_prefix(StringView input);
++
+ WEBVIEW_API Optional<URL::URL> url_for_bang(BangMatch const&);
+ 
+ // Where the match goes, such as "Search GitHub".

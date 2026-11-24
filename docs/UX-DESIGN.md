@@ -154,15 +154,18 @@ with 5 px rows, and cards on pages 10 px.
 
 - `about:newtab`: the mark, one field and one line of hints. It was a static page, and is now a WebUI (`NewTabUI`),
   because the field resolves text in the browser, exactly like the address field. The page only learns the engine's name
-  and whether bangs are on. The address field still takes focus in a new tab.
+  and whether bangs are on, and `NewTabUI` restricts navigation to `http:`, `https:`, and `about:` schemes so typed
+  `javascript:` or `data:` URLs cannot run in the privileged WebUI origin. The address field still takes focus in a new tab.
 - `about:version`: Hellbird's and the engine's versions, and the live privacy status. Versions come from
-  `HELLBIRD_VERSION` and `HELLBIRD_ENGINE_VERSION`, which a build may define.
+  `HELLBIRD_VERSION` and `HELLBIRD_ENGINE_VERSION`, which CMake defines from `version.txt` and `ladybird_version.txt`.
 - `about:settings`, `about:welcome`: the palette, the Ember swatch and the bangs switch.
 
 ## Naming
 
-What the user reads says Hellbird. These keep the engine's name on purpose: the user agent, profile paths, IPC and object
-names, the desktop file ID `org.ladybird.Ladybird`, environment variables, and log output.
+What the user reads says Hellbird, and Linux desktop integration uses `org.hellbird.Hellbird` (`.desktop`, D-Bus
+service, icon, notifications, and Wayland app ID) so Hellbird installs cleanly alongside Ladybird. These keep the
+engine's name on purpose: the user agent (`LADYBIRD_VERSION=2026.47.7`), profile paths, internal IPC and object names,
+environment variables, and log output.
 
 ## Upstream tests that expect Ladybird's defaults
 

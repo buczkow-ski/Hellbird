@@ -1,0 +1,80 @@
+diff --git a/Libraries/LibWebView/NotificationFreedesktopArguments.cpp b/Libraries/LibWebView/NotificationFreedesktopArguments.cpp
+index d43ab7708e..42bb4e4309 100644
+--- a/Libraries/LibWebView/NotificationFreedesktopArguments.cpp
++++ b/Libraries/LibWebView/NotificationFreedesktopArguments.cpp
+@@ -71,7 +71,7 @@ FreedesktopNotifyArguments build_notify_arguments(PlatformNotification const& no
+     FreedesktopNotifyArguments arguments;
+     arguments.app_name = "Hellbird"_string;
+     arguments.replaces_id = replaces_daemon_id;
+-    arguments.app_icon = "org.ladybird.Ladybird"_string;
++    arguments.app_icon = "org.hellbird.Hellbird"_string;
+     auto title = platform_text(notification.data.title);
+     auto body = platform_text(notification.data.body);
+ 
+@@ -101,7 +101,7 @@ FreedesktopNotifyArguments build_notify_arguments(PlatformNotification const& no
+     bool quiet_replacement = notification.replaces.has_value() && !notification.data.renotify;
+     if (notification.data.silent == true || quiet_replacement)
+         arguments.hints.append({ "suppress-sound"_string, true });
+-    arguments.hints.append({ "desktop-entry"_string, "org.ladybird.Ladybird"_string });
++    arguments.hints.append({ "desktop-entry"_string, "org.hellbird.Hellbird"_string });
+     if (notification.icon && notification.icon->width() <= icon_maximum_side && notification.icon->height() <= icon_maximum_side)
+         arguments.hints.append({ "image-data"_string, image_data_for(*notification.icon) });
+ 
+diff --git a/Libraries/LibWebView/WebUI/NewTabUI.cpp b/Libraries/LibWebView/WebUI/NewTabUI.cpp
+index e473af3988..479793adef 100644
+--- a/Libraries/LibWebView/WebUI/NewTabUI.cpp
++++ b/Libraries/LibWebView/WebUI/NewTabUI.cpp
+@@ -63,6 +63,11 @@ void NewTabUI::open_input(JsonValue const& data)
+         async_send_message("navigate"_string, "about:settings#search"_string);
+         return;
+     }
++
++    // NB: Never execute javascript:, data:, or other non-navigable schemes inside the privileged about:newtab WebUI.
++    if (!url->scheme().is_one_of("http"sv, "https"sv, "about"sv))
++        return;
++
+     async_send_message("navigate"_string, url->serialize());
+ }
+ 
+diff --git a/Services/WebDriver/main.cpp b/Services/WebDriver/main.cpp
+index e875feba21..2a97fe5ae8 100644
+--- a/Services/WebDriver/main.cpp
++++ b/Services/WebDriver/main.cpp
+@@ -223,7 +223,11 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
+ 
+         auto launch_browser_callback = [&](ByteString const& webdriver_endpoint, bool headless, Optional<ByteString> const& proxy_autoconfig_url) {
+             auto arguments = create_arguments(webdriver_endpoint, profile_name, profile_path, headless, expose_experimental_interfaces, expose_internals_object, force_cpu_painting, disable_sandbox, debug_process, default_time_zone, resource_substitution_map_path, site_isolation_mode, proxy_autoconfig_url);
++#if defined(AK_OS_MACOS)
+             return launch_process("Ladybird"sv, arguments.span());
++#else
++            return launch_process("Hellbird"sv, arguments.span());
++#endif
+         };
+ 
+         auto maybe_client = WebDriver::Client::try_create(maybe_buffered_socket.release_value(), move(launch_browser_callback));
+diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
+index c2197bed99..5aa7d2ac0e 100644
+--- a/UI/Qt/Application.cpp
++++ b/UI/Qt/Application.cpp
+@@ -1284,7 +1284,7 @@ void Application::will_create_event_loop(Main::Arguments& arguments)
+     new PNGMimeConverter;
+ #endif
+ #if defined(AK_OS_LINUX)
+-    QGuiApplication::setDesktopFileName(QStringLiteral("org.ladybird.Ladybird"));
++    QGuiApplication::setDesktopFileName(QStringLiteral("org.hellbird.Hellbird"));
+     Ladybird::clip_translucent_windows_that_cannot_blend();
+ #endif
+ #if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+diff --git a/UI/Qt/ExternalURLHandler.cpp b/UI/Qt/ExternalURLHandler.cpp
+index 4cf78aa18e..2cca42e9ee 100644
+--- a/UI/Qt/ExternalURLHandler.cpp
++++ b/UI/Qt/ExternalURLHandler.cpp
+@@ -21,7 +21,7 @@
+ 
+ namespace Ladybird {
+ 
+-static constexpr auto default_ladybird_desktop_id = "org.ladybird.Ladybird.desktop"sv;
++static constexpr auto default_ladybird_desktop_id = "org.hellbird.Hellbird.desktop"sv;
+ static Core::EventLoop* s_main_thread_event_loop;
+ 
+ struct LadybirdAppLaunchContext {
