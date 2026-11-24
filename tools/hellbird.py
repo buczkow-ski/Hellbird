@@ -426,7 +426,7 @@ def _package_windows(build_dir: Path, dist_dir: Path, version: str) -> Path:
 
     # Use newline="" so explicit \r\n is written verbatim without becoming \r\r\n on Windows
     (stage_dir / "Launch Hellbird.cmd").write_text(
-        '@echo off\r\nstart "" "%~dp0bin\\Hellbird.exe" %*\r\n',
+        '@echo off\r\nstart "" /D "%~dp0bin" "%~dp0bin\\Hellbird.exe" %*\r\n',
         encoding="utf-8",
         newline="",
     )

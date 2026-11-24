@@ -1,0 +1,26 @@
+diff --git a/Libraries/LibCore/StandardPaths.cpp b/Libraries/LibCore/StandardPaths.cpp
+index 0a295e4d83..36fff226bc 100644
+--- a/Libraries/LibCore/StandardPaths.cpp
++++ b/Libraries/LibCore/StandardPaths.cpp
+@@ -306,6 +306,8 @@ ErrorOr<ByteString> StandardPaths::runtime_directory()
+     auto uid = getuid();
+     builder.appendff("/run/user/{}", uid);
+ #elif defined(AK_OS_WINDOWS)
++    if (auto runtime_override = get_environment_if_not_empty("HELLBIRD_RUNTIME_DIR"sv); runtime_override.has_value())
++        return LexicalPath::canonicalized_path(*runtime_override);
+     builder.appendff("{}", getenv("TEMP"));
+ #else
+     // Just create a directory in /tmp that's owned by us with 0700
+diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
+index 5aa7d2ac0e..39746b801d 100644
+--- a/UI/Qt/Application.cpp
++++ b/UI/Qt/Application.cpp
+@@ -731,6 +731,8 @@ ErrorOr<NonnullOwnPtr<Application>> Application::create(Main::Arguments const& a
+     TRY(application->connect_to_hub(arguments));
+ #else
+     application->m_hub = TRY(Hub::Application::create(arguments, static_cast<Hub::ApplicationHost*>(application.ptr())));
++    if (application->exit_status_if_done().has_value())
++        return application;
+     s_browser_has_started = true;
+ 
+     // Headless mode has no UI to connect to the Hub.

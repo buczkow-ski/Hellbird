@@ -100,6 +100,7 @@ jobs:
             hellbird-linux-${{ env.TARGET_DISTRO }}-
 
       - name: Warm up Rust dependencies & vcpkg
+        shell: bash
         run: |
           for manifest in upstream/ladybird/Cargo.toml upstream/ladybird/Libraries/LibJS/Flap/Cargo.toml; do
             if [ -f "${manifest}" ]; then
@@ -109,6 +110,7 @@ jobs:
           python3 tools/hellbird.py bootstrap-vcpkg --upstream upstream/ladybird --preset "${PRESET}"
 
       - name: Configure & Build Hellbird
+        shell: bash
         run: |
           EXTRA_ARGS=(
             "--extra-cmake-arg=-DCMAKE_C_COMPILER=clang"
@@ -137,6 +139,7 @@ jobs:
           key: ${{ steps.cache-restore.outputs.cache-primary-key }}
 
       - name: Package Linux archives and Debian package
+        shell: bash
         run: |
           python3 tools/hellbird.py package \
             --upstream upstream/ladybird \
