@@ -1,0 +1,17 @@
+# Build and upstream working directories
+upstream/
+build/
+dist/
+out/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
