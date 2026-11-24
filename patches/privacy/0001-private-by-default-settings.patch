@@ -1,0 +1,144 @@
+diff --git a/Base/res/ladybird/about-pages/welcome.html b/Base/res/ladybird/about-pages/welcome.html
+index c6f3170298..ba6aac03b2 100644
+--- a/Base/res/ladybird/about-pages/welcome.html
++++ b/Base/res/ladybird/about-pages/welcome.html
+@@ -130,7 +130,8 @@ SPDX-License-Identifier: BSD-2-Clause
+                         <label for="enable-content-blocking">
+                             <h2 id="ad-blocking-title">Block ads, trackers and more</h2>
+                             <p class="muted small description">
+-                                Pages load faster. If a site breaks, turn it off for that site from the address bar.
++                                Downloads EasyList and EasyPrivacy from easylist.to once you start browsing, and keeps
++                                them up to date. If a site breaks, turn it off for that site from the address bar.
+                             </p>
+                         </label>
+                         <input
+diff --git a/Base/res/ladybird/about-pages/welcome.js b/Base/res/ladybird/about-pages/welcome.js
+index 5d36dc4bf3..7b755fd7dd 100644
+--- a/Base/res/ladybird/about-pages/welcome.js
++++ b/Base/res/ladybird/about-pages/welcome.js
+@@ -36,7 +36,8 @@ function setSearchEngineSettings(name, suggestions) {
+ }
+ 
+ function setSearchEngine(name) {
+-    setSearchEngineSettings(name, name !== null || settings.searchEngine.suggestions);
++    // NB: Choosing an engine never turns on suggestions, which send what is typed before Return is pressed.
++    setSearchEngineSettings(name, settings.searchEngine.suggestions);
+ }
+ 
+ // The suggestions switch is only shown for a chosen engine that offers suggestions, and says where typed text goes.
+@@ -174,9 +175,8 @@ searchSuggestionsEnabled.addEventListener("change", () => {
+     setSearchEngineSettings(settings.searchEngine.engine, searchSuggestionsEnabled.checked);
+ });
+ 
+-enableContentBlocking.addEventListener("change", () => {
+-    if (!initialized) return;
+-
++// Content blocking starts switched on, so nothing is downloaded until the user has seen the switch and goes on with it.
++function applyContentBlocking() {
+     // Enable the lists before the content blocker, which then downloads every enabled list.
+     if (enableContentBlocking.checked) {
+         for (const identifier of ["easyList", "easyPrivacy"])
+@@ -185,7 +185,7 @@ enableContentBlocking.addEventListener("change", () => {
+ 
+     ladybird.sendMessage("setContentBlockerEnabled", enableContentBlocking.checked);
+     ladybird.sendMessage("setFilterListUpdatesEnabled", enableContentBlocking.checked);
+-});
++}
+ 
+ enableUpdateChecks.addEventListener("change", () => {
+     if (!initialized) return;
+@@ -210,6 +210,7 @@ form.addEventListener("submit", event => {
+     setupOptions.disabled = true;
+     startBrowsing.disabled = true;
+     saveStatus.textContent = "";
++    applyContentBlocking();
+     ladybird.sendMessage("completeFirstRun");
+ });
+ 
+@@ -233,8 +234,6 @@ document.addEventListener("WebUIMessage", event => {
+                     radio.checked = radio.value === settings.searchEngine.engine;
+                 updateSearchSuggestions();
+             }
+-            if (Object.hasOwn(data, "contentBlockers"))
+-                enableContentBlocking.checked = settings.contentBlockers.enabled;
+             if (Object.hasOwn(data, "backgroundNetworking")) updateUpdateChecks();
+             if (Object.hasOwn(data, "defaultBrowser")) {
+                 defaultBrowserFailure = null;
+diff --git a/Libraries/LibWebView/Application.cpp b/Libraries/LibWebView/Application.cpp
+index 4a3653a288..034ce663ef 100644
+--- a/Libraries/LibWebView/Application.cpp
++++ b/Libraries/LibWebView/Application.cpp
+@@ -703,6 +703,8 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
+         TRY(m_settings->complete_first_run());
+         m_settings->set_background_networking_enabled(false);
+         m_settings->set_content_blocker_enabled(true);
++        // NB: Tests expect requests without the header, unless they turn it on themselves.
++        m_settings->set_global_privacy_control(GlobalPrivacyControl::No);
+     }
+ 
+     m_browser_options.urls = sanitize_urls(m_browser_options.raw_urls);
+diff --git a/Libraries/LibWebView/Settings.cpp b/Libraries/LibWebView/Settings.cpp
+index 4c50906f03..47f028aef4 100644
+--- a/Libraries/LibWebView/Settings.cpp
++++ b/Libraries/LibWebView/Settings.cpp
+@@ -143,7 +143,7 @@ static auto const& CONFIG_VARIABLE_DEFINITIONS = *new Array<ConfigVariableDefini
+         .name = "ui.toolbar.show_feedback_button"sv,
+         .title = "Show feedback button"sv,
+         .description = "Show the button for sending feedback at the end of the toolbar."sv,
+-        .default_value = true,
++        .default_value = false,
+         .array_element_type = {},
+     },
+     {
+@@ -244,9 +244,10 @@ Optional<ConfigVariableID> config_variable_id_from_name(StringView name)
+ 
+ CrashReportSending crash_report_sending_from_string(StringView string)
+ {
+-    if (string == "never"sv)
+-        return CrashReportSending::NeverSend;
+-    return CrashReportSending::AskMe;
++    // NB: Anything but an explicit choice to be asked keeps crash reports off.
++    if (string == "ask"sv)
++        return CrashReportSending::AskMe;
++    return CrashReportSending::NeverSend;
+ }
+ 
+ StringView crash_report_sending_to_string(CrashReportSending crash_report_sending)
+@@ -756,9 +757,12 @@ void Settings::reset_to_defaults()
+         General,
+         Language,
+     };
++    // NB: The lists that block ads and trackers are chosen from the start, but are only downloaded once the user finishes
++    //     the welcome page with content blocking on, updates the lists, or turns on automatic updates for them.
+     auto add_list = [&](StringView identifier, StringView name, StringView description, StringView url, ListCategory category = ListCategory::General) {
++        auto enabled_by_default = identifier.is_one_of("easyList"sv, "easyPrivacy"sv);
+         m_content_blocker_lists.append({ MUST(String::from_utf8(identifier)), MUST(String::from_utf8(name)),
+-            URL::Parser::basic_parse(url), false, true, category == ListCategory::Language, MUST(String::from_utf8(description)) });
++            URL::Parser::basic_parse(url), enabled_by_default, true, category == ListCategory::Language, MUST(String::from_utf8(description)) });
+     };
+     add_list("easyList"sv, "EasyList"sv, "Blocks advertising on English-language websites."sv, "https://easylist.to/easylist/easylist.txt"sv);
+     add_list("easyPrivacy"sv, "EasyPrivacy"sv, "Blocks tracking scripts, pixels, and other tracking requests."sv, "https://easylist.to/easylist/easyprivacy.txt"sv);
+diff --git a/Libraries/LibWebView/Settings.h b/Libraries/LibWebView/Settings.h
+index 9d61dc0ef7..22eb75eacb 100644
+--- a/Libraries/LibWebView/Settings.h
++++ b/Libraries/LibWebView/Settings.h
+@@ -224,15 +224,15 @@ struct WEBVIEW_API SettingsData {
+     AutoplaySiteSetting m_autoplay;
+     HashMap<Web::Permissions::PermissionName, PermissionPolicy> m_permission_policies;
+ 
+-    GlobalPrivacyControl m_global_privacy_control { GlobalPrivacyControl::No };
+-    CrashReportSending m_crash_report_sending { CrashReportSending::AskMe };
++    GlobalPrivacyControl m_global_privacy_control { GlobalPrivacyControl::Yes };
++    CrashReportSending m_crash_report_sending { CrashReportSending::NeverSend };
+ 
+     bool m_background_networking_enabled { true };
+     bool m_filter_list_updates_enabled { false };
+ #if defined(LADYBIRD_HAS_UPDATE_CHECK)
+-    bool m_update_checks_enabled { true };
++    bool m_update_checks_enabled { false };
+ #endif
+-    bool m_content_blocker_enabled { false };
++    bool m_content_blocker_enabled { true };
+     HashTable<String> m_content_blocker_disabled_sites;
+     Vector<ContentBlockerList> m_content_blocker_lists;
+     String m_custom_content_blocker_filters;

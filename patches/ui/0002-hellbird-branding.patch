@@ -1,0 +1,663 @@
+diff --git a/Base/res/ladybird/about-pages/downloads.html b/Base/res/ladybird/about-pages/downloads.html
+index 72ef40c267..dc3d7579e7 100644
+--- a/Base/res/ladybird/about-pages/downloads.html
++++ b/Base/res/ladybird/about-pages/downloads.html
+@@ -253,7 +253,7 @@
+                 if (download.status === "failed") return download.error || "The download failed.";
+                 if (download.status === "paused" && download.error) return download.error;
+                 if (download.status === "in-progress" && download.isWaitingToRetry)
+-                    return "The server asked us to slow down, so Ladybird is waiting to retry.";
++                    return "The server asked us to slow down, so Hellbird is waiting to retry.";
+                 if (download.status !== "completed" && download.totalSize > 0) {
+                     const unit = unitForDownloadSize(download.totalSize);
+                     const parts = [
+diff --git a/Base/res/ladybird/about-pages/settings.html b/Base/res/ladybird/about-pages/settings.html
+index 2170bf1b01..47a15786e4 100644
+--- a/Base/res/ladybird/about-pages/settings.html
++++ b/Base/res/ladybird/about-pages/settings.html
+@@ -1272,7 +1272,7 @@
+ 
+                 <h3 class="card-title">Automatic connections</h3>
+                 <p class="description">
+-                    Services are automatic connections Ladybird makes for browser features in the background. These
++                    Services are automatic connections Hellbird makes for browser features in the background. These
+                     controls do not affect normal browsing or actions you explicitly request, such as updating filter
+                     lists.
+                 </p>
+diff --git a/Base/res/ladybird/about-pages/settings/services.js b/Base/res/ladybird/about-pages/settings/services.js
+index df6d57facd..f0356f47c2 100644
+--- a/Base/res/ladybird/about-pages/settings/services.js
++++ b/Base/res/ladybird/about-pages/settings/services.js
+@@ -31,7 +31,7 @@ document.addEventListener("WebUIMessage", event => {
+         updateChecks.checked = false;
+         updateChecks.disabled = true;
+         document.querySelector("#update-checks-description").textContent =
+-            "Updates for this build of Ladybird are managed externally.";
++            "Updates for this build of Hellbird are managed externally.";
+     }
+     document.querySelector("#services-paused-note").classList.toggle("hidden", settings.enabled);
+ });
+diff --git a/Base/res/ladybird/about-pages/settings/startup.js b/Base/res/ladybird/about-pages/settings/startup.js
+index 0307993f1f..cdb20120ef 100644
+--- a/Base/res/ladybird/about-pages/settings/startup.js
++++ b/Base/res/ladybird/about-pages/settings/startup.js
+@@ -7,9 +7,9 @@ const defaultBrowserStatus = document.querySelector("#default-browser-status");
+ const makeDefaultBrowser = document.querySelector("#make-default-browser");
+ 
+ const DEFAULT_BROWSER_STATUS = {
+-    default: "Links from other apps open in Ladybird.",
++    default: "Links from other apps open in Hellbird.",
+     "not-default": "Links from other apps open in another browser.",
+-    unavailable: "Ladybird cannot determine or set the default browser on this system.",
++    unavailable: "Hellbird cannot determine or set the default browser on this system.",
+ };
+ 
+ let defaultBrowser;
+diff --git a/Base/res/ladybird/about-pages/version.html b/Base/res/ladybird/about-pages/version.html
+index eb0cdd8e30..d2541f9345 100644
+--- a/Base/res/ladybird/about-pages/version.html
++++ b/Base/res/ladybird/about-pages/version.html
+@@ -3,7 +3,7 @@
+     <head>
+         <meta charset="UTF-8" />
+         <meta name="color-scheme" content="light dark" />
+-        <title>About Ladybird</title>
++        <title>About Hellbird</title>
+         <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
+         <link rel="stylesheet" type="text/css" href="resource://ladybird/ladybird.css" />
+         <style>
+@@ -17,23 +17,13 @@
+             }
+ 
+             .logomark {
+-                width: 168px;
+-                height: 141px;
++                width: 112px;
++                height: 94px;
+             }
+ 
+             .logomark path {
+-                stroke: var(--brand-mark);
+-                stroke-width: 0.95;
+-            }
+-
+-            :root {
+-                --brand-mark: #6a39db;
+-            }
+-
+-            @media (prefers-color-scheme: dark) {
+-                :root {
+-                    --brand-mark: #b496ff;
+-                }
++                stroke: var(--brand);
++                stroke-width: 1.1;
+             }
+ 
+             .name {
+@@ -118,6 +108,41 @@
+                 text-decoration: underline;
+             }
+ 
++            .privacy {
++                width: 100%;
++                max-width: 460px;
++                margin-top: 16px;
++                padding: 6px 18px;
++                box-sizing: border-box;
++                border-radius: 8px;
++                box-shadow: inset 0 0 0 1px var(--separator);
++                list-style: none;
++                font-size: 13px;
++            }
++
++            .privacy li {
++                display: flex;
++                justify-content: space-between;
++                gap: 16px;
++                padding: 8px 0;
++            }
++
++            .privacy li + li {
++                border-top: 1px solid var(--separator-soft);
++            }
++
++            .privacy span:last-child {
++                color: var(--muted);
++            }
++
++            .footnote {
++                max-width: 460px;
++                margin-top: 16px;
++                font-size: 12px;
++                text-align: center;
++                color: var(--muted);
++            }
++
+             .copy {
+                 display: flex;
+                 align-items: center;
+@@ -154,22 +179,24 @@
+             fill="none"
+             stroke-linejoin="round"
+             role="img"
+-            aria-label="Ladybird logomark"
++            aria-label="Hellbird mark"
+         >
+             <path
+-                d="M0.00 0.00 L0.17 0.21 L0.35 0.42 L0.52 0.63 L0.70 0.84 L0.87 1.05 L1.05 1.26 L1.22 1.47 L1.39 1.68 L1.56 1.88 L1.74 2.09 L1.91 2.29 L2.08 2.49 L2.25 2.69 L2.42 2.89 L2.59 3.08 L2.76 3.28 L2.92 3.47 L3.09 3.66 L3.26 3.85 L3.42 4.03 L3.58 4.21 L3.75 4.39 L3.91 4.57 L4.07 4.74 L4.23 4.91 L4.38 5.07 L4.54 5.23 L4.69 5.39 L4.85 5.55 L5.00 5.70 L5.15 5.85 L5.30 5.99 L5.45 6.13 L5.59 6.26 L5.74 6.39 L5.88 6.52 L6.02 6.64 L6.16 6.76 L6.29 6.87 L6.43 6.98 L6.56 7.08 L6.69 7.18 L6.82 7.27 L6.95 7.36 L7.07 7.45 L7.19 7.52 L7.31 7.60 L7.43 7.67 L7.55 7.73 L7.66 7.79 L7.77 7.84 L7.88 7.88 L7.99 7.93 L8.09 7.96 L8.19 7.99 L8.29 8.02 L8.39 8.04 L8.48 8.05 L8.57 8.06 L8.66 8.06 L8.75 8.06 L8.83 8.05 L8.91 8.04 L8.99 8.02 L9.06 7.99 L9.14 7.96 L9.21 7.93 L9.27 7.88 L9.34 7.84 L9.40 7.79 L9.46 7.73 L9.51 7.67 L9.56 7.60 L9.61 7.52 L9.66 7.45 L9.70 7.36 L9.74 7.27 L9.78 7.18 L9.82 7.08 L9.85 6.98 L9.88 6.87 L9.90 6.76 L9.93 6.64 L9.95 6.52 L9.96 6.39 L9.98 6.26 L9.99 6.13 L9.99 5.99 L10.00 5.85 L10.00 5.70 L10.00 5.55 L9.99 5.39 L9.99 5.23 L9.98 5.07 L9.96 4.91 L9.95 4.74 L9.93 4.57 L9.90 4.39 L9.88 4.21 L9.85 4.03 L9.82 3.85 L9.78 3.66 L9.74 3.47 L9.70 3.28 L9.66 3.08 L9.61 2.89 L9.56 2.69 L9.51 2.49 L9.46 2.29 L9.40 2.09 L9.34 1.88 L9.27 1.68 L9.21 1.47 L9.14 1.26 L9.06 1.05 L8.99 0.84 L8.91 0.63 L8.83 0.42 L8.75 0.21 L8.66 0.00 L8.57 -0.21 L8.48 -0.42 L8.39 -0.63 L8.29 -0.84 L8.19 -1.05 L8.09 -1.26 L7.99 -1.47 L7.88 -1.68 L7.77 -1.88 L7.66 -2.09 L7.55 -2.29 L7.43 -2.49 L7.31 -2.69 L7.19 -2.89 L7.07 -3.08 L6.95 -3.28 L6.82 -3.47 L6.69 -3.66 L6.56 -3.85 L6.43 -4.03 L6.29 -4.21 L6.16 -4.39 L6.02 -4.57 L5.88 -4.74 L5.74 -4.91 L5.59 -5.07 L5.45 -5.23 L5.30 -5.39 L5.15 -5.55 L5.00 -5.70 L4.85 -5.85 L4.69 -5.99 L4.54 -6.13 L4.38 -6.26 L4.23 -6.39 L4.07 -6.52 L3.91 -6.64 L3.75 -6.76 L3.58 -6.87 L3.42 -6.98 L3.26 -7.08 L3.09 -7.18 L2.92 -7.27 L2.76 -7.36 L2.59 -7.45 L2.42 -7.52 L2.25 -7.60 L2.08 -7.67 L1.91 -7.73 L1.74 -7.79 L1.56 -7.84 L1.39 -7.88 L1.22 -7.93 L1.05 -7.96 L0.87 -7.99 L0.70 -8.02 L0.52 -8.04 L0.35 -8.05 L0.17 -8.06 L0.00 -8.06 L-0.17 -8.06 L-0.35 -8.05 L-0.52 -8.04 L-0.70 -8.02 L-0.87 -7.99 L-1.05 -7.96 L-1.22 -7.93 L-1.39 -7.88 L-1.56 -7.84 L-1.74 -7.79 L-1.91 -7.73 L-2.08 -7.67 L-2.25 -7.60 L-2.42 -7.52 L-2.59 -7.45 L-2.76 -7.36 L-2.92 -7.27 L-3.09 -7.18 L-3.26 -7.08 L-3.42 -6.98 L-3.58 -6.87 L-3.75 -6.76 L-3.91 -6.64 L-4.07 -6.52 L-4.23 -6.39 L-4.38 -6.26 L-4.54 -6.13 L-4.69 -5.99 L-4.85 -5.85 L-5.00 -5.70 L-5.15 -5.55 L-5.30 -5.39 L-5.45 -5.23 L-5.59 -5.07 L-5.74 -4.91 L-5.88 -4.74 L-6.02 -4.57 L-6.16 -4.39 L-6.29 -4.21 L-6.43 -4.03 L-6.56 -3.85 L-6.69 -3.66 L-6.82 -3.47 L-6.95 -3.28 L-7.07 -3.08 L-7.19 -2.89 L-7.31 -2.69 L-7.43 -2.49 L-7.55 -2.29 L-7.66 -2.09 L-7.77 -1.88 L-7.88 -1.68 L-7.99 -1.47 L-8.09 -1.26 L-8.19 -1.05 L-8.29 -0.84 L-8.39 -0.63 L-8.48 -0.42 L-8.57 -0.21 L-8.66 -0.00 L-8.75 0.21 L-8.83 0.42 L-8.91 0.63 L-8.99 0.84 L-9.06 1.05 L-9.14 1.26 L-9.21 1.47 L-9.27 1.68 L-9.34 1.88 L-9.40 2.09 L-9.46 2.29 L-9.51 2.49 L-9.56 2.69 L-9.61 2.89 L-9.66 3.08 L-9.70 3.28 L-9.74 3.47 L-9.78 3.66 L-9.82 3.85 L-9.85 4.03 L-9.88 4.21 L-9.90 4.39 L-9.93 4.57 L-9.95 4.74 L-9.96 4.91 L-9.98 5.07 L-9.99 5.23 L-9.99 5.39 L-10.00 5.55 L-10.00 5.70 L-10.00 5.85 L-9.99 5.99 L-9.99 6.13 L-9.98 6.26 L-9.96 6.39 L-9.95 6.52 L-9.93 6.64 L-9.90 6.76 L-9.88 6.87 L-9.85 6.98 L-9.82 7.08 L-9.78 7.18 L-9.74 7.27 L-9.70 7.36 L-9.66 7.45 L-9.61 7.52 L-9.56 7.60 L-9.51 7.67 L-9.46 7.73 L-9.40 7.79 L-9.34 7.84 L-9.27 7.88 L-9.21 7.93 L-9.14 7.96 L-9.06 7.99 L-8.99 8.02 L-8.91 8.04 L-8.83 8.05 L-8.75 8.06 L-8.66 8.06 L-8.57 8.06 L-8.48 8.05 L-8.39 8.04 L-8.29 8.02 L-8.19 7.99 L-8.09 7.96 L-7.99 7.93 L-7.88 7.88 L-7.77 7.84 L-7.66 7.79 L-7.55 7.73 L-7.43 7.67 L-7.31 7.60 L-7.19 7.52 L-7.07 7.45 L-6.95 7.36 L-6.82 7.27 L-6.69 7.18 L-6.56 7.08 L-6.43 6.98 L-6.29 6.87 L-6.16 6.76 L-6.02 6.64 L-5.88 6.52 L-5.74 6.39 L-5.59 6.26 L-5.45 6.13 L-5.30 5.99 L-5.15 5.85 L-5.00 5.70 L-4.85 5.55 L-4.69 5.39 L-4.54 5.23 L-4.38 5.07 L-4.23 4.91 L-4.07 4.74 L-3.91 4.57 L-3.75 4.39 L-3.58 4.21 L-3.42 4.03 L-3.26 3.85 L-3.09 3.66 L-2.92 3.47 L-2.76 3.28 L-2.59 3.08 L-2.42 2.89 L-2.25 2.69 L-2.08 2.49 L-1.91 2.29 L-1.74 2.09 L-1.56 1.88 L-1.39 1.68 L-1.22 1.47 L-1.05 1.26 L-0.87 1.05 L-0.70 0.84 L-0.52 0.63 L-0.35 0.42 L-0.17 0.21 L-0.00 0.00 L0.17 -0.21 L0.35 -0.42 L0.52 -0.63 L0.70 -0.84 L0.87 -1.05 L1.05 -1.26 L1.22 -1.47 L1.39 -1.68 L1.56 -1.88 L1.74 -2.09 L1.91 -2.29 L2.08 -2.49 L2.25 -2.69 L2.42 -2.89 L2.59 -3.08 L2.76 -3.28 L2.92 -3.47 L3.09 -3.66 L3.26 -3.85 L3.42 -4.03 L3.58 -4.21 L3.75 -4.39 L3.91 -4.57 L4.07 -4.74 L4.23 -4.91 L4.38 -5.07 L4.54 -5.23 L4.69 -5.39 L4.85 -5.55 L5.00 -5.70 L5.15 -5.85 L5.30 -5.99 L5.45 -6.13 L5.59 -6.26 L5.74 -6.39 L5.88 -6.52 L6.02 -6.64 L6.16 -6.76 L6.29 -6.87 L6.43 -6.98 L6.56 -7.08 L6.69 -7.18 L6.82 -7.27 L6.95 -7.36 L7.07 -7.45 L7.19 -7.52 L7.31 -7.60 L7.43 -7.67 L7.55 -7.73 L7.66 -7.79 L7.77 -7.84 L7.88 -7.88 L7.99 -7.93 L8.09 -7.96 L8.19 -7.99 L8.29 -8.02 L8.39 -8.04 L8.48 -8.05 L8.57 -8.06 L8.66 -8.06 L8.75 -8.06 L8.83 -8.05 L8.91 -8.04 L8.99 -8.02 L9.06 -7.99 L9.14 -7.96 L9.21 -7.93 L9.27 -7.88 L9.34 -7.84 L9.40 -7.79 L9.46 -7.73 L9.51 -7.67 L9.56 -7.60 L9.61 -7.52 L9.66 -7.45 L9.70 -7.36 L9.74 -7.27 L9.78 -7.18 L9.82 -7.08 L9.85 -6.98 L9.88 -6.87 L9.90 -6.76 L9.93 -6.64 L9.95 -6.52 L9.96 -6.39 L9.98 -6.26 L9.99 -6.13 L9.99 -5.99 L10.00 -5.85 L10.00 -5.70 L10.00 -5.55 L9.99 -5.39 L9.99 -5.23 L9.98 -5.07 L9.96 -4.91 L9.95 -4.74 L9.93 -4.57 L9.90 -4.39 L9.88 -4.21 L9.85 -4.03 L9.82 -3.85 L9.78 -3.66 L9.74 -3.47 L9.70 -3.28 L9.66 -3.08 L9.61 -2.89 L9.56 -2.69 L9.51 -2.49 L9.46 -2.29 L9.40 -2.09 L9.34 -1.88 L9.27 -1.68 L9.21 -1.47 L9.14 -1.26 L9.06 -1.05 L8.99 -0.84 L8.91 -0.63 L8.83 -0.42 L8.75 -0.21 L8.66 -0.00 L8.57 0.21 L8.48 0.42 L8.39 0.63 L8.29 0.84 L8.19 1.05 L8.09 1.26 L7.99 1.47 L7.88 1.68 L7.77 1.88 L7.66 2.09 L7.55 2.29 L7.43 2.49 L7.31 2.69 L7.19 2.89 L7.07 3.08 L6.95 3.28 L6.82 3.47 L6.69 3.66 L6.56 3.85 L6.43 4.03 L6.29 4.21 L6.16 4.39 L6.02 4.57 L5.88 4.74 L5.74 4.91 L5.59 5.07 L5.45 5.23 L5.30 5.39 L5.15 5.55 L5.00 5.70 L4.85 5.85 L4.69 5.99 L4.54 6.13 L4.38 6.26 L4.23 6.39 L4.07 6.52 L3.91 6.64 L3.75 6.76 L3.58 6.87 L3.42 6.98 L3.26 7.08 L3.09 7.18 L2.92 7.27 L2.76 7.36 L2.59 7.45 L2.42 7.52 L2.25 7.60 L2.08 7.67 L1.91 7.73 L1.74 7.79 L1.56 7.84 L1.39 7.88 L1.22 7.93 L1.05 7.96 L0.87 7.99 L0.70 8.02 L0.52 8.04 L0.35 8.05 L0.17 8.06 L0.00 8.06 L-0.17 8.06 L-0.35 8.05 L-0.52 8.04 L-0.70 8.02 L-0.87 7.99 L-1.05 7.96 L-1.22 7.93 L-1.39 7.88 L-1.56 7.84 L-1.74 7.79 L-1.91 7.73 L-2.08 7.67 L-2.25 7.60 L-2.42 7.52 L-2.59 7.45 L-2.76 7.36 L-2.92 7.27 L-3.09 7.18 L-3.26 7.08 L-3.42 6.98 L-3.58 6.87 L-3.75 6.76 L-3.91 6.64 L-4.07 6.52 L-4.23 6.39 L-4.38 6.26 L-4.54 6.13 L-4.69 5.99 L-4.85 5.85 L-5.00 5.70 L-5.15 5.55 L-5.30 5.39 L-5.45 5.23 L-5.59 5.07 L-5.74 4.91 L-5.88 4.74 L-6.02 4.57 L-6.16 4.39 L-6.29 4.21 L-6.43 4.03 L-6.56 3.85 L-6.69 3.66 L-6.82 3.47 L-6.95 3.28 L-7.07 3.08 L-7.19 2.89 L-7.31 2.69 L-7.43 2.49 L-7.55 2.29 L-7.66 2.09 L-7.77 1.88 L-7.88 1.68 L-7.99 1.47 L-8.09 1.26 L-8.19 1.05 L-8.29 0.84 L-8.39 0.63 L-8.48 0.42 L-8.57 0.21 L-8.66 0.00 L-8.75 -0.21 L-8.83 -0.42 L-8.91 -0.63 L-8.99 -0.84 L-9.06 -1.05 L-9.14 -1.26 L-9.21 -1.47 L-9.27 -1.68 L-9.34 -1.88 L-9.40 -2.09 L-9.46 -2.29 L-9.51 -2.49 L-9.56 -2.69 L-9.61 -2.89 L-9.66 -3.08 L-9.70 -3.28 L-9.74 -3.47 L-9.78 -3.66 L-9.82 -3.85 L-9.85 -4.03 L-9.88 -4.21 L-9.90 -4.39 L-9.93 -4.57 L-9.95 -4.74 L-9.96 -4.91 L-9.98 -5.07 L-9.99 -5.23 L-9.99 -5.39 L-10.00 -5.55 L-10.00 -5.70 L-10.00 -5.85 L-9.99 -5.99 L-9.99 -6.13 L-9.98 -6.26 L-9.96 -6.39 L-9.95 -6.52 L-9.93 -6.64 L-9.90 -6.76 L-9.88 -6.87 L-9.85 -6.98 L-9.82 -7.08 L-9.78 -7.18 L-9.74 -7.27 L-9.70 -7.36 L-9.66 -7.45 L-9.61 -7.52 L-9.56 -7.60 L-9.51 -7.67 L-9.46 -7.73 L-9.40 -7.79 L-9.34 -7.84 L-9.27 -7.88 L-9.21 -7.93 L-9.14 -7.96 L-9.06 -7.99 L-8.99 -8.02 L-8.91 -8.04 L-8.83 -8.05 L-8.75 -8.06 L-8.66 -8.06 L-8.57 -8.06 L-8.48 -8.05 L-8.39 -8.04 L-8.29 -8.02 L-8.19 -7.99 L-8.09 -7.96 L-7.99 -7.93 L-7.88 -7.88 L-7.77 -7.84 L-7.66 -7.79 L-7.55 -7.73 L-7.43 -7.67 L-7.31 -7.60 L-7.19 -7.52 L-7.07 -7.45 L-6.95 -7.36 L-6.82 -7.27 L-6.69 -7.18 L-6.56 -7.08 L-6.43 -6.98 L-6.29 -6.87 L-6.16 -6.76 L-6.02 -6.64 L-5.88 -6.52 L-5.74 -6.39 L-5.59 -6.26 L-5.45 -6.13 L-5.30 -5.99 L-5.15 -5.85 L-5.00 -5.70 L-4.85 -5.55 L-4.69 -5.39 L-4.54 -5.23 L-4.38 -5.07 L-4.23 -4.91 L-4.07 -4.74 L-3.91 -4.57 L-3.75 -4.39 L-3.58 -4.21 L-3.42 -4.03 L-3.26 -3.85 L-3.09 -3.66 L-2.92 -3.47 L-2.76 -3.28 L-2.59 -3.08 L-2.42 -2.89 L-2.25 -2.69 L-2.08 -2.49 L-1.91 -2.29 L-1.74 -2.09 L-1.56 -1.88 L-1.39 -1.68 L-1.22 -1.47 L-1.05 -1.26 L-0.87 -1.05 L-0.70 -0.84 L-0.52 -0.63 L-0.35 -0.42 L-0.17 -0.21 Z"
++                d="M0 1.6 C-1.2 -2.6 -5.2 -5.2 -10 -5.4 C-9.4 1 -5.6 6.2 0 8.2 C5.6 6.2 9.4 1 10 -5.4 C5.2 -5.2 1.2 -2.6 0 1.6 Z M0 1.6 C-2.6 -1.2 -2.2 -4.6 0.4 -8.2 C2.6 -4.8 2.4 -1.4 0 1.6 Z"
+             />
+         </svg>
+         <div class="name">
+-            <h1 id="browser-name">Ladybird</h1>
++            <h1 id="browser-name">Hellbird</h1>
+             <span class="badge" id="release-stage" hidden></span>
+         </div>
+-        <p class="tagline">A truly independent web browser.</p>
++        <p class="tagline">Private by default. Powered by the <span id="engine">Ladybird Engine</span>.</p>
+         <div class="details">
+             <div class="summary">
+                 <dl>
+                     <dt>Version</dt>
+                     <dd id="browser-version"></dd>
++                    <dt>Engine</dt>
++                    <dd id="engine-version"></dd>
+                     <dt>Built</dt>
+                     <dd id="browser-commit"></dd>
+                     <dt>Platform</dt>
+@@ -190,27 +217,58 @@
+                 </button>
+             </div>
+             <div class="links">
+-                <a href="https://ladybird.org/privacy/" target="_blank">Privacy Policy</a>
+-                <a href="https://ladybird.org/trademark/" target="_blank">Trademark Policy</a>
++                <a href="about:settings#privacy" target="_blank">Privacy settings</a>
+                 <a href="about:licenses" target="_blank">Licenses</a>
++                <a href="https://ladybird.org/" target="_blank">Ladybird</a>
+             </div>
+         </div>
++        <ul class="privacy" id="privacy" aria-label="Privacy status"></ul>
++        <p class="footnote">
++            Hellbird is an independent project. It is not affiliated with the Ladybird Browser Initiative.
++        </p>
+         <script type="module">
+             const copyButton = document.querySelector("#copy");
+             let detailsText = "";
+ 
++            function renderPrivacyStatus(privacy) {
++                const rows = [
++                    ["Global Privacy Control", privacy.globalPrivacyControl ? "Sent to every site" : "Off"],
++                    ["Content blocking", privacy.contentBlocking ? "On" : "Off"],
++                    ["Native !bangs", privacy.bangs ? "Resolved on this computer" : "Off"],
++                    ["Remote search suggestions", privacy.searchSuggestions ? "On" : "Off"],
++                    ["Automatic update checks", privacy.updateChecks ? "On" : "Off"],
++                    ["Crash reports", privacy.crashReports ? "Kept for review" : "Never kept or sent"],
++                ];
++                document.querySelector("#privacy").replaceChildren(
++                    ...rows.map(([title, state]) => {
++                        const row = document.createElement("li");
++                        for (const text of [title, state]) {
++                            const label = document.createElement("span");
++                            label.textContent = text;
++                            row.append(label);
++                        }
++                        return row;
++                    })
++                );
++            }
++
+             function renderVersionInfo(versionInfo) {
+                 document.title = `About ${versionInfo.productName}`;
+                 document.querySelector("#browser-name").innerText = versionInfo.browserName;
+                 document.querySelector("#release-stage").innerText = versionInfo.releaseStage || "Development";
+                 document.querySelector("#release-stage").hidden = false;
+                 document.querySelector("#browser-version").innerText = versionInfo.browserVersion;
++                const engine = `${versionInfo.engineName} Engine ${versionInfo.engineVersion}`;
++                document.querySelector("#engine").innerText = `${versionInfo.engineName} Engine`;
++                document.querySelector("#engine-version").innerText = engine;
++                renderPrivacyStatus(versionInfo.privacy);
+                 document.querySelector("#browser-commit").innerText = `from ${versionInfo.browserCommit.slice(0, 10)}`;
+                 document.querySelector("#platform").innerText = `${versionInfo.platformName}, ${versionInfo.arch}`;
+ 
+                 // What is copied includes the details a bug report needs beyond what the page shows.
+                 detailsText = [
+                     `${versionInfo.productName} ${versionInfo.browserVersion} (${versionInfo.browserCommit})`,
++                    `Engine: ${engine}`,
+                     `Platform: ${versionInfo.platformName}, ${versionInfo.arch}`,
+                     `User agent: ${navigator.userAgent}`,
+                     `Command line: ${versionInfo.commandLine}`,
+diff --git a/Base/res/ladybird/about-pages/welcome.html b/Base/res/ladybird/about-pages/welcome.html
+index 86cd03e871..083efb791b 100644
+--- a/Base/res/ladybird/about-pages/welcome.html
++++ b/Base/res/ladybird/about-pages/welcome.html
+@@ -27,10 +27,10 @@ SPDX-License-Identifier: BSD-2-Clause
+                     aria-hidden="true"
+                 >
+                     <path
+-                        d="M0 0 L1.39 1.68 L2.76 3.29 L4.07 4.76 L5.30 6.02 L6.43 7.02 L7.43 7.70 L8.29 8.06 L8.99 8.06 L9.51 7.70 L9.85 7.02 L9.99 6.02 L9.95 4.76 L9.70 3.29 L9.27 1.68 L8.66 0 L7.88 -1.68 L6.95 -3.29 L5.88 -4.76 L4.69 -6.02 L3.42 -7.02 L2.08 -7.70 L0.70 -8.06 L-0.70 -8.06 L-2.08 -7.70 L-3.42 -7.02 L-4.69 -6.02 L-5.88 -4.76 L-6.95 -3.29 L-7.88 -1.68 L-8.66 0 L-9.27 1.68 L-9.70 3.29 L-9.95 4.76 L-9.99 6.02 L-9.85 7.02 L-9.51 7.70 L-8.99 8.06 L-8.29 8.06 L-7.43 7.70 L-6.43 7.02 L-5.30 6.02 L-4.07 4.76 L-2.76 3.29 L-1.39 1.68 L0 0 L1.39 -1.68 L2.76 -3.29 L4.07 -4.76 L5.30 -6.02 L6.43 -7.02 L7.43 -7.70 L8.29 -8.06 L8.99 -8.06 L9.51 -7.70 L9.85 -7.02 L9.99 -6.02 L9.95 -4.76 L9.70 -3.29 L9.27 -1.68 L8.66 0 L7.88 1.68 L6.95 3.29 L5.88 4.76 L4.69 6.02 L3.42 7.02 L2.08 7.70 L0.70 8.06 L-0.70 8.06 L-2.08 7.70 L-3.42 7.02 L-4.69 6.02 L-5.88 4.76 L-6.95 3.29 L-7.88 1.68 L-8.66 0 L-9.27 -1.68 L-9.70 -3.29 L-9.95 -4.76 L-9.99 -6.02 L-9.85 -7.02 L-9.51 -7.70 L-8.99 -8.06 L-8.29 -8.06 L-7.43 -7.70 L-6.43 -7.02 L-5.30 -6.02 L-4.07 -4.76 L-2.76 -3.29 L-1.39 -1.68 Z"
++                        d="M0 1.6 C-1.2 -2.6 -5.2 -5.2 -10 -5.4 C-9.4 1 -5.6 6.2 0 8.2 C5.6 6.2 9.4 1 10 -5.4 C5.2 -5.2 1.2 -2.6 0 1.6 Z M0 1.6 C-2.6 -1.2 -2.2 -4.6 0.4 -8.2 C2.6 -4.8 2.4 -1.4 0 1.6 Z"
+                     />
+                 </svg>
+-                <h1>Welcome to Ladybird</h1>
++                <h1>Welcome to Hellbird</h1>
+                 <p class="muted">You can change any of this later in Settings.</p>
+             </header>
+             <fieldset id="setup-options" disabled>
+diff --git a/Base/res/ladybird/about-pages/welcome.js b/Base/res/ladybird/about-pages/welcome.js
+index b77fafe380..5265e49b3d 100644
+--- a/Base/res/ladybird/about-pages/welcome.js
++++ b/Base/res/ladybird/about-pages/welcome.js
+@@ -112,7 +112,7 @@ function updateDefaultBrowser() {
+     defaultBrowser.classList.toggle("hidden", !isDefault && !canMakeDefault);
+     defaultBrowserDescription.textContent =
+         defaultBrowserFailure ??
+-        (isDefault ? "Links from other apps open in Ladybird." : "Open links from other apps in Ladybird.");
++        (isDefault ? "Links from other apps open in Hellbird." : "Open links from other apps in Hellbird.");
+     makeDefaultBrowser.classList.toggle("hidden", !canMakeDefault);
+ 
+     // A control row is filled under the pointer, and a click anywhere on it reaches the control its label names. This
+diff --git a/Libraries/LibCore/CMakeLists.txt b/Libraries/LibCore/CMakeLists.txt
+index 42f4d405a2..739c94463d 100644
+--- a/Libraries/LibCore/CMakeLists.txt
++++ b/Libraries/LibCore/CMakeLists.txt
+@@ -124,7 +124,7 @@ if (NOT LADYBIRD_VERSION STREQUAL "")
+         set(browser_is_final_release 1)
+     endif()
+ endif()
+-string(JOIN " " browser_product_name "Ladybird" ${browser_release_stage})
++string(JOIN " " browser_product_name "Hellbird" ${browser_release_stage})
+ configure_file(BrowserVersion.h.in BrowserVersion.h @ONLY)
+ if (ENABLE_INSTALL_HEADERS)
+     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/BrowserVersion.h" COMPONENT Lagom_Development
+diff --git a/Libraries/LibWebView/Application.cpp b/Libraries/LibWebView/Application.cpp
+index 034ce663ef..896912f30c 100644
+--- a/Libraries/LibWebView/Application.cpp
++++ b/Libraries/LibWebView/Application.cpp
+@@ -364,12 +364,12 @@ ErrorOr<void> Application::initialize(Main::Arguments const& arguments)
+     bool file_scheme_urls_have_tuple_origins = false;
+ 
+     Core::ArgsParser args_parser;
+-    args_parser.set_general_help("The Ladybird web browser :^)");
++    args_parser.set_general_help("The Hellbird web browser :^)");
+     args_parser.add_positional_argument(raw_urls, "URLs to open", "url", Core::ArgsParser::Required::No);
+ 
+     args_parser.add_option(Core::ArgsParser::Option {
+         .argument_mode = Core::ArgsParser::OptionArgumentMode::Optional,
+-        .help_string = "Run Ladybird without a browser window. Mode may be 'screenshot' (default), 'layout-tree', 'text', 'manual', or 'terminal'.",
++        .help_string = "Run Hellbird without a browser window. Mode may be 'screenshot' (default), 'layout-tree', 'text', 'manual', or 'terminal'.",
+         .long_name = "headless",
+         .value_name = "mode",
+         .accept_value = [&](StringView value) {
+diff --git a/Libraries/LibWebView/NotificationFreedesktopArguments.cpp b/Libraries/LibWebView/NotificationFreedesktopArguments.cpp
+index fb77885c08..d43ab7708e 100644
+--- a/Libraries/LibWebView/NotificationFreedesktopArguments.cpp
++++ b/Libraries/LibWebView/NotificationFreedesktopArguments.cpp
+@@ -69,7 +69,7 @@ static FreedesktopImageData image_data_for(Gfx::Bitmap const& bitmap)
+ FreedesktopNotifyArguments build_notify_arguments(PlatformNotification const& notification, FreedesktopCapabilities const& capabilities, u32 replaces_daemon_id)
+ {
+     FreedesktopNotifyArguments arguments;
+-    arguments.app_name = "Ladybird"_string;
++    arguments.app_name = "Hellbird"_string;
+     arguments.replaces_id = replaces_daemon_id;
+     arguments.app_icon = "org.ladybird.Ladybird"_string;
+     auto title = platform_text(notification.data.title);
+diff --git a/Libraries/LibWebView/Settings.cpp b/Libraries/LibWebView/Settings.cpp
+index a643fd03f2..6c96e3ded4 100644
+--- a/Libraries/LibWebView/Settings.cpp
++++ b/Libraries/LibWebView/Settings.cpp
+@@ -127,7 +127,7 @@ static auto const& CONFIG_VARIABLE_DEFINITIONS = *new Array<ConfigVariableDefini
+         .id = ConfigVariableID::ShowAdvancedDebugMenu,
+         .name = "debug.ui.show_advanced_debug_menu"sv,
+         .title = "Show Debug menu"sv,
+-        .description = "Show the Debug menu, with tools for inspecting Ladybird itself."sv,
++        .description = "Show the Debug menu, with tools for inspecting Hellbird itself."sv,
+         .default_value = false,
+         .array_element_type = {},
+     },
+diff --git a/Libraries/LibWebView/WebUI/SettingsUI.cpp b/Libraries/LibWebView/WebUI/SettingsUI.cpp
+index 59e5571472..e690c5bd69 100644
+--- a/Libraries/LibWebView/WebUI/SettingsUI.cpp
++++ b/Libraries/LibWebView/WebUI/SettingsUI.cpp
+@@ -394,8 +394,8 @@ void SettingsUI::make_default_browser(JsonValue const&)
+         }
+ 
+         auto failure = result.system_message.has_value()
+-            ? MUST(String::formatted("Could not make Ladybird the default browser. The system reported: {}", *result.system_message))
+-            : "Could not make Ladybird the default browser. Choose it in your system settings instead."_string;
++            ? MUST(String::formatted("Could not make Hellbird the default browser. The system reported: {}", *result.system_message))
++            : "Could not make Hellbird the default browser. Choose it in your system settings instead."_string;
+         self->async_send_message("defaultBrowserResult"sv, move(failure));
+     });
+ }
+diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
+index 39434daa88..c2197bed99 100644
+--- a/UI/Qt/Application.cpp
++++ b/UI/Qt/Application.cpp
+@@ -798,9 +798,9 @@ Hub::UIInfo Application::current_ui_info() const
+ {
+     QMessageBox dialog;
+     dialog.setIcon(QMessageBox::Warning);
+-    dialog.setText(QObject::tr("Ladybird is already running, but it is not responding."));
+-    dialog.setInformativeText(QObject::tr("To open Ladybird with this profile, the Ladybird that is running must be closed first. What its pages have not saved will be lost."));
+-    auto* close_button = dialog.addButton(QObject::tr("Close Ladybird"), QMessageBox::DestructiveRole);
++    dialog.setText(QObject::tr("Hellbird is already running, but it is not responding."));
++    dialog.setInformativeText(QObject::tr("To open Hellbird with this profile, the Hellbird that is running must be closed first. What its pages have not saved will be lost."));
++    auto* close_button = dialog.addButton(QObject::tr("Close Hellbird"), QMessageBox::DestructiveRole);
+     dialog.setDefaultButton(dialog.addButton(QMessageBox::Cancel));
+     // NB: Nothing else of this launch is on the screen yet, so the question has to be where the user sees it.
+     dialog.setWindowFlag(Qt::WindowStaysOnTopHint);
+@@ -1277,6 +1277,8 @@ void Application::will_create_event_loop(Main::Arguments& arguments)
+     qputenv("NO_AT_BRIDGE", "1");
+ #endif
+     m_application = make<LadybirdQApplication>(arguments);
++    // NB: Only the name shown to the user changes. The application's name, which Qt derives paths from, stays.
++    QGuiApplication::setApplicationDisplayName(QStringLiteral(BROWSER_PRODUCT_NAME));
+ #if defined(AK_OS_MACOS)
+     // NB: Qt owns its converters, and deletes them along with the QApplication.
+     new PNGMimeConverter;
+@@ -1685,7 +1687,7 @@ void Application::offer_to_restore_unexpectedly_closed_tabs(BrowserWindow& windo
+     Vector<PageCard::Button> buttons;
+     buttons.append({ "Not now", PageCard::ButtonRole::Secondary, {} });
+     buttons.append({ "Restore tabs", PageCard::ButtonRole::Primary, AK::move(restore_tabs) });
+-    window.show_page_card(BrowserWindow::PageCardSlot::RestoreSession, "Ladybird quit unexpectedly", question, AK::move(buttons));
++    window.show_page_card(BrowserWindow::PageCardSlot::RestoreSession, "Hellbird quit unexpectedly", question, AK::move(buttons));
+ }
+ 
+ void Application::open_startup_tabs(BrowserWindow& window, Vector<URL::URL> const& urls)
+@@ -2073,7 +2075,7 @@ bool Application::confirm_stop_active_downloads(QWidget* parent)
+ 
+     if (downloader.has_unresumable_downloads()) {
+         QMessageBox dialog(parent ? parent : active_window_if_any());
+-        dialog.setWindowTitle("Ladybird");
++        dialog.setWindowTitle("Hellbird");
+         dialog.setIcon(QMessageBox::Warning);
+         dialog.setText("Downloads are still in progress.");
+         dialog.setInformativeText("Quitting will cancel downloads that cannot be resumed.");
+@@ -2378,7 +2380,7 @@ static QMessageBox* create_message_box(QMessageBox::Icon icon, StringView text,
+ {
+     auto* dialog = new QMessageBox(parent);
+     dialog->setAttribute(Qt::WA_DeleteOnClose);
+-    dialog->setWindowTitle("Ladybird");
++    dialog->setWindowTitle("Hellbird");
+     dialog->setIcon(icon);
+     dialog->setTextFormat(Qt::PlainText);
+     dialog->setText(qstring_from_ak_string(text));
+@@ -2528,8 +2530,8 @@ void Application::offer_restart_after_update()
+     // A temporary profile is gone once Ladybird quits, and its windows and tabs with it. A session that could not be
+     // saved, as when its database would not open, is gone as well.
+     auto reopens = !m_profile_is_temporary && m_session_store && m_session_store->is_persistent();
+-    auto text = reopens ? "Restart Ladybird to use the new version. Your windows and tabs will reopen, except private ones."_string : "Restart Ladybird to use the new version."_string;
+-    window->show_page_card(BrowserWindow::PageCardSlot::Update, "Ladybird was updated", qstring_from_ak_string(text), move(buttons));
++    auto text = reopens ? "Restart Hellbird to use the new version. Your windows and tabs will reopen, except private ones."_string : "Restart Hellbird to use the new version."_string;
++    window->show_page_card(BrowserWindow::PageCardSlot::Update, "Hellbird was updated", qstring_from_ak_string(text), move(buttons));
+ }
+ 
+ void Application::restart()
+diff --git a/UI/Qt/ApplicationActions.cpp b/UI/Qt/ApplicationActions.cpp
+index de3cda3ea6..e701cb8fc2 100644
+--- a/UI/Qt/ApplicationActions.cpp
++++ b/UI/Qt/ApplicationActions.cpp
+@@ -135,7 +135,7 @@ ApplicationActions::ApplicationActions(PageOptions const& options)
+         HubConnection::the().async_view_select_all(view.view_id());
+     }));
+ 
+-    m_open_about_page_action = Action::create("About Ladybird"sv, ActionID::OpenAboutPage, [] {
++    m_open_about_page_action = Action::create("About Hellbird"sv, ActionID::OpenAboutPage, [] {
+         Application::the().activate_or_open_tab_with_url(URL::about_version());
+     });
+     m_open_downloads_page_action = Action::create("Downloads"sv, ActionID::ViewDownloads, [] {
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index 6ee71fe1d4..2d9fcdc490 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -1315,8 +1315,9 @@ int BrowserWindow::tab_index(Tab* tab)
+ 
+ void BrowserWindow::update_window_title(QString const& title)
+ {
++    // NB: A title ends with the application's display name, which Qt otherwise adds to it once more.
+     char const* format = is_private() == WebView::IsPrivate::Yes
+-        ? "%1 - " BROWSER_PRODUCT_NAME " (Private)"
++        ? "%1 (Private) - " BROWSER_PRODUCT_NAME
+         : "%1 - " BROWSER_PRODUCT_NAME;
+     setWindowTitle(QString(format).arg(title));
+ }
+diff --git a/UI/Qt/CrashReportReviewWidget.cpp b/UI/Qt/CrashReportReviewWidget.cpp
+index 7455a11eea..1e25c14179 100644
+--- a/UI/Qt/CrashReportReviewWidget.cpp
++++ b/UI/Qt/CrashReportReviewWidget.cpp
+@@ -73,7 +73,7 @@ CrashReportReviewWidget::CrashReportReviewWidget(QString exit_text, QWidget* par
+ 
+     auto* contents = new QWidget(m_review_page);
+     auto* contents_layout = create_group_layout(contents);
+-    auto* contents_summary = create_label(tr("Includes technical crash details, your Ladybird version and platform."), contents);
++    auto* contents_summary = create_label(tr("Includes technical crash details, your Hellbird version and platform."), contents);
+     contents_summary->setForegroundRole(QPalette::PlaceholderText);
+     contents_layout->addWidget(contents_summary);
+     m_details = create_details_panel(contents);
+@@ -336,7 +336,7 @@ void CrashReportReviewWidget::show_retry(String const& reason, u32 retry_number,
+ void CrashReportReviewWidget::show_sent()
+ {
+     m_progress->setValue(100);
+-    show_outcome(tr("Report sent"), tr("Thank you for helping Ladybird."));
++    show_outcome(tr("Report sent"), tr("Thank you for helping Hellbird."));
+ }
+ 
+ void CrashReportReviewWidget::show_declined()
+diff --git a/UI/Qt/Icon.cpp b/UI/Qt/Icon.cpp
+index e8da3ec633..7fce7338f8 100644
+--- a/UI/Qt/Icon.cpp
++++ b/UI/Qt/Icon.cpp
+@@ -1100,8 +1100,8 @@ QSize physical_size_for_device_pixel_ratio(QSize size, qreal device_pixel_ratio)
+     };
+ }
+ 
+-// The logomark traces x = sin 2t, y = sin 3t, scaled 179 : 145, on a box of 22 by 18.4 around its middle.
+-static constexpr auto LOGOMARK_PATH = "M0 0 L1.39 1.68 L2.76 3.29 L4.07 4.76 L5.30 6.02 L6.43 7.02 L7.43 7.70 L8.29 8.06 L8.99 8.06 L9.51 7.70 L9.85 7.02 L9.99 6.02 L9.95 4.76 L9.70 3.29 L9.27 1.68 L8.66 0 L7.88 -1.68 L6.95 -3.29 L5.88 -4.76 L4.69 -6.02 L3.42 -7.02 L2.08 -7.70 L0.70 -8.06 L-0.70 -8.06 L-2.08 -7.70 L-3.42 -7.02 L-4.69 -6.02 L-5.88 -4.76 L-6.95 -3.29 L-7.88 -1.68 L-8.66 0 L-9.27 1.68 L-9.70 3.29 L-9.95 4.76 L-9.99 6.02 L-9.85 7.02 L-9.51 7.70 L-8.99 8.06 L-8.29 8.06 L-7.43 7.70 L-6.43 7.02 L-5.30 6.02 L-4.07 4.76 L-2.76 3.29 L-1.39 1.68 L0 0 L1.39 -1.68 L2.76 -3.29 L4.07 -4.76 L5.30 -6.02 L6.43 -7.02 L7.43 -7.70 L8.29 -8.06 L8.99 -8.06 L9.51 -7.70 L9.85 -7.02 L9.99 -6.02 L9.95 -4.76 L9.70 -3.29 L9.27 -1.68 L8.66 0 L7.88 1.68 L6.95 3.29 L5.88 4.76 L4.69 6.02 L3.42 7.02 L2.08 7.70 L0.70 8.06 L-0.70 8.06 L-2.08 7.70 L-3.42 7.02 L-4.69 6.02 L-5.88 4.76 L-6.95 3.29 L-7.88 1.68 L-8.66 0 L-9.27 -1.68 L-9.70 -3.29 L-9.95 -4.76 L-9.99 -6.02 L-9.85 -7.02 L-9.51 -7.70 L-8.99 -8.06 L-8.29 -8.06 L-7.43 -7.70 L-6.43 -7.02 L-5.30 -6.02 L-4.07 -4.76 L-2.76 -3.29 L-1.39 -1.68 Z"sv;
++// The mark is a bird with raised wings and a flame between them, on a box of 22 by 18.4 around its middle.
++static constexpr auto LOGOMARK_PATH = "M0 1.6 C-1.2 -2.6 -5.2 -5.2 -10 -5.4 C-9.4 1 -5.6 6.2 0 8.2 C5.6 6.2 9.4 1 10 -5.4 C5.2 -5.2 1.2 -2.6 0 1.6 Z M0 1.6 C-2.6 -1.2 -2.2 -4.6 0.4 -8.2 C2.6 -4.8 2.4 -1.4 0 1.6 Z"sv;
+ static constexpr QRectF LOGOMARK_BOUNDS { -11, -9.2, 22, 18.4 };
+ 
+ void paint_logomark(QPainter& painter, QRectF const& rect, QColor const& color, qreal stroke_width)
+diff --git a/UI/Qt/Icon.h b/UI/Qt/Icon.h
+index e465ac5de3..01bd0a7f82 100644
+--- a/UI/Qt/Icon.h
++++ b/UI/Qt/Icon.h
+@@ -90,7 +90,7 @@ QPixmap create_chrome_icon_pixmap(ChromeIcon, QColor, qreal device_pixel_ratio);
+ 
+ QSize physical_size_for_device_pixel_ratio(QSize size, qreal device_pixel_ratio);
+ 
+-// Strokes Ladybird's logomark, a Lissajous figure, to fill the given rect. The stroke width is on the logomark's own
++// Strokes Hellbird's mark, a bird with a flame between its wings, to fill the given rect. The stroke width is on the logomark's own
+ // 22 by 18.4 box.
+ void paint_logomark(QPainter&, QRectF const&, QColor const&, qreal stroke_width);
+ 
+diff --git a/UI/Qt/LadybirdButton.cpp b/UI/Qt/LadybirdButton.cpp
+index 1974690059..d5cee2753b 100644
+--- a/UI/Qt/LadybirdButton.cpp
++++ b/UI/Qt/LadybirdButton.cpp
+@@ -107,8 +107,8 @@ LadybirdButton::LadybirdButton(WebView::IsPrivate is_private, QWidget* parent)
+     , m_is_private(is_private)
+ {
+     setObjectName("LadybirdButton");
+-    setAccessibleName(is_private == WebView::IsPrivate::Yes ? "Ladybird menu, private window" : "Ladybird menu");
+-    setToolTip(is_private == WebView::IsPrivate::Yes ? "Ladybird menu, private window" : "Ladybird menu");
++    setAccessibleName(is_private == WebView::IsPrivate::Yes ? "Hellbird menu, private window" : "Hellbird menu");
++    setToolTip(is_private == WebView::IsPrivate::Yes ? "Hellbird menu, private window" : "Hellbird menu");
+     setFocusPolicy(Qt::TabFocus);
+     setPopupMode(QToolButton::InstantPopup);
+     setFixedSize(sizeHint());
+diff --git a/UI/Qt/PermissionPromptPopover.cpp b/UI/Qt/PermissionPromptPopover.cpp
+index 7396286fed..ecccf40c71 100644
+--- a/UI/Qt/PermissionPromptPopover.cpp
++++ b/UI/Qt/PermissionPromptPopover.cpp
+@@ -92,7 +92,7 @@ PermissionPromptPopover::PermissionPromptPopover(QWidget* parent, WebView::Permi
+     header->addWidget(m_icon_tile, 0, Qt::AlignTop);
+     auto is_notice = request.kind == WebView::PermissionPromptKind::SystemDeniedNotice;
+     auto title_text = is_notice
+-        ? QStringLiteral("Ladybird can't %1").arg(feature_text(request.name))
++        ? QStringLiteral("Hellbird can't %1").arg(feature_text(request.name))
+         : QStringLiteral("%1 wants to %2").arg(requester_text(request), feature_text(request.name));
+     auto* title = new QLabel(title_text, &card());
+     title->setObjectName("LadybirdPermissionPromptTitle");
+@@ -102,14 +102,14 @@ PermissionPromptPopover::PermissionPromptPopover(QWidget* parent, WebView::Permi
+     layout->addLayout(header);
+ 
+     // Shown while the system hasn't yet been asked whether Ladybird may use the feature: it asks right after this prompt.
+-    auto* hint = new QLabel(QStringLiteral("Your system will then ask you to let Ladybird %1.").arg(feature_text(request.name)), &card());
++    auto* hint = new QLabel(QStringLiteral("Your system will then ask you to let Hellbird %1.").arg(feature_text(request.name)), &card());
+     hint->setObjectName("LadybirdPermissionPromptHint");
+     hint->setWordWrap(true);
+     hint->setVisible(request.show_os_hint);
+     layout->addWidget(hint);
+ 
+     if (is_notice) {
+-        auto* body = new QLabel(QStringLiteral("Your system's privacy settings don't let Ladybird %1.").arg(feature_text(request.name)), &card());
++        auto* body = new QLabel(QStringLiteral("Your system's privacy settings don't let Hellbird %1.").arg(feature_text(request.name)), &card());
+         body->setObjectName("LadybirdPermissionPromptBody");
+         body->setWordWrap(true);
+         layout->addWidget(body);
+diff --git a/UI/Qt/ProcessManagerWindow.cpp b/UI/Qt/ProcessManagerWindow.cpp
+index 3d8802aed8..1e1d780aac 100644
+--- a/UI/Qt/ProcessManagerWindow.cpp
++++ b/UI/Qt/ProcessManagerWindow.cpp
+@@ -451,7 +451,7 @@ ProcessManagerWindow::ProcessManagerWindow(Source source)
+     m_summary = new QLabel(m_footer);
+     m_summary->setObjectName("LadybirdTaskManagerSummary");
+     m_summary->setTextFormat(Qt::RichText);
+-    m_summary->setToolTip(tr("Total CPU and memory for all Ladybird processes. Updates every second."));
++    m_summary->setToolTip(tr("Total CPU and memory for all Hellbird processes. Updates every second."));
+     footer_layout->addWidget(m_summary);
+     footer_layout->addStretch();
+     m_end_action = new QAction(tr("End Process"), this);
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index 1debafeab4..f7b026cc55 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -617,7 +617,7 @@ void Tab::initialize(Optional<u64> hub_view_id)
+         m_color_picker_dialog = new QColorDialog(QColor(current_color.red(), current_color.green(), current_color.blue()), &view());
+ 
+         auto& dialog = *m_color_picker_dialog;
+-        dialog.setWindowTitle("Ladybird");
++        dialog.setWindowTitle("Hellbird");
+         dialog.setOption(QColorDialog::ShowAlphaChannel, false);
+         QObject::connect(&dialog, &QColorDialog::currentColorChanged, this, [this](QColor const& color) {
+             view().color_picker_update(Color(color.red(), color.green(), color.blue()), Web::HTML::ColorPickerUpdateState::Update);
+@@ -679,7 +679,7 @@ void Tab::initialize(Optional<u64> hub_view_id)
+                                                     : QStringLiteral("HH:mm");
+         auto* dialog = new QDialog(&view());
+         m_date_picker_dialog = dialog;
+-        dialog->setWindowTitle("Ladybird");
++        dialog->setWindowTitle("Hellbird");
+         auto* layout = new QVBoxLayout(dialog);
+ 
+         QCalendarWidget* calendar = nullptr;
+@@ -1285,7 +1285,7 @@ void Tab::set_screen_wake_lock_state(Web::ScreenWakeLockState wake_lock_state)
+     case Web::ScreenWakeLockState::Acquired:
+         if (m_screen_display_sleep_inhibitor.has_value())
+             break;
+-        if (auto inhibitor = WakeLock::DisplaySleepInhibitor::create("Ladybird Content"sv); !inhibitor.is_error())
++        if (auto inhibitor = WakeLock::DisplaySleepInhibitor::create("Hellbird Content"sv); !inhibitor.is_error())
+             m_screen_display_sleep_inhibitor = inhibitor.release_value();
+         break;
+     }
+@@ -1560,7 +1560,7 @@ void Tab::close_popovers()
+ static QString explanation_for_page_without_site(URL::URL const& url)
+ {
+     if (url.scheme() == "about"sv)
+-        return QStringLiteral("Ladybird pages have no site settings.");
++        return QStringLiteral("Hellbird pages have no site settings.");
+     if (url.scheme() == "file"sv)
+         return QStringLiteral("Files on this computer have no site settings.");
+     // NB: A page from a website can still have no origin of its own to keep settings for, for example when its
+diff --git a/UI/Qt/Theme.cpp b/UI/Qt/Theme.cpp
+index 406b2cfc35..9c514fd447 100644
+--- a/UI/Qt/Theme.cpp
++++ b/UI/Qt/Theme.cpp
+@@ -559,7 +559,7 @@ QColor selected_row()
+     return is_dark() ? rgb(0x2463b8) : primary();
+ }
+ 
+-// A tinted theme's logomark clears 4.5:1 on both the strip and the toolbar, as the Ladybird button sits on either,
++// A theme's mark clears 4.5:1 on both the strip and the toolbar, as the Ladybird button sits on either,
+ // depending on where the tabs are.
+ QColor logomark()
+ {
+diff --git a/UI/Qt/VersionPage.cpp b/UI/Qt/VersionPage.cpp
+index 1760b34c49..8a3c8cad58 100644
+--- a/UI/Qt/VersionPage.cpp
++++ b/UI/Qt/VersionPage.cpp
+@@ -11,11 +11,37 @@
+ #include <LibCore/System.h>
+ #include <LibWebCommon/Loader/UserAgent.h>
+ #include <LibWebView/BuildInformation.h>
++#include <LibWebView/Settings.h>
+ #include <UI/Qt/Application.h>
+ #include <UI/Qt/VersionPage.h>
+ 
++#if !defined(HELLBIRD_VERSION)
++#    define HELLBIRD_VERSION "0.1.0-alpha.1"
++#endif
++#if !defined(HELLBIRD_ENGINE_VERSION)
++#    define HELLBIRD_ENGINE_VERSION "2026.47.7"
++#endif
++
+ namespace Ladybird {
+ 
++static JsonObject privacy_status()
++{
++    auto const& settings = Application::settings();
++
++    JsonObject status;
++    status.set("globalPrivacyControl"sv, settings.global_privacy_control() == WebView::GlobalPrivacyControl::Yes);
++    status.set("contentBlocking"sv, settings.content_blocker_enabled());
++    status.set("searchSuggestions"sv, settings.search_engine_settings().suggestions);
++    status.set("bangs"sv, settings.search_engine_settings().bangs);
++#if defined(LADYBIRD_HAS_UPDATE_CHECK)
++    status.set("updateChecks"sv, settings.automatic_update_checks_allowed());
++#else
++    status.set("updateChecks"sv, false);
++#endif
++    status.set("crashReports"sv, settings.crash_report_sending() != WebView::CrashReportSending::NeverSend);
++    return status;
++}
++
+ void VersionPage::received_message(String const& name, JsonValue const&)
+ {
+     if (name == "loadVersionInfo"sv)
+@@ -24,8 +50,11 @@ void VersionPage::received_message(String const& name, JsonValue const&)
+ 
+ void VersionPage::load_version_info()
+ {
+-    static NeverDestroyed<String> browser_name = String::from_utf8_without_validation({ BROWSER_NAME, __builtin_strlen(BROWSER_NAME) });
+-    static NeverDestroyed<String> browser_version = String::from_utf8_without_validation({ BROWSER_VERSION, __builtin_strlen(BROWSER_VERSION) });
++    // NB: The engine's name and version are what websites see, so they are told apart from the browser's.
++    static NeverDestroyed<String> browser_name = "Hellbird"_string;
++    static NeverDestroyed<String> browser_version = String::from_utf8_without_validation({ HELLBIRD_VERSION, __builtin_strlen(HELLBIRD_VERSION) });
++    static NeverDestroyed<String> engine_name = String::from_utf8_without_validation({ BROWSER_NAME, __builtin_strlen(BROWSER_NAME) });
++    static NeverDestroyed<String> engine_version = String::from_utf8_without_validation({ HELLBIRD_ENGINE_VERSION, __builtin_strlen(HELLBIRD_ENGINE_VERSION) });
+     static NeverDestroyed<String> release_stage = String::from_utf8_without_validation({ BROWSER_RELEASE_STAGE, __builtin_strlen(BROWSER_RELEASE_STAGE) });
+     static NeverDestroyed<String> product_name = String::from_utf8_without_validation({ BROWSER_PRODUCT_NAME, __builtin_strlen(BROWSER_PRODUCT_NAME) });
+     static NeverDestroyed<String> browser_commit = String::from_utf8_without_validation(WebView::LADYBIRD_COMMIT.bytes());
+@@ -37,6 +66,9 @@ void VersionPage::load_version_info()
+     JsonObject version_info;
+     version_info.set("browserName"_string, *browser_name);
+     version_info.set("browserVersion"_string, *browser_version);
++    version_info.set("engineName"_string, *engine_name);
++    version_info.set("engineVersion"_string, *engine_version);
++    version_info.set("privacy"_string, privacy_status());
+     version_info.set("releaseStage"_string, *release_stage);
+     version_info.set("productName"_string, *product_name);
+     version_info.set("browserCommit"_string, *browser_commit);
+diff --git a/UI/Qt/WebCompatReportReview.cpp b/UI/Qt/WebCompatReportReview.cpp
+index f920315d42..dddf0d16c6 100644
+--- a/UI/Qt/WebCompatReportReview.cpp
++++ b/UI/Qt/WebCompatReportReview.cpp
+@@ -494,7 +494,7 @@ void WebCompatReportReview::show_retry(String const& reason, u32 retry_number, u
+ void WebCompatReportReview::show_sent()
+ {
+     m_progress->setValue(100);
+-    show_status(tr("Report sent"), tr("Thanks for helping make the web work in Ladybird."), { m_back_to_site_button, m_close_button }, nullptr);
++    show_status(tr("Report sent"), tr("Thanks for helping make the web work in Hellbird."), { m_back_to_site_button, m_close_button }, nullptr);
+     m_progress->hide();
+     auto sent_color = Theme::is_dark() ? QColor(0x30b14f) : QColor(0x208a3a);
+     m_status_icon->setPixmap(create_chrome_icon(ChromeIcon::CheckCircle, sent_color).pixmap(QSize(40, 40), devicePixelRatioF()));

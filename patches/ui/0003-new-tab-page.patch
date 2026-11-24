@@ -1,0 +1,317 @@
+diff --git a/Base/res/ladybird/about-pages/newtab.html b/Base/res/ladybird/about-pages/newtab.html
+index c3973b0a28..0874b7fb24 100644
+--- a/Base/res/ladybird/about-pages/newtab.html
++++ b/Base/res/ladybird/about-pages/newtab.html
+@@ -2,6 +2,8 @@
+ <html lang="en">
+     <head>
+         <meta charset="UTF-8" />
++        <meta name="viewport" content="width=device-width, initial-scale=1" />
++        <meta name="color-scheme" content="light dark" />
+         <title>New Tab</title>
+         <link rel="icon" type="image/png" href="resource://icons/48x48/app-browser.png" />
+         <link rel="stylesheet" type="text/css" href="resource://ladybird/ladybird.css" />
+@@ -9,6 +11,155 @@
+             html {
+                 color-scheme: light dark;
+             }
++
++            body {
++                display: flex;
++                flex-direction: column;
++                align-items: center;
++                min-height: 100vh;
++                box-sizing: border-box;
++                padding: 28vh 24px 24px;
++            }
++
++            .brand {
++                display: flex;
++                align-items: center;
++                gap: 12px;
++                user-select: none;
++            }
++
++            .brand svg {
++                width: 40px;
++                height: 33.5px;
++                color: var(--brand);
++            }
++
++            .brand h1 {
++                font-size: 24px;
++                font-weight: 500;
++                letter-spacing: -0.02em;
++            }
++
++            form {
++                width: 100%;
++                max-width: 560px;
++                margin-top: 28px;
++            }
++
++            input#query[type="text"] {
++                width: 100%;
++                height: 44px;
++                padding: 0 16px;
++                box-sizing: border-box;
++                border-radius: 10px;
++                font-size: 15px;
++                background: var(--surface);
++                box-shadow: inset 0 0 0 1px var(--separator);
++            }
++
++            input#query[type="text"]:focus {
++                box-shadow:
++                    inset 0 0 0 1px var(--focus-edge),
++                    0 0 0 3px var(--focus-ring);
++            }
++
++            .hint {
++                min-height: 18px;
++                margin-top: 14px;
++                font-size: 12px;
++                text-align: center;
++                color: var(--muted);
++            }
++
++            kbd {
++                padding: 1px 5px;
++                border-radius: 4px;
++                font-family: inherit;
++                font-size: 11px;
++                box-shadow: inset 0 0 0 1px var(--separator);
++            }
+         </style>
+     </head>
++    <body>
++        <div class="brand">
++            <svg
++                viewBox="-11 -9.2 22 18.4"
++                fill="none"
++                stroke="currentColor"
++                stroke-width="1.3"
++                stroke-linecap="round"
++                stroke-linejoin="round"
++                aria-hidden="true"
++            >
++                <path d="M0 1.6 C-1.2 -2.6 -5.2 -5.2 -10 -5.4 C-9.4 1 -5.6 6.2 0 8.2 C5.6 6.2 9.4 1 10 -5.4 C5.2 -5.2 1.2 -2.6 0 1.6 Z M0 1.6 C-2.6 -1.2 -2.2 -4.6 0.4 -8.2 C2.6 -4.8 2.4 -1.4 0 1.6 Z" />
++            </svg>
++            <h1>Hellbird</h1>
++        </div>
++        <form id="search" role="search">
++            <input
++                id="query"
++                type="text"
++                aria-label="Search or enter address"
++                placeholder="Search or enter address"
++                autocomplete="off"
++                autocapitalize="off"
++                spellcheck="false"
++            />
++        </form>
++        <p class="hint"><kbd>/</kbd> to search<span id="bang-hint" class="hidden"> &middot; <kbd>!gh</kbd> to search a site</span></p>
++        <script type="module">
++            const form = document.querySelector("#search");
++            const query = document.querySelector("#query");
++            const bangHint = document.querySelector("#bang-hint");
++
++            let isConnected = false;
++            let pendingInput = null;
++
++            // Where the text goes is decided by the browser, exactly as for the address field.
++            function openInput(input) {
++                if (!isConnected) {
++                    pendingInput = input;
++                    return;
++                }
++                ladybird.sendMessage("openInput", input);
++            }
++
++            form.addEventListener("submit", event => {
++                event.preventDefault();
++                const input = query.value.trim();
++                if (input) openInput(input);
++            });
++
++            document.addEventListener("keydown", event => {
++                if (event.key === "/" && document.activeElement !== query) {
++                    if (event.ctrlKey || event.altKey || event.metaKey) return;
++                    event.preventDefault();
++                    query.focus();
++                } else if (event.key === "Escape" && document.activeElement === query) {
++                    query.value = "";
++                    query.blur();
++                }
++            });
++
++            document.addEventListener("WebUILoaded", () => {
++                isConnected = true;
++                ladybird.sendMessage("loadSearchSettings");
++
++                if (pendingInput !== null) {
++                    openInput(pendingInput);
++                    pendingInput = null;
++                }
++            });
++
++            document.addEventListener("WebUIMessage", event => {
++                const { name, data } = event.detail;
++                if (name === "loadSearchSettings") {
++                    query.placeholder = data.engine ? `Search ${data.engine} or enter address` : "Enter address";
++                    bangHint.classList.toggle("hidden", !data.bangs);
++                } else if (name === "navigate") {
++                    location.assign(data);
++                }
++            });
++        </script>
++    </body>
+ </html>
+diff --git a/Libraries/LibWebView/CMakeLists.txt b/Libraries/LibWebView/CMakeLists.txt
+index 375200e9a7..2ef5c2214b 100644
+--- a/Libraries/LibWebView/CMakeLists.txt
++++ b/Libraries/LibWebView/CMakeLists.txt
+@@ -97,6 +97,7 @@ set(SOURCES
+     WebUI/AboutUI.cpp
+     WebUI/ApplicationWebUI.cpp
+     WebUI/CrashReportsUI.cpp
++    WebUI/NewTabUI.cpp
+     WebUI/SupportUI.cpp
+     WebUI/SettingsUI.cpp
+     WebWorkerClient.cpp
+diff --git a/Libraries/LibWebView/WebUI.cpp b/Libraries/LibWebView/WebUI.cpp
+index 6a07219863..e6139b0579 100644
+--- a/Libraries/LibWebView/WebUI.cpp
++++ b/Libraries/LibWebView/WebUI.cpp
+@@ -13,6 +13,7 @@
+ #include <LibWebView/WebUI/AboutUI.h>
+ #include <LibWebView/WebUI/ApplicationWebUI.h>
+ #include <LibWebView/WebUI/CrashReportsUI.h>
++#include <LibWebView/WebUI/NewTabUI.h>
+ #include <LibWebView/WebUI/SettingsUI.h>
+ #include <LibWebView/WebUI/SupportUI.h>
+ 
+@@ -23,7 +24,7 @@ static constexpr auto s_pages = to_array<WebUI::Page>({
+     { "blocking"sv, "Blocking"sv, WebUI::PageType::Static },
+     { "crashes"sv, "Crash Reports"sv, WebUI::PageType::Dynamic },
+     { "licenses"sv, "Licenses"sv, WebUI::PageType::Static },
+-    { "newtab"sv, "New Tab"sv, WebUI::PageType::Static },
++    { "newtab"sv, "New Tab"sv, WebUI::PageType::Dynamic },
+     { "settings"sv, "Settings"sv, WebUI::PageType::Dynamic },
+     { "support"sv, "Support"sv, WebUI::PageType::Dynamic },
+     { "welcome"sv, "Welcome"sv, WebUI::PageType::Dynamic },
+@@ -98,6 +99,8 @@ ErrorOr<RefPtr<WebUI>> WebUI::create(WebContentClient& client, Web::PageId page_
+         web_ui = TRY(create_web_ui<AboutUI>(client, page_id, move(host)));
+     else if (page->host == "crashes"sv)
+         web_ui = TRY(create_web_ui<CrashReportsUI>(client, page_id, move(host)));
++    else if (page->host == "newtab"sv)
++        web_ui = TRY(create_web_ui<NewTabUI>(client, page_id, move(host)));
+     else if (page->host.is_one_of("settings"sv, "welcome"sv))
+         web_ui = TRY(create_web_ui<SettingsUI>(client, page_id, move(host)));
+     else if (page->host == "support"sv)
+diff --git a/Libraries/LibWebView/WebUI/NewTabUI.cpp b/Libraries/LibWebView/WebUI/NewTabUI.cpp
+new file mode 100644
+index 0000000000..e473af3988
+--- /dev/null
++++ b/Libraries/LibWebView/WebUI/NewTabUI.cpp
+@@ -0,0 +1,69 @@
++/*
++ * Copyright (c) 2026, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/JsonObject.h>
++#include <LibURL/URL.h>
++#include <LibWebView/Application.h>
++#include <LibWebView/Omnibox.h>
++#include <LibWebView/Settings.h>
++#include <LibWebView/URL.h>
++#include <LibWebView/WebUI/NewTabUI.h>
++
++namespace WebView {
++
++void NewTabUI::register_interfaces()
++{
++    register_interface("loadSearchSettings"sv, [this](auto const&) {
++        load_search_settings();
++    });
++    register_interface("openInput"sv, [this](auto const& data) {
++        open_input(data);
++    });
++}
++
++void NewTabUI::load_search_settings()
++{
++    auto const& search_engine_settings = Application::settings().search_engine_settings();
++
++    JsonObject search_settings;
++    search_settings.set("engine"sv, search_engine_settings.engine.has_value() ? JsonValue(search_engine_settings.engine->name) : JsonValue {});
++    search_settings.set("bangs"sv, search_engine_settings.bangs);
++
++    async_send_message("loadSearchSettings"_string, move(search_settings));
++}
++
++void NewTabUI::open_input(JsonValue const& data)
++{
++    if (!data.is_string())
++        return;
++
++    auto const& input = data.as_string();
++    if (input.bytes_as_string_view().trim_whitespace().is_empty())
++        return;
++
++    auto const& search_engine_settings = Application::settings().search_engine_settings();
++    auto classified_input = classify_user_input(input);
++
++    Optional<URL::URL> url;
++    if (classified_input.classification == UserInputClassification::ExternalURL) {
++        url = move(classified_input.url);
++    } else {
++        auto destination_kind = classified_input.classification == UserInputClassification::Search
++            ? OmniboxDestinationKind::Search
++            : OmniboxDestinationKind::URL;
++        url = url_for_omnibox_destination(input, destination_kind, search_engine_settings.engine, AppendTLD::No,
++            search_engine_settings.bangs ? EnableBangs::Yes : EnableBangs::No);
++    }
++
++    // NB: Without a search engine, there is nowhere to send a search to until the user chooses one.
++    if (!url.has_value()) {
++        async_send_message("navigate"_string, "about:settings#search"_string);
++        return;
++    }
++    async_send_message("navigate"_string, url->serialize());
++}
++
++}
+diff --git a/Libraries/LibWebView/WebUI/NewTabUI.h b/Libraries/LibWebView/WebUI/NewTabUI.h
+new file mode 100644
+index 0000000000..8db5b876bc
+--- /dev/null
++++ b/Libraries/LibWebView/WebUI/NewTabUI.h
+@@ -0,0 +1,25 @@
++/*
++ * Copyright (c) 2026, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <LibWebView/WebUI.h>
++
++namespace WebView {
++
++// about:newtab, whose search field goes where the same text in the address field would. The page learns nothing but
++// the search engine's name and whether bangs are on.
++class NewTabUI final : public WebUI {
++    WEB_UI(NewTabUI);
++
++private:
++    virtual void register_interfaces() override;
++
++    void load_search_settings();
++    void open_input(JsonValue const&);
++};
++
++}

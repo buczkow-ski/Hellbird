@@ -1,0 +1,5 @@
+# Stage 3: search, bangs, shortcuts and tab patches.
+0001-privacy-search-engines.patch
+0002-native-bangs.patch
+0003-copy-page-url.patch
+0004-close-tabs-to-the-left.patch

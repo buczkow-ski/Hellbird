@@ -1,0 +1,56 @@
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index 7b5432d4b6..1debafeab4 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -933,6 +933,17 @@ void Tab::create_tab_context_menu()
+         }
+     });
+ 
++    auto* close_preceding_tabs_action = new QAction(this);
++    QObject::connect(close_preceding_tabs_action, &QAction::triggered, this, [this]() {
++        // As with closing the following tabs, activate this tab first if the current tab is among those closing.
++        if (auto* current = m_window->current_tab(); current && m_window->tab_index(current) < tab_index() && !current->is_pinned())
++            m_window->activate_tab(tab_index());
++        for (auto i = tab_index() - 1; i >= 0; i--) {
++            if (!m_window->tab_at(i)->is_pinned())
++                m_window->request_to_close_tab(i);
++        }
++    });
++
+     auto* close_other_tabs_action = new QAction("Cl&ose Other Tabs", this);
+     QObject::connect(close_other_tabs_action, &QAction::triggered, this, [this]() {
+         // As with closing the following tabs, activate this tab first if the current tab is among those closing.
+@@ -959,15 +970,32 @@ void Tab::create_tab_context_menu()
+     m_context_menu->addSeparator();
+     m_context_menu->addAction(close_tab_action);
+     m_context_menu->addAction(close_other_tabs_action);
++    m_context_menu->addAction(close_preceding_tabs_action);
+     m_context_menu->addAction(close_following_tabs_action);
+     m_context_menu->addSeparator();
+     m_context_menu->addAction(Application::the().reopen_recently_closed_tab_action());
+ 
+-    QObject::connect(m_context_menu, &QMenu::aboutToShow, this, [this, new_tab_action, close_following_tabs_action, mute_tab_action, move_to_new_window_action]() {
++    QObject::connect(m_context_menu, &QMenu::aboutToShow, this, [this, new_tab_action, close_other_tabs_action, close_preceding_tabs_action, close_following_tabs_action, mute_tab_action, move_to_new_window_action]() {
+         auto is_horizontal = m_window->tab_widget().tab_bar()->tab_layout() == TabLayout::Horizontal;
+         new_tab_action->setText(is_horizontal ? "New Tab to the &Right" : "New Tab &Below");
++        close_preceding_tabs_action->setText(is_horizontal ? "Close Tabs to the &Left" : "Close Tabs &Above");
+         close_following_tabs_action->setText(is_horizontal ? "Close Tabs to the R&ight" : "Close Tabs B&elow");
+ 
++        // Pinned tabs stay open, so each of these is only offered when it has another tab to close.
++        auto has_tabs_to_close_before = false;
++        auto has_tabs_to_close_after = false;
++        for (int i = 0; i < m_window->tab_count(); ++i) {
++            if (i == tab_index() || m_window->tab_at(i)->is_pinned())
++                continue;
++            if (i < tab_index())
++                has_tabs_to_close_before = true;
++            else
++                has_tabs_to_close_after = true;
++        }
++        close_preceding_tabs_action->setEnabled(has_tabs_to_close_before);
++        close_following_tabs_action->setEnabled(has_tabs_to_close_after);
++        close_other_tabs_action->setEnabled(has_tabs_to_close_before || has_tabs_to_close_after);
++
+         // A tab that hasn't loaded has no page to mute yet.
+         mute_tab_action->setEnabled(is_loaded());
+         mute_tab_action->setText(is_loaded() && view().page_mute_state() == Web::HTML::MuteState::Muted ? "Un&mute Tab" : "&Mute Tab");
