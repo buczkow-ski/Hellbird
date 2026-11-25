@@ -1,0 +1,952 @@
+diff --git a/Base/res/ladybird/ladybird.css b/Base/res/ladybird/ladybird.css
+index 8322aae9ba..7791b94407 100644
+--- a/Base/res/ladybird/ladybird.css
++++ b/Base/res/ladybird/ladybird.css
+@@ -1,3 +1,35 @@
++@font-face {
++    font-family: "Inter";
++    src: url("resource://ladybird/fonts/Inter-Regular.ttf") format("truetype");
++    font-weight: 400;
++    font-style: normal;
++    font-display: swap;
++}
++
++@font-face {
++    font-family: "Inter";
++    src: url("resource://ladybird/fonts/Inter-Medium.ttf") format("truetype");
++    font-weight: 500;
++    font-style: normal;
++    font-display: swap;
++}
++
++@font-face {
++    font-family: "Inter";
++    src: url("resource://ladybird/fonts/Inter-SemiBold.ttf") format("truetype");
++    font-weight: 600;
++    font-style: normal;
++    font-display: swap;
++}
++
++@font-face {
++    font-family: "Inter";
++    src: url("resource://ladybird/fonts/Inter-Bold.ttf") format("truetype");
++    font-weight: 700;
++    font-style: normal;
++    font-display: swap;
++}
++
+ :root {
+     --indigo-10: #a5a6f2;
+     --indigo-20: #8a88eb;
+@@ -173,7 +205,7 @@
+ 
+ * {
+     color-scheme: light dark;
+-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
++    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+ 
+     margin: 0;
+     padding: 0;
+diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
+index f0a266cd5b..984ab9bbb3 100644
+--- a/UI/Qt/Application.cpp
++++ b/UI/Qt/Application.cpp
+@@ -1391,6 +1391,8 @@ Optional<String> Application::system_font_family() const
+ #if defined(AK_OS_MACOS)
+     return {};
+ #else
++    if (auto const& os_family = ChromeStyle::os_system_font_family(); !os_family.isEmpty())
++        return ak_string_from_qstring(os_family);
+     return ui_font_family();
+ #endif
+ }
+diff --git a/UI/Qt/BookmarksBar.cpp b/UI/Qt/BookmarksBar.cpp
+index 42278d410c..24ded9c39b 100644
+--- a/UI/Qt/BookmarksBar.cpp
++++ b/UI/Qt/BookmarksBar.cpp
+@@ -1633,7 +1633,8 @@ void BookmarksBarContainer::update_geometry()
+     if (on_hover)
+         setGeometry(m_page_stack.x(), m_page_stack.y(), m_page_stack.width(), height);
+     m_bar->setGeometry(0, height - full_height, width(), full_height);
+-    set_view_overlay_height(on_hover && visible ? height : 0);
++    auto top_frame_inset = m_page_stack.layout() ? m_page_stack.layout()->contentsMargins().top() : 0;
++    set_view_overlay_height(on_hover && visible ? max(0, height - top_frame_inset) : 0);
+     setVisible(visible);
+ 
+ #if defined(LADYBIRD_QT_USE_RHI_WIDGET)
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index c4cbfca984..d8c582f48e 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -67,6 +67,10 @@
+ #include <QWidget>
+ #include <QWindow>
+ 
++#if defined(AK_OS_WINDOWS)
++#    include <AK/Windows.h>
++#endif
++
+ namespace Ladybird {
+ 
+ static constexpr auto AUDIO_STATE_BUTTON_POSITION = QTabBar::LeftSide;
+@@ -1758,6 +1762,11 @@ bool BrowserWindow::event(QEvent* event)
+     }
+ #endif
+ 
++#if defined(AK_OS_WINDOWS)
++    if (event->type() == QEvent::Show || event->type() == QEvent::WinIdChange)
++        update_window_border();
++#endif
++
+     if (event->type() == QEvent::WindowActivate) {
+         Application::the().set_active_window(*this);
+         Application::the().report_active_view();
+@@ -2058,10 +2067,69 @@ bool BrowserWindow::should_draw_window_border() const
+     return windowFlags().testFlag(Qt::FramelessWindowHint) && !isFullScreen() && !isMaximized();
+ }
+ 
++#if defined(AK_OS_WINDOWS)
++static bool set_windows_dwm_corner_preference(HWND hwnd, bool rounded)
++{
++    if (!hwnd)
++        return false;
++
++    using DwmSetWindowAttributeFn = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
++    static DwmSetWindowAttributeFn dwm_set_window_attribute = []() -> DwmSetWindowAttributeFn {
++        HMODULE dwmapi = GetModuleHandleW(L"dwmapi.dll");
++        if (!dwmapi)
++            dwmapi = LoadLibraryW(L"dwmapi.dll");
++        if (!dwmapi)
++            return nullptr;
++#    if defined(__clang__)
++#        pragma clang diagnostic push
++#        pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
++#    endif
++        auto fn = reinterpret_cast<DwmSetWindowAttributeFn>(GetProcAddress(dwmapi, "DwmSetWindowAttribute"));
++#    if defined(__clang__)
++#        pragma clang diagnostic pop
++#    endif
++        return fn;
++    }();
++    if (!dwm_set_window_attribute)
++        return false;
++
++    constexpr DWORD DWMWA_WINDOW_CORNER_PREFERENCE_VALUE = 33;
++    constexpr DWORD DWMWCP_DEFAULT_VALUE = 0;
++    constexpr DWORD DWMWCP_ROUND_VALUE = 2;
++    DWORD preference = rounded ? DWMWCP_ROUND_VALUE : DWMWCP_DEFAULT_VALUE;
++    return SUCCEEDED(dwm_set_window_attribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE_VALUE, &preference, sizeof(preference)));
++}
++#endif
++
+ void BrowserWindow::update_window_border()
+ {
+     auto draw_border = should_draw_window_border();
+ 
++#if defined(AK_OS_WINDOWS)
++    auto* hwnd = reinterpret_cast<HWND>(internalWinId());
++    if (!hwnd)
++        return;
++    if (draw_border) {
++        // Prefer native Windows 11 DWM rounded corners so the window keeps smooth hardware-antialiased corners,
++        // native drop shadow, and zero artificial outer margin around unframed web pages.
++        m_uses_dwm_rounded_corners = set_windows_dwm_corner_preference(hwnd, true);
++        if (m_uses_dwm_rounded_corners) {
++            setContentsMargins(0, 0, 0, 0);
++            clearMask();
++        } else {
++            // Windows 10 fallback: keep only a 1 px border inset instead of a wide multi-pixel frame.
++            setContentsMargins(1, 1, 1, 1);
++            setMask(ChromeStyle::rounded_rect_region(rect(), WINDOW_CORNER_RADIUS));
++        }
++    } else {
++        m_uses_dwm_rounded_corners = false;
++        set_windows_dwm_corner_preference(hwnd, false);
++        setContentsMargins(0, 0, 0, 0);
++        clearMask();
++    }
++    update();
++    return;
++#else
+     // The rectangular contents must fit inside the inner edge of the rounded outline. Child widgets paint after us,
+     // and native page surfaces on Wayland are not clipped by the window mask.
+     auto contents_inset = draw_border ? qCeil(WINDOW_CORNER_RADIUS - ((WINDOW_CORNER_RADIUS - 1) / AK::sqrt(2.0))) : 0;
+@@ -2076,6 +2144,7 @@ void BrowserWindow::update_window_border()
+     }
+ 
+     update();
++#endif
+ }
+ 
+ void BrowserWindow::paintEvent(QPaintEvent* event)
+@@ -2083,7 +2152,11 @@ void BrowserWindow::paintEvent(QPaintEvent* event)
+     QMainWindow::paintEvent(event);
+ 
+     QPainter painter(this);
+-    if (!should_draw_window_border()) {
++    if (!should_draw_window_border()
++#if defined(AK_OS_WINDOWS)
++        || m_uses_dwm_rounded_corners
++#endif
++    ) {
+ #if !defined(AK_OS_MACOS)
+         painter.fillRect(rect(), palette().window());
+ #endif
+diff --git a/UI/Qt/BrowserWindow.h b/UI/Qt/BrowserWindow.h
+index 84c7c4d84f..ce294e79ed 100644
+--- a/UI/Qt/BrowserWindow.h
++++ b/UI/Qt/BrowserWindow.h
+@@ -387,6 +387,9 @@ private:
+ #if defined(AK_OS_MACOS)
+     Optional<AppKitWindowChromeSnapshots> m_window_chrome_snapshots;
+ #endif
++#if defined(AK_OS_WINDOWS)
++    bool m_uses_dwm_rounded_corners { false };
++#endif
+ };
+ 
+ }
+diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
+index c096dafef6..8987c2ba2e 100644
+--- a/UI/Qt/ChromeStyle.cpp
++++ b/UI/Qt/ChromeStyle.cpp
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <AK/Platform.h>
++#include <LibWebView/Utilities.h>
+ #include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/StringUtils.h>
+ #include <UI/Qt/SystemAppearance.h>
+@@ -13,7 +14,9 @@
+ #include <QAbstractButton>
+ #include <QApplication>
+ #include <QCursor>
++#include <QDir>
+ #include <QElapsedTimer>
++#include <QFileInfo>
+ #include <QFont>
+ #include <QFontDatabase>
+ #include <QGuiApplication>
+@@ -23,9 +26,11 @@
+ #include <QPainterPath>
+ #include <QPalette>
+ #include <QProxyStyle>
++#include <QRegion>
+ #include <QStyleHints>
+ #include <QStyleOption>
+ #include <QWidget>
++#include <QtMath>
+ 
+ #if defined(AK_OS_LINUX)
+ #    include <UI/Qt/X11Window.h>
+@@ -310,7 +315,8 @@ QWidget#LadybirdToolbarContainer {{
+ 
+ QWidget#LadybirdToolbarContainer[bookmarksBarBelow="true"],
+ QWidget#LadybirdToolbarContainer[verticalTabs="true"],
+-QWidget#LadybirdToolbarContainer[dynamicTabsBelow="true"] {{
++QWidget#LadybirdToolbarContainer[dynamicTabsBelow="true"],
++QWidget#LadybirdToolbarContainer[roundedContentFrame="true"] {{
+     border-bottom-color: transparent;
+ }}
+ 
+@@ -678,6 +684,10 @@ QToolBar#LadybirdBookmarksBar {{
+     spacing: 2px;
+ }}
+ 
++QToolBar#LadybirdBookmarksBar[roundedContentFrame="true"] {{
++    border-bottom-color: transparent;
++}}
++
+ QToolBar#LadybirdBookmarksBar QToolButton {{
+     color: {2};
+     background: transparent;
+@@ -1143,7 +1153,8 @@ QWidget#LadybirdTabStrip[dynamicLayout="true"] {{
+     border-bottom: 1px solid {7};
+ }}
+ 
+-QWidget#LadybirdTabStrip[dynamicLayout="true"][bookmarksBarBelow="true"] {{
++QWidget#LadybirdTabStrip[dynamicLayout="true"][bookmarksBarBelow="true"],
++QWidget#LadybirdTabStrip[dynamicLayout="true"][roundedContentFrame="true"] {{
+     border-bottom: 0;
+ }}
+ 
+@@ -2331,14 +2342,81 @@ public:
+     }
+ };
+ 
++static QString& stored_os_system_font_family()
++{
++    static auto* family = new QString();
++    return *family;
++}
++
++QString const& os_system_font_family()
++{
++    return stored_os_system_font_family();
++}
++
++QRegion rounded_rect_region(QRect const& rect, int radius)
++{
++    if (rect.isEmpty())
++        return {};
++    auto r = min(radius, min(rect.width(), rect.height()) / 2);
++    if (r <= 0)
++        return QRegion(rect);
++    QRegion region(rect.adjusted(0, r, 0, -r));
++    for (int y = 0; y < r; ++y) {
++        auto dy = r - (y + 0.5);
++        auto inset = qFloor(r - qSqrt((r * r) - (dy * dy)));
++        auto w = rect.width() - (2 * inset);
++        region += QRect(rect.left() + inset, rect.top() + y, w, 1);
++        region += QRect(rect.left() + inset, rect.bottom() - y, w, 1);
++    }
++    return region;
++}
++
++static QString load_bundled_inter_font_family()
++{
++    if (WebView::s_ladybird_resource_root.is_empty())
++        return {};
++
++    auto fonts_dir = QDir(qstring_from_ak_string(WebView::s_ladybird_resource_root)).filePath(QStringLiteral("ladybird/fonts"));
++    static constexpr QLatin1StringView font_files[] = {
++        QLatin1StringView("Inter-Regular.ttf"),
++        QLatin1StringView("Inter-Medium.ttf"),
++        QLatin1StringView("Inter-SemiBold.ttf"),
++        QLatin1StringView("Inter-Bold.ttf"),
++    };
++
++    QString family;
++    for (auto file_name : font_files) {
++        auto path = QDir(fonts_dir).filePath(file_name);
++        if (!QFileInfo::exists(path))
++            continue;
++        auto id = QFontDatabase::addApplicationFont(path);
++        if (id >= 0 && family.isEmpty()) {
++            auto families = QFontDatabase::applicationFontFamilies(id);
++            if (!families.isEmpty())
++                family = families.first();
++        }
++    }
++    return family;
++}
++
+ void install_application_style()
+ {
+-#if defined(Q_OS_WIN)
+     auto font = QApplication::font();
++    if (stored_os_system_font_family().isEmpty())
++        stored_os_system_font_family() = font.family();
++
++    bool font_changed = false;
++    if (auto inter_family = load_bundled_inter_font_family(); !inter_family.isEmpty()) {
++        font.setFamily(inter_family);
++        font_changed = true;
++    }
++#if defined(Q_OS_WIN)
+     font.setHintingPreference(QFont::PreferFullHinting);
+     font.setStyleStrategy(static_cast<QFont::StyleStrategy>(font.styleStrategy() | QFont::PreferAntialias));
+-    QApplication::setFont(font);
++    font_changed = true;
+ #endif
++    if (font_changed)
++        QApplication::setFont(font);
+     QApplication::setStyle(new ApplicationStyle);
+ }
+ 
+diff --git a/UI/Qt/ChromeStyle.h b/UI/Qt/ChromeStyle.h
+index a1bfa08e90..4dc6a26c60 100644
+--- a/UI/Qt/ChromeStyle.h
++++ b/UI/Qt/ChromeStyle.h
+@@ -9,6 +9,7 @@
+ #include <AK/Optional.h>
+ #include <AK/Types.h>
+ #include <QColor>
++#include <QRegion>
+ #include <QString>
+ #include <QStringList>
+ 
+@@ -121,6 +122,8 @@ QString primary_button_style_sheet();
+ 
+ // Installs the application style, which keeps the platform's look but follows the design's timing.
+ void install_application_style();
++QString const& os_system_font_family();
++QRegion rounded_rect_region(QRect const&, int radius);
+ QString page_card_style_sheet();
+ QString element_picker_style_sheet();
+ QString screenshot_selection_style_sheet(QPalette const&);
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index 91b3debcad..01ad05f063 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -215,6 +215,7 @@ void Tab::initialize(Optional<u64> hub_view_id)
+     };
+ 
+     m_view = new WebContentView(this, hub_view_id, AK::move(view_initial_state));
++    m_view->set_corner_radius(m_corner_radius);
+     // The window reports its geometry to its tabs as it is moved and resized, so a tab opened later has to be told
+     // where the window stands now.
+     m_view->set_window_position({ m_window->x(), m_window->y() });
+@@ -1444,9 +1445,28 @@ QImage Tab::render_hover_text(QString const& text) const
+     return image;
+ }
+ 
++void Tab::set_corner_radius(int radius)
++{
++    radius = max(0, radius);
++    if (m_corner_radius == radius)
++        return;
++    m_corner_radius = radius;
++    if (m_view)
++        m_view->set_corner_radius(m_corner_radius);
++    update();
++}
++
+ void Tab::paintEvent(QPaintEvent*)
+ {
+     QPainter painter(this);
++    if (m_corner_radius > 0) {
++        painter.fillRect(rect(), ChromeStyle::chrome_background(Theme::chrome_palette(*this)));
++        painter.setRenderHint(QPainter::Antialiasing, true);
++        painter.setPen(Qt::NoPen);
++        painter.setBrush(Theme::panel().page);
++        painter.drawRoundedRect(QRectF(rect()), m_corner_radius, m_corner_radius);
++        return;
++    }
+     painter.fillRect(rect(), Theme::panel().page);
+ }
+ 
+diff --git a/UI/Qt/Tab.h b/UI/Qt/Tab.h
+index 9c7ed02619..b4b09d95d6 100644
+--- a/UI/Qt/Tab.h
++++ b/UI/Qt/Tab.h
+@@ -159,6 +159,7 @@ public:
+ 
+     bool url_is_hidden() const { return m_location_edit->url_is_hidden(); }
+     void set_url_is_hidden(bool url_is_hidden) { m_location_edit->set_url_is_hidden(url_is_hidden); }
++    void set_corner_radius(int);
+ 
+ public:
+     void show_private_session_popover();
+@@ -278,6 +279,7 @@ private:
+     bool m_preserve_close_retry_state_on_dialog_dismissal { false };
+     bool m_window_is_closing { false };
+     bool m_is_pinned { false };
++    int m_corner_radius { 0 };
+ 
+     Optional<SessionTabId> m_session_tab_id;
+     Optional<DeferredTab> m_deferred_tab;
+diff --git a/UI/Qt/TabBar.cpp b/UI/Qt/TabBar.cpp
+index a2f5489326..6f800d178f 100644
+--- a/UI/Qt/TabBar.cpp
++++ b/UI/Qt/TabBar.cpp
+@@ -58,6 +58,7 @@
+ #include <QGraphicsOpacityEffect>
+ #include <QGraphicsPixmapItem>
+ #include <QGraphicsScene>
++#include <QGuiApplication>
+ #include <QHBoxLayout>
+ #include <QKeyEvent>
+ #include <QLabel>
+@@ -3079,6 +3080,68 @@ bool TabBar::start_window_move()
+     return handle->startSystemMove();
+ }
+ 
++static constexpr int CONTENT_FRAME_CORNER_RADIUS = 10;
++
++static int content_frame_corner_radius()
++{
++    // Wayland dma-buf subsurfaces cannot be rounded by widget masks, so keep square corners on Wayland.
++    if (QGuiApplication::platformName().startsWith("wayland"))
++        return 0;
++    return CONTENT_FRAME_CORNER_RADIUS;
++}
++
++class PageFrame final : public QWidget {
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    explicit PageFrame(QStackedWidget& content, QWidget* parent)
++        : QWidget(parent)
++        , m_content(&content)
++    {
++        setObjectName("LadybirdPageFrame");
++        m_layout = new QVBoxLayout(this);
++        m_layout->setSpacing(0);
++        m_layout->setContentsMargins(0, 0, 0, 0);
++        m_layout->addWidget(&content);
++    }
++
++    void set_framed(bool framed)
++    {
++        if (m_framed == framed)
++            return;
++        m_framed = framed;
++        // 6 px outer chrome on left/right/bottom, 4 px on top, plus 1 px on each side for the rounded border.
++        m_layout->setContentsMargins(m_framed ? QMargins(7, 5, 7, 7) : QMargins());
++        update();
++    }
++
++private:
++    virtual void paintEvent(QPaintEvent*) override
++    {
++        if (!m_framed)
++            return;
++        QPainter painter(this);
++        auto const& chrome_palette = Theme::chrome_palette(*this);
++        painter.fillRect(rect(), ChromeStyle::chrome_background(chrome_palette));
++        if (!m_content || m_content->geometry().isEmpty())
++            return;
++        painter.setRenderHint(QPainter::Antialiasing, true);
++        painter.setBrush(Qt::NoBrush);
++        painter.setPen(QPen(ChromeStyle::chrome_border(chrome_palette), 1));
++        auto corner_radius = content_frame_corner_radius();
++        if (corner_radius > 0) {
++            auto radius = static_cast<qreal>(corner_radius) + 0.5;
++            painter.drawRoundedRect(QRectF(m_content->geometry()).adjusted(-0.5, -0.5, 0.5, 0.5), radius, radius);
++        } else {
++            painter.drawRect(QRectF(m_content->geometry()).adjusted(-0.5, -0.5, 0.5, 0.5));
++        }
++    }
++
++    QStackedWidget* m_content { nullptr };
++    QVBoxLayout* m_layout { nullptr };
++    bool m_framed { false };
++};
++
+ TabWidget::TabWidget(WebView::IsPrivate is_private, QWidget* parent)
+     : QWidget(parent)
+ {
+@@ -3104,14 +3167,15 @@ TabWidget::TabWidget(WebView::IsPrivate is_private, QWidget* parent)
+ 
+     m_toolbar = new WindowToolbar(is_private, this);
+     m_toolbar->installEventFilter(this);
+-    m_stacked_widget = new QStackedWidget(this);
+     m_page_column = new QWidget(this);
+     m_page_column->installEventFilter(this);
++    m_stacked_widget = new QStackedWidget(m_page_column);
++    m_page_frame = new PageFrame(*m_stacked_widget, m_page_column);
+     m_toolbar_placeholder = new QWidget(m_page_column);
+     m_page_column_layout = new QVBoxLayout(m_page_column);
+     m_page_column_layout->setSpacing(0);
+     m_page_column_layout->setContentsMargins(0, 0, 0, 0);
+-    m_bookmarks_bar = new BookmarksBarContainer(*m_toolbar, *m_stacked_widget, m_page_column);
++    m_bookmarks_bar = new BookmarksBarContainer(*m_toolbar, *m_page_frame, m_page_column);
+     m_bookmarks_bar->installEventFilter(this);
+     m_bookmarks_bar->bar().installEventFilter(this);
+     m_notification_bar_column = new QWidget(m_page_column);
+@@ -3401,6 +3465,8 @@ void TabWidget::insert_tab(int index, Tab* widget, QString const& label)
+     }
+ 
+     m_stacked_widget->insertWidget(index, widget);
++    if (widget)
++        widget->set_corner_radius(effective_rounded_content_frame() ? content_frame_corner_radius() : 0);
+     m_tab_bar->insertTab(index, label);
+     place_toolbar_over_page_column();
+ 
+@@ -3572,10 +3638,30 @@ void TabWidget::set_rounded_content_frame(bool enabled)
+     if (m_rounded_content_frame == enabled)
+         return;
+     m_rounded_content_frame = enabled;
+-    m_page_column_layout->setContentsMargins(m_rounded_content_frame ? QMargins(6, 0, 6, 6) : QMargins());
++    update_rounded_content_frame();
+     update_chrome_style();
+ }
+ 
++void TabWidget::update_rounded_content_frame()
++{
++    auto framed = effective_rounded_content_frame();
++    if (m_page_frame)
++        m_page_frame->set_framed(framed);
++    auto corner_radius = framed ? content_frame_corner_radius() : 0;
++    for (int i = 0; i < m_stacked_widget->count(); ++i) {
++        if (auto* page = as_if<Tab>(m_stacked_widget->widget(i)))
++            page->set_corner_radius(corner_radius);
++    }
++    if (m_toolbar)
++        m_toolbar->set_rounded_content_frame(framed);
++    if (m_tab_bar_row)
++        set_dynamic_property_if_needed(*m_tab_bar_row, "roundedContentFrame", framed);
++    if (m_bookmarks_bar)
++        set_dynamic_property_if_needed(m_bookmarks_bar->bar(), "roundedContentFrame", framed);
++    if (m_vertical_tabs_content_separator && m_collapsed_sidebar_top_edge)
++        update_vertical_tabs_content_separator();
++}
++
+ void TabWidget::set_vertical_tabs_enabled(bool enabled)
+ {
+     if (m_vertical_tabs_enabled == enabled)
+@@ -5076,11 +5162,11 @@ void TabWidget::rebuild_page_column()
+ // while the pointer is near the toolbar. The tab performance monitor's row ends the column.
+ void TabWidget::add_page_to_page_column()
+ {
+-    m_page_column_layout->setContentsMargins(m_rounded_content_frame ? QMargins(6, 0, 6, 6) : QMargins());
++    m_page_column_layout->setContentsMargins(0, 0, 0, 0);
+     m_page_column_layout->addWidget(m_notification_bar_column);
+     if (!m_bookmarks_bar->shows_over_page())
+         m_page_column_layout->addWidget(m_bookmarks_bar);
+-    m_page_column_layout->addWidget(m_stacked_widget, 1);
++    m_page_column_layout->addWidget(m_page_frame, 1);
+     m_page_column_layout->addWidget(&m_toolbar->performance_monitor_row());
+ }
+ 
+@@ -5092,7 +5178,7 @@ void TabWidget::update_bookmarks_bar_visibility()
+     if (m_bookmarks_bar->shows_over_page() && index != -1)
+         m_page_column_layout->removeWidget(m_bookmarks_bar);
+     else if (!m_bookmarks_bar->shows_over_page() && index == -1)
+-        m_page_column_layout->insertWidget(m_page_column_layout->indexOf(m_stacked_widget), m_bookmarks_bar);
++        m_page_column_layout->insertWidget(m_page_column_layout->indexOf(m_page_frame), m_bookmarks_bar);
+ 
+     m_bookmarks_bar->update_geometry();
+ }
+@@ -5223,7 +5309,7 @@ void TabWidget::update_vertical_tabs_content_separator()
+     // NB: With the toolbar in the sidebar, the page runs up to the window's top, so there is no toolbar above it to
+     //     separate it from.
+     auto has_page_bookmarks_bar = !m_bookmarks_bar->isHidden();
+-    auto show_content_separator = m_tab_bar_visible && m_tab_bar->tab_layout() != TabLayout::Horizontal && !has_page_bookmarks_bar && !toolbar_is_in_sidebar();
++    auto show_content_separator = m_tab_bar_visible && m_tab_bar->tab_layout() != TabLayout::Horizontal && !has_page_bookmarks_bar && !toolbar_is_in_sidebar() && !effective_rounded_content_frame();
+     m_vertical_tabs_content_separator->setVisible(show_content_separator);
+     if (!show_content_separator)
+         return;
+@@ -5360,6 +5446,7 @@ void TabWidget::update_tab_chrome_visibility()
+     m_tab_bar_row->setVisible(show_top_row);
+     set_dynamic_property_if_needed(*m_tab_bar_row, "bookmarksBarBelow", dynamic_horizontal && !m_bookmarks_bar->isHidden() && !m_bookmarks_bar->shows_over_page());
+     m_toolbar->set_dynamic_tabs_below(dynamic_horizontal && show_top_row);
++    update_rounded_content_frame();
+     m_toolbar->setVisible(m_tab_bar_visible);
+     m_toolbar_placeholder->setVisible(m_tab_bar_visible && m_toolbar_follows_page_column);
+     m_vertical_tab_bar_column->setVisible(m_tab_bar_visible && !is_horizontal);
+@@ -5420,10 +5507,13 @@ void TabWidget::update_chrome_style()
+     auto reserved_space_palette = m_vertical_tabs_reserved_space->palette();
+     reserved_space_palette.setColor(QPalette::Window, ChromeStyle::chrome_sidebar_background(Theme::chrome_palette(*this)));
+     m_vertical_tabs_reserved_space->setPalette(reserved_space_palette);
+-    m_page_column->setAutoFillBackground(m_rounded_content_frame);
++    m_page_column->setAutoFillBackground(effective_rounded_content_frame());
+     auto page_column_palette = m_page_column->palette();
+     page_column_palette.setColor(QPalette::Window, ChromeStyle::chrome_background(Theme::chrome_palette(*this)));
+     m_page_column->setPalette(page_column_palette);
++    update_rounded_content_frame();
++    if (m_page_frame)
++        m_page_frame->update();
+     if (m_all_tabs_popover)
+         m_all_tabs_popover->update_chrome_style(palette());
+     m_is_updating_chrome_style = false;
+diff --git a/UI/Qt/TabBar.h b/UI/Qt/TabBar.h
+index 23486a1e4a..15b29e54f0 100644
+--- a/UI/Qt/TabBar.h
++++ b/UI/Qt/TabBar.h
+@@ -58,6 +58,7 @@ namespace Ladybird {
+ class AllTabsPopover;
+ class ChromeHeaderButton;
+ class LadybirdButton;
++class PageFrame;
+ 
+ class TabMicrophoneIndicator;
+ class TabWidget;
+@@ -440,6 +441,8 @@ private:
+     void recreate_icons();
+     void update_vertical_tabs_toggle_icon();
+     void update_chrome_style();
++    void update_rounded_content_frame();
++    bool effective_rounded_content_frame() const { return m_rounded_content_frame && m_tab_bar_visible; }
+     void update_vertical_tabs_overlay_geometry();
+     void update_vertical_tabs_content_overlay();
+     void set_vertical_tabs_hover_expanded(bool);
+@@ -476,6 +479,7 @@ private:
+     QBoxLayout* m_notification_bar_column_layout { nullptr };
+     Array<NotificationBar*, 2> m_notification_bars {};
+     QWidget* m_page_column { nullptr };
++    PageFrame* m_page_frame { nullptr };
+     QWidget* m_toolbar_placeholder { nullptr };
+     bool m_toolbar_follows_page_column { false };
+     QWidget* m_tab_bar_row { nullptr };
+diff --git a/UI/Qt/WebContentView.cpp b/UI/Qt/WebContentView.cpp
+index c5e19f6948..4656c9f090 100644
+--- a/UI/Qt/WebContentView.cpp
++++ b/UI/Qt/WebContentView.cpp
+@@ -1187,6 +1187,12 @@ void WebContentView::paintEvent(QPaintEvent*)
+ #    endif
+ 
+     QPainter painter(this);
++    if (m_corner_radius > 0) {
++        painter.fillRect(rect(), ChromeStyle::chrome_background(Theme::chrome_palette(*this)));
++        QPainterPath clip;
++        clip.addRoundedRect(QRectF(rect()), m_corner_radius, m_corner_radius);
++        painter.setClipPath(clip);
++    }
+     painter.scale(1 / device_pixel_ratio(), 1 / device_pixel_ratio());
+ 
+     auto paintable = current_paintable();
+@@ -1880,9 +1886,43 @@ void WebContentView::show_crash_report_review()
+         m_crash_report_review->setFocus(Qt::OtherFocusReason);
+ }
+ 
++void WebContentView::set_corner_radius(int radius)
++{
++    radius = max(0, radius);
++    if (m_corner_radius == radius)
++        return;
++    m_corner_radius = radius;
++    update_corner_mask();
++    update();
++}
++
++void WebContentView::update_corner_mask()
++{
++#if defined(LADYBIRD_QT_USE_IOSURFACE_LAYER)
++    if (!internalWinId())
++        return;
++    if (m_corner_radius <= 0 && !m_has_applied_corner_radius)
++        return;
++    m_has_applied_corner_radius = m_corner_radius > 0;
++    round_appkit_view_corners(*this, m_corner_radius, Qt::transparent);
++#elif defined(LADYBIRD_QT_USE_D3D_RHI_WIDGET)
++    apply_windows_corner_mask(CornerMaskPass::Immediate);
++    if (!m_corner_mask_update_pending) {
++        m_corner_mask_update_pending = true;
++        QTimer::singleShot(0, this, [this] {
++            m_corner_mask_update_pending = false;
++            apply_windows_corner_mask(CornerMaskPass::Settled);
++        });
++    }
++#elif defined(LADYBIRD_QT_USE_VULKAN_WINDOW)
++    update_vulkan_window_mask();
++#endif
++}
++
+ void WebContentView::resizeEvent(QResizeEvent* event)
+ {
+     WebContentViewBase::resizeEvent(event);
++    update_corner_mask();
+ #ifdef LADYBIRD_QT_USE_IOSURFACE_LAYER
+     update_iosurface_layer_frame();
+     synchronize_resize_with_remote_layer();
+@@ -2020,6 +2060,7 @@ void WebContentView::showEvent(QShowEvent* event)
+     present_current_paintable_as_layer_contents();
+ #endif
+ #ifdef LADYBIRD_QT_USE_D3D_RHI_WIDGET
++    update_corner_mask();
+     update_whether_view_hosts_remote_layer();
+ #endif
+ #ifdef LADYBIRD_HAS_WAYLAND_GPU_QUERY
+@@ -2532,10 +2573,16 @@ bool WebContentView::event(QEvent* event)
+ #ifdef LADYBIRD_QT_USE_D3D_RHI_WIDGET
+     if (event->type() == QEvent::WinIdChange)
+         native_window_changed();
++    else if (event->type() == QEvent::DevicePixelRatioChange) {
++        clearMask();
++        update_corner_mask();
++    }
+ #endif
+ #ifdef LADYBIRD_QT_USE_IOSURFACE_LAYER
+-    if (event->type() == QEvent::WinIdChange)
++    if (event->type() == QEvent::WinIdChange) {
++        update_corner_mask();
+         present_current_paintable_as_layer_contents();
++    }
+     if (event->type() == QEvent::PlatformSurface && static_cast<QPlatformSurfaceEvent*>(event)->surfaceEventType() == QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
+         detach_iosurface_layer_from_native_view();
+ #endif
+diff --git a/UI/Qt/WebContentView.h b/UI/Qt/WebContentView.h
+index a755725340..10a9564b0b 100644
+--- a/UI/Qt/WebContentView.h
++++ b/UI/Qt/WebContentView.h
+@@ -170,6 +170,7 @@ public:
+     void set_viewport_rect(Gfx::IntRect);
+     void push_viewport_size();
+     void set_device_pixel_ratio(double);
++    void set_corner_radius(int);
+     void set_vertical_tab_overlay_insets(int left, int right);
+     void set_bookmarks_bar_overlay_height(int);
+     // How much the page is dimmed under a page dialog, from 0 to 1, where the page is presented above anything Qt paints
+@@ -439,6 +440,12 @@ private:
+     bool has_visible_child_over_page() const;
+     void update_whether_view_hosts_remote_layer();
+     void native_window_changed();
++    enum class CornerMaskPass : u8 {
++        Immediate,
++        Settled,
++    };
++    void apply_windows_corner_mask(CornerMaskPass = CornerMaskPass::Immediate);
++    bool m_corner_mask_update_pending { false };
+     bool m_hosts_remote_layer { false };
+     bool m_vertical_tabs_overlay_page { false };
+     bool m_bookmarks_bar_overlays_page { false };
+@@ -534,6 +541,11 @@ private:
+     int m_vertical_tab_overlay_left { 0 };
+     int m_vertical_tab_overlay_right { 0 };
+     int m_bookmarks_bar_overlay_height { 0 };
++#endif
++    void update_corner_mask();
++    int m_corner_radius { 0 };
++#if defined(LADYBIRD_QT_USE_IOSURFACE_LAYER)
++    bool m_has_applied_corner_radius { false };
+ #endif
+ };
+ 
+diff --git a/UI/Qt/WebContentViewLinux.cpp b/UI/Qt/WebContentViewLinux.cpp
+index 6ae07a9164..2f89df51cb 100644
+--- a/UI/Qt/WebContentViewLinux.cpp
++++ b/UI/Qt/WebContentViewLinux.cpp
+@@ -18,6 +18,7 @@
+ #include <LibGfx/VulkanContext.h>
+ #include <LibGfx/VulkanImage.h>
+ #include <LibWebView/Application.h>
++#include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/NativeWindowContainer.h>
+ #include <UI/Qt/WebContentView.h>
+ #ifdef LADYBIRD_HAS_WAYLAND_GPU_QUERY
+@@ -1559,6 +1560,9 @@ void WebContentView::update_vulkan_window_mask()
+     auto size = m_vulkan_window_container->size();
+     QRegion window_mask { QRect { QPoint { 0, 0 }, size } };
+ 
++    if (m_corner_radius > 0 && !size.isEmpty() && QGuiApplication::platformName() == "xcb")
++        window_mask &= ChromeStyle::rounded_rect_region(QRect { QPoint { 0, 0 }, size }, m_corner_radius);
++
+     if (QGuiApplication::platformName() == "xcb" || m_vulkan_window_supports_alpha_blending.value_or(false)) {
+         if (m_vertical_tab_overlay_left > 0)
+             window_mask -= QRect { 0, 0, m_vertical_tab_overlay_left, size.height() };
+diff --git a/UI/Qt/WebContentViewWindows.cpp b/UI/Qt/WebContentViewWindows.cpp
+index 0c014ff4d1..c0aab2fd03 100644
+--- a/UI/Qt/WebContentViewWindows.cpp
++++ b/UI/Qt/WebContentViewWindows.cpp
+@@ -14,6 +14,8 @@
+ #include <QChildEvent>
+ #include <QColor>
+ #include <QImage>
++#include <QRegion>
++#include <QtMath>
+ #include <rhi/qrhi.h>
+ #include <rhi/qrhi_platform.h>
+ 
+@@ -117,12 +119,57 @@ void WebContentView::update_whether_view_hosts_remote_layer()
+     set_hosts_remote_layer(should_host);
+ }
+ 
++void WebContentView::apply_windows_corner_mask(CornerMaskPass pass)
++{
++    if (m_corner_radius <= 0 || rect().isEmpty()) {
++        clearMask();
++        return;
++    }
++
++    auto r = min(m_corner_radius, min(width(), height()) / 2);
++    if (r <= 0) {
++        clearMask();
++        return;
++    }
++
++    // Give Qt a conservative cross-shaped mask so the parent PageFrame always paints the corner pixels cleanly at
++    // fractional DPI, then apply the exact device-pixel rounded region directly to the native HWND.
++    QRegion cross_mask(rect().adjusted(0, r, 0, -r));
++    cross_mask += rect().adjusted(r, 0, -r, 0);
++    setMask(cross_mask);
++
++    if (auto* hwnd = reinterpret_cast<HWND>(internalWinId())) {
++        auto dpr = devicePixelRatioF();
++        int logical_device_width = qRound(width() * dpr);
++        int logical_device_height = qRound(height() * dpr);
++        int device_width = logical_device_width;
++        int device_height = logical_device_height;
++        RECT client_rect {};
++        if (GetClientRect(hwnd, &client_rect)) {
++            device_width = client_rect.right - client_rect.left;
++            device_height = client_rect.bottom - client_rect.top;
++        }
++        // During pending resizes on newly shown or hidden views, GetClientRect can lag behind Qt's new widget size.
++        // Never crop on the immediate pass; the settled pass re-applies the exact physical rect once Qt resizes the HWND.
++        if (pass == CornerMaskPass::Immediate) {
++            device_width = max(device_width, logical_device_width);
++            device_height = max(device_height, logical_device_height);
++        }
++        auto radius_px = max(1, qRound(r * dpr));
++        if (HRGN region = CreateRoundRectRgn(0, 0, device_width + 1, device_height + 1, 2 * radius_px, 2 * radius_px)) {
++            if (!SetWindowRgn(hwnd, region, TRUE))
++                DeleteObject(region);
++        }
++    }
++}
++
+ void WebContentView::native_window_changed()
+ {
+     if (m_hosts_remote_layer) {
+         m_hosts_remote_layer = false;
+         set_hosts_remote_layer(false);
+     }
++    update_corner_mask();
+     update_whether_view_hosts_remote_layer();
+ }
+ 
+diff --git a/UI/Qt/WindowToolbar.cpp b/UI/Qt/WindowToolbar.cpp
+index 4d05489af9..9eefa0b0cd 100644
+--- a/UI/Qt/WindowToolbar.cpp
++++ b/UI/Qt/WindowToolbar.cpp
+@@ -2230,6 +2230,16 @@ void WindowToolbar::set_dynamic_tabs_below(bool below)
+     update();
+ }
+ 
++void WindowToolbar::set_rounded_content_frame(bool enabled)
++{
++    if (property("roundedContentFrame").toBool() == enabled)
++        return;
++    setProperty("roundedContentFrame", enabled);
++    style()->unpolish(this);
++    style()->polish(this);
++    update();
++}
++
+ bool WindowToolbar::event(QEvent* event)
+ {
+     // An inactive window's toolbar icons drop to the muted color.
+diff --git a/UI/Qt/WindowToolbar.h b/UI/Qt/WindowToolbar.h
+index 8d1e461d6a..a281b7519d 100644
+--- a/UI/Qt/WindowToolbar.h
++++ b/UI/Qt/WindowToolbar.h
+@@ -85,6 +85,7 @@ public:
+     void set_dynamic_layout(bool dynamic_layout, bool centered_address_bar);
+     void set_dynamic_new_tab_action(QAction*);
+     void set_dynamic_tabs_below(bool);
++    void set_rounded_content_frame(bool);
+ 
+     ToolbarArrangement arrangement() const { return m_arrangement; }
+     // The sidebar's own margin plus the given inset keeps the toolbar's contents clear of the sidebar's edges.
+diff --git a/UI/cmake/ResourceFiles.cmake b/UI/cmake/ResourceFiles.cmake
+index 1d932fc2d4..5549723121 100644
+--- a/UI/cmake/ResourceFiles.cmake
++++ b/UI/cmake/ResourceFiles.cmake
+@@ -4,6 +4,15 @@ set(FONTS
+ )
+ list(TRANSFORM FONTS PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/fonts/")
+ 
++set(UI_FONTS
++    Inter-Bold.ttf
++    Inter-Medium.ttf
++    Inter-OFL.txt
++    Inter-Regular.ttf
++    Inter-SemiBold.ttf
++)
++list(TRANSFORM UI_FONTS PREPEND "${LADYBIRD_SOURCE_DIR}/Base/res/ladybird/fonts/")
++
+ set(16x16_ICONS
+     open-parent-directory.png
+ )
+@@ -180,6 +189,10 @@ function(copy_resources_to_build base_directory bundle_target)
+         DESTINATION ${base_directory} TARGET ${bundle_target}
+     )
+ 
++    copy_resource_set(ladybird/fonts RESOURCES ${UI_FONTS}
++        DESTINATION ${base_directory} TARGET ${bundle_target}
++    )
++
+     copy_resource_set(ladybird/about-pages/settings RESOURCES ${ABOUT_SETTINGS_RESOURCES}
+         DESTINATION ${base_directory} TARGET ${bundle_target}
+     )
+@@ -224,6 +237,7 @@ function(install_ladybird_resources destination component)
+     install(FILES ${INTERNAL_RESOURCES} "${LADYBIRD_LICENSES_FILE}" DESTINATION "${destination}/ladybird"
+         COMPONENT ${component})
+     install(FILES ${ABOUT_PAGES} DESTINATION "${destination}/ladybird/about-pages" COMPONENT ${component})
++    install(FILES ${UI_FONTS} DESTINATION "${destination}/ladybird/fonts" COMPONENT ${component})
+     install(FILES ${ABOUT_SETTINGS_RESOURCES} DESTINATION "${destination}/ladybird/about-pages/settings" COMPONENT ${component})
+     install(FILES ${WEB_TEMPLATES} DESTINATION "${destination}/ladybird/templates" COMPONENT ${component})
+     if (PDFJS_BUILD_FILES)

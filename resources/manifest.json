@@ -23,6 +23,26 @@
     {
       "src": "branding/hellbird.rc",
       "dest": "UI/Icons/hellbird.rc"
+    },
+    {
+      "src": "fonts/Inter-Regular.ttf",
+      "dest": "Base/res/ladybird/fonts/Inter-Regular.ttf"
+    },
+    {
+      "src": "fonts/Inter-Medium.ttf",
+      "dest": "Base/res/ladybird/fonts/Inter-Medium.ttf"
+    },
+    {
+      "src": "fonts/Inter-SemiBold.ttf",
+      "dest": "Base/res/ladybird/fonts/Inter-SemiBold.ttf"
+    },
+    {
+      "src": "fonts/Inter-Bold.ttf",
+      "dest": "Base/res/ladybird/fonts/Inter-Bold.ttf"
+    },
+    {
+      "src": "fonts/OFL.txt",
+      "dest": "Base/res/ladybird/fonts/Inter-OFL.txt"
     }
   ]
 }

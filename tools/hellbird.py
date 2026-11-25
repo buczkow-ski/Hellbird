@@ -436,8 +436,16 @@ def _package_windows(build_dir: Path, dist_dir: Path, version: str) -> Path:
             shutil.copy2(src, stage_dir / meta_file)
 
     generated_licenses = share_lagom / "ladybird" / "LICENSES.txt"
+    inter_ofl = REPO_ROOT / "resources" / "fonts" / "OFL.txt"
     if generated_licenses.is_file():
-        shutil.copy2(generated_licenses, stage_dir / "THIRD_PARTY_LICENSES.txt")
+        combined_licenses = generated_licenses.read_text(encoding="utf-8")
+        if inter_ofl.is_file():
+            combined_licenses = (
+                combined_licenses.rstrip("\n")
+                + "\n\n---\n\nInter Font Family (SIL Open Font License 1.1)\n\n"
+                + inter_ofl.read_text(encoding="utf-8")
+            )
+        (stage_dir / "THIRD_PARTY_LICENSES.txt").write_text(combined_licenses, encoding="utf-8")
 
     zip_path = dist_dir / f"{stage_name}.zip"
     if zip_path.exists():
