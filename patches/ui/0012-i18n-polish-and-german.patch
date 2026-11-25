@@ -1190,11 +1190,14 @@ index 545f35d033..d8aa332472 100644
  
  enum class HostSetting : u8 {
 diff --git a/Libraries/LibWebView/WebUI.cpp b/Libraries/LibWebView/WebUI.cpp
-index 220698b083..672196486a 100644
+index 220698b083..1007ca108d 100644
 --- a/Libraries/LibWebView/WebUI.cpp
 +++ b/Libraries/LibWebView/WebUI.cpp
-@@ -7,6 +7,8 @@
+@@ -5,8 +5,11 @@
+  */
+ 
  #include <AK/NeverDestroyed.h>
++#include <AK/kmalloc.h>
  #include <LibIPC/Transport.h>
  #include <LibIPC/TransportHandle.h>
 +#include <LibWebView/Application.h>
@@ -1202,12 +1205,14 @@ index 220698b083..672196486a 100644
  #include <LibWebView/WebContentClient.h>
  #include <LibWebView/WebContentPage.h>
  #include <LibWebView/WebUI.h>
-@@ -116,16 +118,47 @@ ErrorOr<RefPtr<WebUI>> WebUI::create(WebContentClient& client, Web::PageId page_
+@@ -116,16 +119,49 @@ ErrorOr<RefPtr<WebUI>> WebUI::create(WebContentClient& client, Web::PageId page_
      return web_ui;
  }
  
 +class WebUIInterfaceLanguageObserver final : public SettingsObserver {
 +public:
++    AK_ALLOC_WITH_KMALLOC;
++
 +    explicit WebUIInterfaceLanguageObserver(WebUI& web_ui)
 +        : SettingsObserver(Application::settings())
 +        , m_web_ui(web_ui)
@@ -1250,7 +1255,7 @@ index 220698b083..672196486a 100644
  void WebUI::die()
  {
      if (auto client = m_client.strong_ref())
-@@ -144,6 +177,11 @@ void WebUI::received_message(String name, JsonValue data)
+@@ -144,6 +180,11 @@ void WebUI::received_message(String name, JsonValue data)
      if (!has_client())
          return;
  
@@ -1263,7 +1268,7 @@ index 220698b083..672196486a 100644
      if (!interface.has_value()) {
          warnln("Received message from WebUI for unrecognized interface: {}", name);
 diff --git a/Libraries/LibWebView/WebUI.h b/Libraries/LibWebView/WebUI.h
-index 49f9c2a8be..0884fd687f 100644
+index 49f9c2a8be..802a70b993 100644
 --- a/Libraries/LibWebView/WebUI.h
 +++ b/Libraries/LibWebView/WebUI.h
 @@ -11,6 +11,7 @@
@@ -1278,7 +1283,7 @@ index 49f9c2a8be..0884fd687f 100644
  
  namespace WebView {
  
-+class SettingsObserver;
++class WebUIInterfaceLanguageObserver;
 +
  class WEBVIEW_API WebUI
      : public IPC::ConnectionToServer<WebUIClientEndpoint, WebUIServerEndpoint>
@@ -1295,7 +1300,7 @@ index 49f9c2a8be..0884fd687f 100644
      String m_host;
  
      HashMap<StringView, Interface> m_interfaces;
-+    OwnPtr<SettingsObserver> m_interface_language_observer;
++    OwnPtr<WebUIInterfaceLanguageObserver> m_interface_language_observer;
  };
  
  #define WEB_UI(WebUIType)                                                                                                                       \
@@ -1622,7 +1627,7 @@ index 663a2186dd..aad4b5520f 100644
          set_has_no_matches(false);
 diff --git a/UI/Qt/Localization.cpp b/UI/Qt/Localization.cpp
 new file mode 100644
-index 0000000000..381219e205
+index 0000000000..f97a21cb5c
 --- /dev/null
 +++ b/UI/Qt/Localization.cpp
 @@ -0,0 +1,744 @@
@@ -1664,8 +1669,8 @@ index 0000000000..381219e205
 +
 +LocalizationRegistry& registry()
 +{
-+    static LocalizationRegistry s_registry;
-+    return s_registry;
++    static auto* s_registry = new LocalizationRegistry;
++    return *s_registry;
 +}
 +
 +template<typename Object>
@@ -1699,7 +1704,7 @@ index 0000000000..381219e205
 +
 +QHash<QString, QString> const& polish_table()
 +{
-+    static QHash<QString, QString> const table = {
++    static auto const& table = *new QHash<QString, QString> {
 +        // Top-level menus
 +        { QStringLiteral("&File"), QStringLiteral("&Plik") },
 +        { QStringLiteral("File"), QStringLiteral("Plik") },
@@ -1928,7 +1933,7 @@ index 0000000000..381219e205
 +
 +QHash<QString, QString> const& german_table()
 +{
-+    static QHash<QString, QString> const table = {
++    static auto const& table = *new QHash<QString, QString> {
 +        // Top-level menus
 +        { QStringLiteral("&File"), QStringLiteral("&Datei") },
 +        { QStringLiteral("File"), QStringLiteral("Datei") },
@@ -2167,63 +2172,63 @@ index 0000000000..381219e205
 +            return translated_head + QStringLiteral("  ") + tail;
 +    }
 +
-+    static QRegularExpression const protection_active_re(QStringLiteral("^Protection active on (.+)$"));
++    static auto const& protection_active_re = *new QRegularExpression(QStringLiteral("^Protection active on (.+)$"));
 +    if (auto m = protection_active_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Ochrona aktywna na %1") : QStringLiteral("Schutz aktiv auf %1")).arg(m.captured(1));
 +
-+    static QRegularExpression const paused_resume_re(QStringLiteral("^Paused on (.+) \u2014 click to resume$"));
++    static auto const& paused_resume_re = *new QRegularExpression(QStringLiteral("^Paused on (.+) \u2014 click to resume$"));
 +    if (auto m = paused_resume_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Wstrzymano na %1 \u2014 kliknij, aby wznowić") : QStringLiteral("Pausiert auf %1 \u2014 zum Fortsetzen klicken")).arg(m.captured(1));
 +
-+    static QRegularExpression const pause_site_re(QStringLiteral("^Pause protection on (.+)$"));
++    static auto const& pause_site_re = *new QRegularExpression(QStringLiteral("^Pause protection on (.+)$"));
 +    if (auto m = pause_site_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Wstrzymaj ochronę na %1") : QStringLiteral("Schutz auf %1 pausieren")).arg(m.captured(1));
 +
-+    static QRegularExpression const resume_site_re(QStringLiteral("^Resume protection on (.+)$"));
++    static auto const& resume_site_re = *new QRegularExpression(QStringLiteral("^Resume protection on (.+)$"));
 +    if (auto m = resume_site_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Wznów ochronę na %1") : QStringLiteral("Schutz auf %1 fortsetzen")).arg(m.captured(1));
 +
-+    static QRegularExpression const shield_blocked_site_re(QStringLiteral("^Hellbird Shield \u2014 (\\d+) blocked on (.+)$"));
++    static auto const& shield_blocked_site_re = *new QRegularExpression(QStringLiteral("^Hellbird Shield \u2014 (\\d+) blocked on (.+)$"));
 +    if (auto m = shield_blocked_site_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Hellbird Shield \u2014 zablokowano %1 na %2") : QStringLiteral("Hellbird Shield \u2014 %1 auf %2 blockiert")).arg(m.captured(1), m.captured(2));
 +
-+    static QRegularExpression const shield_blocked_re(QStringLiteral("^Hellbird Shield \u2014 (\\d+) blocked$"));
++    static auto const& shield_blocked_re = *new QRegularExpression(QStringLiteral("^Hellbird Shield \u2014 (\\d+) blocked$"));
 +    if (auto m = shield_blocked_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Hellbird Shield \u2014 zablokowano %1") : QStringLiteral("Hellbird Shield \u2014 %1 blockiert")).arg(m.captured(1));
 +
-+    static QRegularExpression const shield_paused_re(QStringLiteral("^Hellbird Shield \u2014 Paused on (.+)$"));
++    static auto const& shield_paused_re = *new QRegularExpression(QStringLiteral("^Hellbird Shield \u2014 Paused on (.+)$"));
 +    if (auto m = shield_paused_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Hellbird Shield \u2014 Wstrzymano na %1") : QStringLiteral("Hellbird Shield \u2014 Pausiert auf %1")).arg(m.captured(1));
 +
-+    static QRegularExpression const restore_tabs_re(QStringLiteral("^Restore the (\\d+) tabs you had open\\?$"));
++    static auto const& restore_tabs_re = *new QRegularExpression(QStringLiteral("^Restore the (\\d+) tabs you had open\\?$"));
 +    if (auto m = restore_tabs_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Przywrócić %1 otwartych kart?") : QStringLiteral("Die %1 geöffneten Tabs wiederherstellen?")).arg(m.captured(1));
 +
-+    static QRegularExpression const search_tabs_re(QStringLiteral("^Search (\\d+) tabs$"));
++    static auto const& search_tabs_re = *new QRegularExpression(QStringLiteral("^Search (\\d+) tabs$"));
 +    if (auto m = search_tabs_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Szukaj wśród %1 kart") : QStringLiteral("%1 Tabs durchsuchen")).arg(m.captured(1));
 +
-+    static QRegularExpression const find_of_re(QStringLiteral("^(\\d+) of (\\d+)$"));
++    static auto const& find_of_re = *new QRegularExpression(QStringLiteral("^(\\d+) of (\\d+)$"));
 +    if (auto m = find_of_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("%1 z %2") : QStringLiteral("%1 von %2")).arg(m.captured(1), m.captured(2));
 +
-+    static QRegularExpression const open_all_tabs_re(QStringLiteral("^Open All in Tabs \\((\\d+)\\)$"));
++    static auto const& open_all_tabs_re = *new QRegularExpression(QStringLiteral("^Open All in Tabs \\((\\d+)\\)$"));
 +    if (auto m = open_all_tabs_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Otwórz wszystkie w kartach (%1)") : QStringLiteral("Alle in Tabs öffnen (%1)")).arg(m.captured(1));
 +
-+    static QRegularExpression const update_available_re(QStringLiteral("^(?:Hellbird|Ladybird) (.+) is available$"));
++    static auto const& update_available_re = *new QRegularExpression(QStringLiteral("^(?:Hellbird|Ladybird) (.+) is available$"));
 +    if (auto m = update_available_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Dostępna jest wersja Hellbird %1") : QStringLiteral("Hellbird %1 ist verfügbar")).arg(m.captured(1));
 +
-+    static QRegularExpression const you_have_updater_re(QStringLiteral("^You have (?:Hellbird|Ladybird) (.+)\\. Update it with your system's software updater\\.$"));
++    static auto const& you_have_updater_re = *new QRegularExpression(QStringLiteral("^You have (?:Hellbird|Ladybird) (.+)\\. Update it with your system's software updater\\.$"));
 +    if (auto m = you_have_updater_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Masz wersję Hellbird %1. Zaktualizuj ją za pomocą menedżera aktualizacji systemu.") : QStringLiteral("Du verwendest Hellbird %1. Aktualisiere über die Systemaktualisierung.")).arg(m.captured(1));
 +
-+    static QRegularExpression const you_have_re(QStringLiteral("^You have (?:Hellbird|Ladybird) (.+)\\.$"));
++    static auto const& you_have_re = *new QRegularExpression(QStringLiteral("^You have (?:Hellbird|Ladybird) (.+)\\.$"));
 +    if (auto m = you_have_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("Masz wersję Hellbird %1.") : QStringLiteral("Du verwendest Hellbird %1.")).arg(m.captured(1));
 +
-+    static QRegularExpression const host_filter_tooltip_re(QStringLiteral("^(.+) \\((.+)\\)\\nClick to write a filter for it$"));
++    static auto const& host_filter_tooltip_re = *new QRegularExpression(QStringLiteral("^(.+) \\((.+)\\)\\nClick to write a filter for it$"));
 +    if (auto m = host_filter_tooltip_re.match(text); m.hasMatch())
 +        return (is_pl ? QStringLiteral("%1 (%2)\nKliknij, aby utworzyć filtr") : QStringLiteral("%1 (%2)\nKlicken, um einen Filter zu erstellen")).arg(m.captured(1), m.captured(2));
 +

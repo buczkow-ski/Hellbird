@@ -3027,7 +3027,7 @@ index 9142d5de4e..4941be2ea8 100644
      virtual void view_screen_wake_lock_state_changed(u64 view_id, Web::ScreenWakeLockState state) override;
      virtual void view_web_content_crashed(u64 view_id, WebView::ViewImplementation::WebContentCrashReason reason) override;
 diff --git a/UI/Qt/Localization.cpp b/UI/Qt/Localization.cpp
-index 381219e205..09bbf28e38 100644
+index f97a21cb5c..68b5906769 100644
 --- a/UI/Qt/Localization.cpp
 +++ b/UI/Qt/Localization.cpp
 @@ -207,6 +207,24 @@ QHash<QString, QString> const& polish_table()
@@ -3084,7 +3084,7 @@ index 381219e205..09bbf28e38 100644
      if (auto m = find_of_re.match(text); m.hasMatch())
          return (is_pl ? QStringLiteral("%1 z %2") : QStringLiteral("%1 von %2")).arg(m.captured(1), m.captured(2));
  
-+    static QRegularExpression const matches_re(QStringLiteral("^(\\d+) matches$"));
++    static auto const& matches_re = *new QRegularExpression(QStringLiteral("^(\\d+) matches$"));
 +    if (auto m = matches_re.match(text); m.hasMatch()) {
 +        if (!is_pl)
 +            return QStringLiteral("%1 Treffer").arg(m.captured(1));
@@ -3094,7 +3094,7 @@ index 381219e205..09bbf28e38 100644
 +        return (is_few ? QStringLiteral("%1 dopasowania") : QStringLiteral("%1 dopasowań")).arg(m.captured(1));
 +    }
 +
-     static QRegularExpression const open_all_tabs_re(QStringLiteral("^Open All in Tabs \\((\\d+)\\)$"));
+     static auto const& open_all_tabs_re = *new QRegularExpression(QStringLiteral("^Open All in Tabs \\((\\d+)\\)$"));
      if (auto m = open_all_tabs_re.match(text); m.hasMatch())
          return (is_pl ? QStringLiteral("Otwórz wszystkie w kartach (%1)") : QStringLiteral("Alle in Tabs öffnen (%1)")).arg(m.captured(1));
 diff --git a/UI/Qt/RemoteView.h b/UI/Qt/RemoteView.h
