@@ -17,3 +17,6 @@
 0016-inter-font-and-rounded-content-frame.patch
 0017-builtin-devtools-panel.patch
 0018-fast-content-blocker-startup.patch
+0019-memory-quick-wins.patch
+0020-memory-saver-tab-discarding.patch
+0021-lazy-content-blocker.patch

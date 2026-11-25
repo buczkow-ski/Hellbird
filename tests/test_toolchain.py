@@ -14,6 +14,7 @@ import zipfile
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "tools"))
 
+import bench_ram  # noqa: E402
 import hellbird  # noqa: E402
 import patcher  # noqa: E402
 import resources  # noqa: E402
@@ -213,6 +214,77 @@ class RepoIntegrityTests(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "resources/branding/macos/app_icon.iconset/icon_512x512@2x.png").read_bytes().startswith(png_sig))
         self.assertTrue((REPO_ROOT / "resources/branding/hellbird.ico").read_bytes().startswith(b"\x00\x00\x01\x00"))
         self.assertIn("VERSIONINFO", (REPO_ROOT / "resources/branding/hellbird.rc").read_text(encoding="utf-8"))
+
+
+class BenchRamTests(unittest.TestCase):
+    def test_classify_process_role(self) -> None:
+        self.assertEqual(bench_ram.classify_process_role("Hellbird.exe"), "browser-ui")
+        self.assertEqual(bench_ram.classify_process_role("WebContent.exe"), "webcontent")
+        self.assertEqual(bench_ram.classify_process_role("Compositor"), "compositor")
+        self.assertEqual(bench_ram.classify_process_role("RequestServer.exe"), "requestserver")
+        self.assertEqual(bench_ram.classify_process_role("VideoDecoderSer"), "videodecoderserver")
+        self.assertEqual(bench_ram.classify_process_role("AudioServer.exe"), "audioserver")
+        self.assertEqual(
+            bench_ram.classify_process_role("helium.exe", "helium.exe --type=renderer"),
+            "renderer",
+        )
+        self.assertEqual(
+            bench_ram.classify_process_role(
+                "helium.exe",
+                "helium.exe --type=utility --utility-sub-type=network.mojom.NetworkService",
+            ),
+            "network",
+        )
+        self.assertNotIn("chrome.exe", bench_ram.HELIUM_PROCESS_NAMES)
+        cmd = bench_ram._build_bench_command("hellbird", Path("Hellbird.exe"), Path("tmp_prof"), ["https://example.com"])
+        self.assertIn("--profile-path", cmd)
+
+    def test_parse_linux_smaps_rollup_and_budgets(self) -> None:
+        sample = (
+            "00400000-7fff0000 ---p 00000000 00:00 0 [rollup]\n"
+            "Rss:              102400 kB\n"
+            "Pss:               51200 kB\n"
+            "Private_Clean:     10240 kB\n"
+            "Private_Dirty:     30720 kB\n"
+        )
+        pss_mb, priv_mb = bench_ram.parse_linux_smaps_rollup(sample)
+        self.assertEqual(pss_mb, 50.0)
+        self.assertEqual(priv_mb, 40.0)
+
+        snap = bench_ram.BrowserSnapshot(
+            browser="hellbird",
+            timestamp_epoch=1.0,
+            process_count=4,
+            total_private_ws_mb=120.0,
+            total_commit_mb=600.0,
+            total_peak_commit_mb=700.0,
+            total_pss_mb=None,
+            total_gpu_committed_mb=50.0,
+            system=bench_ram.SystemMemoryInfo(8192.0, 2048.0, 10000.0, 20000.0),
+            processes=[
+                bench_ram.ProcessSample(100, "Hellbird.exe", "browser-ui", 20.0, 100.0, 150.0, None, 10.0),
+                bench_ram.ProcessSample(200, "WebContent.exe", "webcontent", 100.0, 500.0, 550.0, None, 40.0),
+            ],
+        )
+        table = bench_ram.format_snapshot_table(snap)
+        self.assertIn("HELLBIRD (4 processes)", table)
+        self.assertEqual(bench_ram.check_budgets(snap, max_commit_mb=700.0, max_processes=6), [])
+        failures = bench_ram.check_budgets(snap, max_commit_mb=500.0, max_private_ws_mb=100.0, max_processes=3)
+        self.assertEqual(len(failures), 3)
+
+        empty_snap = bench_ram.BrowserSnapshot(
+            browser="hellbird",
+            timestamp_epoch=1.0,
+            process_count=0,
+            total_private_ws_mb=0.0,
+            total_commit_mb=0.0,
+            total_peak_commit_mb=0.0,
+            total_pss_mb=None,
+            total_gpu_committed_mb=None,
+            system=bench_ram.SystemMemoryInfo(8192.0, 2048.0, 10000.0, 20000.0),
+            processes=[],
+        )
+        self.assertEqual(len(bench_ram.check_budgets(empty_snap, max_commit_mb=500.0)), 1)
 
 
 if __name__ == "__main__":

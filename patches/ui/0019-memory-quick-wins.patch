@@ -1,0 +1,200 @@
+diff --git a/Libraries/LibThreading/ThreadPool.cpp b/Libraries/LibThreading/ThreadPool.cpp
+index d77a5250..fcc8abd3 100644
+--- a/Libraries/LibThreading/ThreadPool.cpp
++++ b/Libraries/LibThreading/ThreadPool.cpp
+@@ -9,7 +9,9 @@
+ #include <LibThreading/ThreadPool.h>
+ 
+ static constexpr size_t THREAD_COUNT = 4;
++#if !defined(AK_OS_WINDOWS)
+ static constexpr size_t THREAD_STACK_SIZE = 8 * MiB;
++#endif
+ static constexpr auto THREAD_IDLE_MEMORY_COLLECTION_DELAY = AK::Duration::from_seconds(1);
+ 
+ namespace Threading {
+@@ -27,7 +29,11 @@ ThreadPool::ThreadPool()
+         auto thread = Thread::construct(name, [this]() -> intptr_t {
+             return worker_thread_func();
+         });
++#if !defined(AK_OS_WINDOWS)
++        // On Windows, /STACK:0x800000 already reserves 8 MiB with lazy page-on-demand commit. Passing an explicit stack
++        // size through the Windows pthread shim commits the full 8 MiB upfront per worker thread (~32 MiB/process).
+         thread->set_stack_size(THREAD_STACK_SIZE);
++#endif
+         thread->start();
+         m_threads.append(move(thread));
+     }
+diff --git a/Libraries/LibWebView/Application.cpp b/Libraries/LibWebView/Application.cpp
+index c38f7614..c3830c38 100644
+--- a/Libraries/LibWebView/Application.cpp
++++ b/Libraries/LibWebView/Application.cpp
+@@ -1816,6 +1816,14 @@ void Application::launch_spare_web_content_process()
+     if (browser_options().profile_helper_process == ProcessType::WebContent)
+         return;
+ 
++    // On memory-constrained machines (<= 8 GiB RAM), keeping an idle spare WebContent process around wastes
++    // ~30-50 MiB of committed memory for marginal tab-open latency benefit. Keep it enabled in test mode so
++    // upstream spare-process tests remain deterministic on 8 GiB CI/dev machines.
++    if (m_web_content_options.is_test_mode == IsTestMode::No) {
++        if (auto physical_memory = Core::System::physical_memory_bytes(); physical_memory > 0 && physical_memory <= 8 * GiB)
++            return;
++    }
++
+     if (m_spare_web_content_process || m_has_queued_task_to_launch_spare_web_content_process)
+         return;
+     m_has_queued_task_to_launch_spare_web_content_process = true;
+diff --git a/Libraries/LibWebView/RequestServerManager.cpp b/Libraries/LibWebView/RequestServerManager.cpp
+index d08cfc52..1bb072d6 100644
+--- a/Libraries/LibWebView/RequestServerManager.cpp
++++ b/Libraries/LibWebView/RequestServerManager.cpp
+@@ -12,6 +12,7 @@
+ #include <LibCore/Directory.h>
+ #include <LibCore/EventLoop.h>
+ #include <LibCore/File.h>
++#include <LibCore/System.h>
+ #include <LibCrypto/Authentication/HMAC.h>
+ #include <LibFileSystem/FileSystem.h>
+ #include <LibHTTP/Cache/Utilities.h>
+@@ -192,8 +193,18 @@ void RequestServerManager::client_disconnected(RequestServerInstance& instance,
+     if (!instance.site().has_value() || !instance.m_client_ids.is_empty())
+         return;
+ 
++    auto idle_timeout = Application::request_server_options().idle_site_request_server_timeout;
++    // Scale the default 60 s idle timeout down on lower-RAM systems so per-site RequestServer processes retire promptly.
++    if (Application::web_content_options().is_test_mode == IsTestMode::No && idle_timeout == AK::Duration::from_seconds(60)) {
++        auto physical_memory = Core::System::physical_memory_bytes();
++        if (physical_memory > 0 && physical_memory <= 8 * GiB)
++            idle_timeout = AK::Duration::from_seconds(15);
++        else if (physical_memory > 0 && physical_memory <= 16 * GiB)
++            idle_timeout = AK::Duration::from_seconds(30);
++    }
++
+     auto weak_instance = instance.make_weak_ptr();
+-    instance.m_idle_timer = Core::Timer::create_single_shot(Application::request_server_options().idle_site_request_server_timeout, [weak_instance] {
++    instance.m_idle_timer = Core::Timer::create_single_shot(idle_timeout, [weak_instance] {
+         auto instance = weak_instance.strong_ref();
+         if (instance && instance->m_client_ids.is_empty())
+             the().retire(*instance);
+diff --git a/Services/Compositor/DisplayListRasterCache.cpp b/Services/Compositor/DisplayListRasterCache.cpp
+index 14af8e2e..a1d28492 100644
+--- a/Services/Compositor/DisplayListRasterCache.cpp
++++ b/Services/Compositor/DisplayListRasterCache.cpp
+@@ -15,6 +15,7 @@
+ #include <Compositor/VideoFrameSkia.h>
+ #include <LibCompositing/DisplayList/DisplayListCommand.h>
+ #include <LibCompositing/DisplayList/DisplayListResources.h>
++#include <LibCore/System.h>
+ #include <LibGfx/Bitmap.h>
+ #include <LibGfx/ColorSpace.h>
+ #include <LibGfx/Font/Font.h>
+@@ -400,7 +401,14 @@ bool DisplayListRasterCache::reserve_vector_image_raster(DisplayListResourceId i
+     // caching this raster instead of evicting hot entries, so an oversized page degrades to direct replay for
+     // the overflow instead of thrashing the whole cache. Additions are rare by design, so the total is simply
+     // recomputed here instead of being tracked incrementally.
+-    constexpr size_t max_vector_image_raster_cache_bytes = 512 * MiB;
++    static size_t const max_vector_image_raster_cache_bytes = []() -> size_t {
++        auto physical_memory = Core::System::physical_memory_bytes();
++        if (physical_memory > 0 && physical_memory <= 8 * GiB)
++            return 128 * MiB;
++        if (physical_memory > 0 && physical_memory <= 16 * GiB)
++            return 256 * MiB;
++        return 512 * MiB;
++    }();
+     auto raster_bytes = static_cast<size_t>(rect_in_recorded_space.width()) * rect_in_recorded_space.height() * 4;
+     auto total_bytes = raster_bytes + m_vector_image_raster_cache_reserved_bytes;
+     for (auto const& it : m_vector_image_rasters)
+diff --git a/Services/Compositor/SkiaBackendContext.cpp b/Services/Compositor/SkiaBackendContext.cpp
+index 0423fb3c..1c51755a 100644
+--- a/Services/Compositor/SkiaBackendContext.cpp
++++ b/Services/Compositor/SkiaBackendContext.cpp
+@@ -10,6 +10,7 @@
+ #include <AK/RefPtr.h>
+ #include <AK/Time.h>
+ #include <Compositor/PaintingSurface.h>
++#include <LibCore/System.h>
+ #include <LibGfx/Bitmap.h>
+ #ifdef USE_DIRECTX
+ #    include <LibGfx/Direct3DContext.h>
+@@ -48,15 +49,29 @@ constexpr bool AllocatedWithSystemAllocator<skgpu::VulkanExtensions> = true;
+ 
+ namespace Gfx {
+ 
+-#if defined(AK_OS_MACOS) || defined(USE_DIRECTX) || defined(USE_VULKAN)
+-static constexpr size_t skia_resource_cache_limit = 256 * MiB;
+-#endif
++struct SkiaCacheBudget {
++    size_t resource_cache_limit;
++    size_t high_watermark;
++    size_t critical_watermark;
++};
++
++static SkiaCacheBudget skia_cache_budget()
++{
++    static SkiaCacheBudget const budget = [] {
++        auto physical_memory = Core::System::physical_memory_bytes();
++        if (physical_memory > 0 && physical_memory <= 8 * GiB)
++            return SkiaCacheBudget { 96 * MiB, 144 * MiB, 192 * MiB };
++        if (physical_memory > 0 && physical_memory <= 16 * GiB)
++            return SkiaCacheBudget { 160 * MiB, 240 * MiB, 320 * MiB };
++        return SkiaCacheBudget { 256 * MiB, 384 * MiB, 512 * MiB };
++    }();
++    return budget;
++}
++
+ static constexpr auto skia_deferred_cleanup_interval = AK::Duration::from_seconds(1);
+ static constexpr auto skia_aggressive_cleanup_interval = AK::Duration::from_seconds(5);
+ static constexpr auto skia_deferred_cleanup_resource_age = std::chrono::seconds(5);
+ static constexpr auto skia_idle_cleanup_delay = AK::Duration::from_seconds(6);
+-static constexpr auto skia_resource_cache_high_watermark = 384 * MiB;
+-static constexpr auto skia_resource_cache_critical_watermark = 512 * MiB;
+ 
+ static auto& main_thread_context()
+ {
+@@ -171,9 +186,10 @@ void SkiaBackendContext::perform_post_flush_cleanup()
+     }
+     m_idle_cleanup_timer->restart();
+ 
++    auto const budget = skia_cache_budget();
+     size_t resource_bytes = 0;
+     context->getResourceCacheUsage(nullptr, &resource_bytes);
+-    if (resource_bytes < skia_resource_cache_high_watermark)
++    if (resource_bytes < budget.high_watermark)
+         return;
+     if (s_last_aggressive_cleanup.has_value() && now - *s_last_aggressive_cleanup < skia_aggressive_cleanup_interval)
+         return;
+@@ -181,7 +197,7 @@ void SkiaBackendContext::perform_post_flush_cleanup()
+     s_last_aggressive_cleanup = now;
+     context->performDeferredCleanup(std::chrono::milliseconds(0));
+     context->getResourceCacheUsage(nullptr, &resource_bytes);
+-    if (resource_bytes >= skia_resource_cache_critical_watermark)
++    if (resource_bytes >= budget.critical_watermark)
+         context->purgeUnlockedResources(GrPurgeResourceOptions::kScratchResourcesOnly);
+ }
+ 
+@@ -285,7 +301,7 @@ RefPtr<SkiaBackendContext> SkiaBackendContext::create_direct3d_context(NonnullRe
+         return {};
+     }
+ 
+-    context->setResourceCacheLimit(skia_resource_cache_limit);
++    context->setResourceCacheLimit(skia_cache_budget().resource_cache_limit);
+     return adopt_ref(*new SkiaDirect3DBackendContext(move(context), move(direct3d_context)));
+ }
+ #endif
+@@ -368,7 +384,7 @@ RefPtr<SkiaBackendContext> SkiaBackendContext::create_vulkan_context(VulkanConte
+ 
+     sk_sp<GrDirectContext> ctx = GrDirectContexts::MakeVulkan(backend_context, options);
+     VERIFY(ctx);
+-    ctx->setResourceCacheLimit(skia_resource_cache_limit);
++    ctx->setResourceCacheLimit(skia_cache_budget().resource_cache_limit);
+     return adopt_ref(*new SkiaVulkanBackendContext(ctx, vulkan_context, move(extensions)));
+ }
+ #endif
+@@ -408,7 +424,7 @@ RefPtr<SkiaBackendContext> SkiaBackendContext::create_metal_context(NonnullRefPt
+     backend_context.fQueue.retain(metal_context->queue());
+     sk_sp<GrDirectContext> ctx = GrDirectContexts::MakeMetal(backend_context);
+     VERIFY(ctx);
+-    ctx->setResourceCacheLimit(skia_resource_cache_limit);
++    ctx->setResourceCacheLimit(skia_cache_budget().resource_cache_limit);
+     return adopt_ref(*new SkiaMetalBackendContext(move(ctx), move(metal_context)));
+ }
+ #endif

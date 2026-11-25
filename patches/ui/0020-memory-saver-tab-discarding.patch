@@ -1,0 +1,633 @@
+diff --git a/Base/res/ladybird/about-pages/i18n.js b/Base/res/ladybird/about-pages/i18n.js
+index 58f65620..b45324e9 100644
+--- a/Base/res/ladybird/about-pages/i18n.js
++++ b/Base/res/ladybird/about-pages/i18n.js
+@@ -98,6 +98,12 @@
+             "Everything in the sidebar": "Wszystko na pasku bocznym",
+             "Centered address bar": "Wyśrodkowany pasek adresu",
+             "Show subtle frame around web pages": "Pokaż subtelną ramkę wokół stron",
++            "Put inactive tabs to sleep to save memory": "Usypiaj nieaktywne karty, aby oszczędzać pamięć",
++            "Sleep inactive tabs after": "Uśpij nieaktywne karty po",
++            "10 minutes": "10 minutach",
++            "30 minutes": "30 minutach",
++            "1 hour": "1 godzinie",
++            "2 hours": "2 godzinach",
+             "Expand vertical tabs on hover when collapsed": "Rozwijaj pionowe karty po najechaniu, gdy są zwinięte",
+             "Sidebar position": "Położenie paska bocznego",
+             "Left": "Po lewej",
+@@ -392,6 +398,12 @@
+             "Everything in the sidebar": "Alles in der Seitenleiste",
+             "Centered address bar": "Zentrierte Adressleiste",
+             "Show subtle frame around web pages": "Dezenten Rahmen um Webseiten anzeigen",
++            "Put inactive tabs to sleep to save memory": "Inaktive Tabs in den Ruhezustand versetzen, um Speicher zu sparen",
++            "Sleep inactive tabs after": "Inaktive Tabs pausieren nach",
++            "10 minutes": "10 Minuten",
++            "30 minutes": "30 Minuten",
++            "1 hour": "1 Stunde",
++            "2 hours": "2 Stunden",
+             "Expand vertical tabs on hover when collapsed": "Vertikale Tabs beim Überfahren ausklappen, wenn minimiert",
+             "Sidebar position": "Position der Seitenleiste",
+             "Left": "Links",
+diff --git a/Base/res/ladybird/about-pages/settings.html b/Base/res/ladybird/about-pages/settings.html
+index 3c7b5737..efe9019d 100644
+--- a/Base/res/ladybird/about-pages/settings.html
++++ b/Base/res/ladybird/about-pages/settings.html
+@@ -1125,6 +1125,19 @@
+                             <label for="rounded-content-frame">Show subtle frame around web pages</label>
+                             <input id="rounded-content-frame" type="checkbox" switch />
+                         </div>
++                        <div class="card-group inline-container control-row">
++                            <label for="memory-saver-enabled">Put inactive tabs to sleep to save memory</label>
++                            <input id="memory-saver-enabled" type="checkbox" switch />
++                        </div>
++                        <div class="card-group inline-container control-row">
++                            <label for="memory-saver-idle-minutes">Sleep inactive tabs after</label>
++                            <select id="memory-saver-idle-minutes">
++                                <option value="10">10 minutes</option>
++                                <option value="30">30 minutes</option>
++                                <option value="60">1 hour</option>
++                                <option value="120">2 hours</option>
++                            </select>
++                        </div>
+                         <div class="card-group inline-container control-row hidden">
+                             <label for="vertical-tabs-expand-on-hover">
+                                 Expand vertical tabs on hover when collapsed
+diff --git a/Base/res/ladybird/about-pages/settings/tabs.js b/Base/res/ladybird/about-pages/settings/tabs.js
+index 8e22a27f..6ed7f5b2 100644
+--- a/Base/res/ladybird/about-pages/settings/tabs.js
++++ b/Base/res/ladybird/about-pages/settings/tabs.js
+@@ -2,6 +2,8 @@ const tabLayoutGroup = document.querySelector("#tab-layout-group");
+ const tabLayoutInputs = tabLayoutGroup.querySelectorAll('input[name="tab-layout"]');
+ const centeredAddressBar = document.querySelector("#centered-address-bar");
+ const roundedContentFrame = document.querySelector("#rounded-content-frame");
++const memorySaverEnabled = document.querySelector("#memory-saver-enabled");
++const memorySaverIdleMinutes = document.querySelector("#memory-saver-idle-minutes");
+ const verticalTabsExpandOnHover = document.querySelector("#vertical-tabs-expand-on-hover");
+ const verticalTabsPosition = document.querySelector("#vertical-tabs-position");
+ const showBookmarksBar = document.querySelector("#show-bookmarks-bar");
+@@ -47,6 +49,12 @@ const loadSettings = settings => {
+     for (const input of tabLayoutInputs) input.checked = input.value === layout;
+     centeredAddressBar.checked = TAB_SETTINGS.centeredAddressBar !== false;
+     roundedContentFrame.checked = TAB_SETTINGS.roundedContentFrame !== false;
++    memorySaverEnabled.checked = !!TAB_SETTINGS.memorySaverEnabled;
++    const idleMinutes = String(TAB_SETTINGS.memorySaverIdleMinutes || 30);
++    memorySaverIdleMinutes.value = Array.from(memorySaverIdleMinutes.options).some(option => option.value === idleMinutes)
++        ? idleMinutes
++        : "30";
++    memorySaverIdleMinutes.parentElement.classList.toggle("hidden", !memorySaverEnabled.checked);
+     verticalTabsExpandOnHover.checked = !!TAB_SETTINGS.verticalTabsExpandOnHover;
+     verticalTabsPosition.value = TAB_SETTINGS.verticalTabsPosition || "left";
+     updateVerticalTabsDependentSettings();
+@@ -77,6 +85,17 @@ roundedContentFrame.addEventListener("change", () => {
+     saveTabSettings();
+ });
+ 
++memorySaverEnabled.addEventListener("change", () => {
++    TAB_SETTINGS.memorySaverEnabled = memorySaverEnabled.checked;
++    memorySaverIdleMinutes.parentElement.classList.toggle("hidden", !memorySaverEnabled.checked);
++    saveTabSettings();
++});
++
++memorySaverIdleMinutes.addEventListener("change", () => {
++    TAB_SETTINGS.memorySaverIdleMinutes = Number(memorySaverIdleMinutes.value) || 30;
++    saveTabSettings();
++});
++
+ verticalTabsExpandOnHover.addEventListener("change", () => {
+     TAB_SETTINGS.verticalTabsExpandOnHover = verticalTabsExpandOnHover.checked;
+     saveTabSettings();
+diff --git a/Libraries/LibWebView/Settings.cpp b/Libraries/LibWebView/Settings.cpp
+index bdc6569c..07878b79 100644
+--- a/Libraries/LibWebView/Settings.cpp
++++ b/Libraries/LibWebView/Settings.cpp
+@@ -65,6 +65,8 @@ static constexpr auto EVERYTHING_IN_SIDEBAR_KEY = "everythingInSidebar"sv;
+ static constexpr auto DYNAMIC_LAYOUT_KEY = "dynamicLayout"sv;
+ static constexpr auto CENTERED_ADDRESS_BAR_KEY = "centeredAddressBar"sv;
+ static constexpr auto ROUNDED_CONTENT_FRAME_KEY = "roundedContentFrame"sv;
++static constexpr auto MEMORY_SAVER_ENABLED_KEY = "memorySaverEnabled"sv;
++static constexpr auto MEMORY_SAVER_IDLE_MINUTES_KEY = "memorySaverIdleMinutes"sv;
+ 
+ static constexpr auto BROWSING_BEHAVIOR_KEY = "browsingBehavior"sv;
+ static constexpr auto ENABLE_AUTOSCROLL_KEY = "enableAutoscroll"sv;
+@@ -914,6 +916,8 @@ JsonValue Settings::serialize_json() const
+     tab_settings.set(DYNAMIC_LAYOUT_KEY, m_tab_settings.dynamic_layout);
+     tab_settings.set(CENTERED_ADDRESS_BAR_KEY, m_tab_settings.centered_address_bar);
+     tab_settings.set(ROUNDED_CONTENT_FRAME_KEY, m_tab_settings.rounded_content_frame);
++    tab_settings.set(MEMORY_SAVER_ENABLED_KEY, m_tab_settings.memory_saver_enabled);
++    tab_settings.set(MEMORY_SAVER_IDLE_MINUTES_KEY, m_tab_settings.memory_saver_idle_minutes);
+     settings.set(TAB_SETTINGS_KEY, move(tab_settings));
+ 
+     JsonObject browsing_behavior;
+@@ -1351,6 +1355,10 @@ TabSettings Settings::parse_tab_settings(JsonValue const& settings)
+         tab_settings.centered_address_bar = *centered_address_bar;
+     if (auto rounded_content_frame = settings.as_object().get_bool(ROUNDED_CONTENT_FRAME_KEY); rounded_content_frame.has_value())
+         tab_settings.rounded_content_frame = *rounded_content_frame;
++    if (auto memory_saver_enabled = settings.as_object().get_bool(MEMORY_SAVER_ENABLED_KEY); memory_saver_enabled.has_value())
++        tab_settings.memory_saver_enabled = *memory_saver_enabled;
++    if (auto memory_saver_idle_minutes = settings.as_object().get_integer<u32>(MEMORY_SAVER_IDLE_MINUTES_KEY); memory_saver_idle_minutes.has_value())
++        tab_settings.memory_saver_idle_minutes = clamp<u32>(*memory_saver_idle_minutes, 1, 1440);
+ 
+     return tab_settings;
+ }
+diff --git a/Libraries/LibWebView/Settings.h b/Libraries/LibWebView/Settings.h
+index d8aa3324..5e552b68 100644
+--- a/Libraries/LibWebView/Settings.h
++++ b/Libraries/LibWebView/Settings.h
+@@ -115,6 +115,8 @@ struct TabSettings {
+     // buttons, and there is no toolbar row. The sidebar is then always on the left.
+     bool everything_in_sidebar { false };
+     Optional<u16> vertical_tabs_expanded_width;
++    bool memory_saver_enabled { false };
++    u32 memory_saver_idle_minutes { 30 };
+ };
+ 
+ struct SearchEngineSettings {
+diff --git a/Libraries/LibWebView/WebUI/SettingsUI.cpp b/Libraries/LibWebView/WebUI/SettingsUI.cpp
+index a92c33dd..d28dce50 100644
+--- a/Libraries/LibWebView/WebUI/SettingsUI.cpp
++++ b/Libraries/LibWebView/WebUI/SettingsUI.cpp
+@@ -472,6 +472,12 @@ void SettingsUI::set_tab_settings(JsonValue const& tab_settings)
+     // Collapsed/expanded vertical tabs and their width are not controlled by the settings UI. Don't overwrite them.
+     parsed_tab_settings.vertical_tabs_expanded = current_tab_settings.vertical_tabs_expanded;
+     parsed_tab_settings.vertical_tabs_expanded_width = current_tab_settings.vertical_tabs_expanded_width;
++    if (tab_settings.is_object()) {
++        if (!tab_settings.as_object().has("memorySaverEnabled"sv))
++            parsed_tab_settings.memory_saver_enabled = current_tab_settings.memory_saver_enabled;
++        if (!tab_settings.as_object().has("memorySaverIdleMinutes"sv))
++            parsed_tab_settings.memory_saver_idle_minutes = current_tab_settings.memory_saver_idle_minutes;
++    }
+ 
+     // NB: A sidebar layout picked on the welcome page opens expanded, so the choice shows in the window at once.
+     if (host() == "welcome"sv && parsed_tab_settings.vertical_tabs_enabled)
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index 12b9df95..3989d5bb 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -10,10 +10,12 @@
+  */
+ 
+ #include <AK/Platform.h>
++#include <AK/QuickSort.h>
+ #include <AK/StdLibExtras.h>
+ #include <AK/TypeCasts.h>
+ #include <LibCore/BrowserVersion.h>
+ #include <LibCore/EventLoop.h>
++#include <LibCore/System.h>
+ #include <LibWebView/Application.h>
+ #include <LibWebView/HistoryStore.h>
+ #include <LibWebView/URL.h>
+@@ -468,6 +470,11 @@ BrowserWindow::BrowserWindow(Vector<URL::URL> const& initial_urls, IsPopupWindow
+     main_layout->addWidget(m_devtools_banner);
+ 
+     setCentralWidget(main_widget);
++
++    m_memory_saver_timer = new QTimer(this);
++    m_memory_saver_timer->setInterval(60 * 1000);
++    QObject::connect(m_memory_saver_timer, &QTimer::timeout, this, &BrowserWindow::discard_idle_tabs);
++    m_memory_saver_timer->start();
+     setContextMenuPolicy(Qt::PreventContextMenu);
+ 
+     // The first tab was made current before the tabs were in the window, so its focus never reached the window. Without
+@@ -737,10 +744,12 @@ void BrowserWindow::open_new_tab()
+ 
+ void BrowserWindow::duplicate_tab(Tab& source_tab, Web::HTML::ActivateTab activate_tab, Optional<i32> history_step)
+ {
+-    // A tab that hasn't loaded keeps its history in the session store.
++    // A tab that hasn't loaded keeps its history either inline (if discarded) or in the session store.
+     Optional<WebView::SessionHistorySnapshot> history;
+     if (source_tab.is_loaded())
+         history = source_tab.view().session_history_snapshot();
++    else if (auto const* deferred = source_tab.deferred_history(); deferred && !deferred->entries.is_empty())
++        history = *deferred;
+     else if (auto session_tab_id = source_tab.session_tab_id(); session_tab_id.has_value())
+         history = session().load_tab_history(*session_tab_id);
+     auto fallback_url = source_tab.url();
+@@ -939,8 +948,7 @@ void BrowserWindow::initialize_tab(Tab* tab)
+ 
+     if (tab->is_loaded())
+         initialize_tab_view(tab);
+-    else
+-        QObject::connect(tab, &Tab::loaded, this, [this, tab] { initialize_tab_view(tab); }, Qt::SingleShotConnection);
++    QObject::connect(tab, &Tab::loaded, this, [this, tab] { initialize_tab_view(tab); });
+ 
+     initialize_tab_buttons(tab);
+ }
+@@ -1109,6 +1117,7 @@ void BrowserWindow::set_current_tab(Tab* tab)
+     // What a tab's toolbar showed belongs to that tab, so it goes away with it however another tab is selected.
+     if (m_current_tab) {
+         m_current_tab->close_popovers();
++        m_current_tab->mark_active();
+         m_current_tab->view().set_system_visibility_state(Web::HTML::VisibilityState::Hidden);
+     }
+ 
+@@ -1117,6 +1126,7 @@ void BrowserWindow::set_current_tab(Tab* tab)
+ 
+     if (m_current_tab) {
+         m_current_tab->clear_attention();
++        m_current_tab->mark_active();
+         m_current_tab->view().set_system_visibility_state(Web::HTML::VisibilityState::Visible);
+ 
+         if (auto session_tab_id = m_current_tab->session_tab_id(); session_tab_id.has_value())
+@@ -1127,6 +1137,56 @@ void BrowserWindow::set_current_tab(Tab* tab)
+     Application::the().report_active_view();
+ }
+ 
++void BrowserWindow::discard_idle_tabs()
++{
++    if (m_is_popup_window == IsPopupWindow::Yes)
++        return;
++
++    auto const& tab_settings = Application::settings().tab_settings();
++    if (!tab_settings.memory_saver_enabled)
++        return;
++
++    int loaded_count = 0;
++    for (int i = 0; i < m_tabs_container->count(); ++i) {
++        if (auto* tab = m_tabs_container->tab(i); tab && tab->is_loaded())
++            ++loaded_count;
++    }
++    if (loaded_count <= 1)
++        return;
++
++    auto idle_minutes = clamp<u32>(tab_settings.memory_saver_idle_minutes, 1, 1440);
++    auto physical_memory = Core::System::physical_memory_bytes();
++    if (physical_memory > 0 && physical_memory <= 8 * GiB && loaded_count >= 6)
++        idle_minutes = max<u32>(5, idle_minutes / 2);
++
++    auto threshold = AK::Duration::from_seconds(static_cast<i64>(idle_minutes) * 60);
++    struct DiscardCandidate {
++        Tab* tab { nullptr };
++        AK::Duration idle;
++    };
++    Vector<DiscardCandidate> candidates;
++    for (int i = 0; i < m_tabs_container->count(); ++i) {
++        auto* tab = m_tabs_container->tab(i);
++        if (!tab)
++            continue;
++        auto idle = tab->idle_duration();
++        if (idle < threshold || !tab->can_be_discarded_locally())
++            continue;
++        candidates.append({ tab, idle });
++    }
++    // Discard the least-recently-used tabs first, and check sync beforeunload IPC only for idle candidates.
++    quick_sort(candidates, [](auto const& a, auto const& b) { return a.idle > b.idle; });
++
++    constexpr int max_discards_per_tick = 3;
++    int discarded = 0;
++    for (auto const& candidate : candidates) {
++        if (discarded >= max_discards_per_tick)
++            break;
++        if (candidate.tab->discard())
++            ++discarded;
++    }
++}
++
+ void BrowserWindow::show_page_card(PageCardSlot slot, QString const& title, QString const& text, Vector<PageCard::Button> buttons)
+ {
+     auto& card = m_page_cards[to_underlying(slot)];
+diff --git a/UI/Qt/BrowserWindow.h b/UI/Qt/BrowserWindow.h
+index ce294e79..02c22ec9 100644
+--- a/UI/Qt/BrowserWindow.h
++++ b/UI/Qt/BrowserWindow.h
+@@ -316,6 +316,7 @@ private:
+     void initialize_window_context_menu();
+ 
+     void update_chrome_style();
++    void discard_idle_tabs();
+ 
+     int constrain_insertion_index(int index, bool pinned) const;
+     void pinned_state_changed(Tab&);
+@@ -342,6 +343,7 @@ private:
+ 
+     TabWidget* m_tabs_container { nullptr };
+     Tab* m_current_tab { nullptr };
++    QTimer* m_memory_saver_timer { nullptr };
+     Array<QPointer<PageCard>, 2> m_page_cards;
+     QPointer<WebContentView> m_page_cards_view;
+     Vector<QPointer<Tab>> m_background_tabs_from_current_tab;
+diff --git a/UI/Qt/Localization.cpp b/UI/Qt/Localization.cpp
+index b342cad6..936b9a07 100644
+--- a/UI/Qt/Localization.cpp
++++ b/UI/Qt/Localization.cpp
+@@ -97,6 +97,7 @@ QHash<QString, QString> const& polish_table()
+         // File & window actions
+         { QStringLiteral("New &Tab"), QStringLiteral("Nowa &karta") },
+         { QStringLiteral("New Tab"), QStringLiteral("Nowa karta") },
++        { QStringLiteral("Sleeping to save memory"), QStringLiteral("Uśpiona, aby oszczędzać pamięć") },
+         { QStringLiteral("New &Window"), QStringLiteral("Nowe &okno") },
+         { QStringLiteral("New Window"), QStringLiteral("Nowe okno") },
+         { QStringLiteral("New Pri&vate Window"), QStringLiteral("Nowe okno &prywatne") },
+@@ -518,6 +519,7 @@ QHash<QString, QString> const& german_table()
+         { QStringLiteral("Toggle Bookmark"), QStringLiteral("Lesezeichen umschalten") },
+         { QStringLiteral("Bookmark All Tabs\u2026"), QStringLiteral("Alle Tabs als Lesezeichen speichern\u2026") },
+         { QStringLiteral("Manage Bookmarks"), QStringLiteral("Lesezeichen verwalten") },
++        { QStringLiteral("Sleeping to save memory"), QStringLiteral("Im Ruhezustand zum Speichersparen") },
+         { QStringLiteral("New Folder\u2026"), QStringLiteral("Neuer Ordner\u2026") },
+         { QStringLiteral("Edit Folder\u2026"), QStringLiteral("Ordner bearbeiten\u2026") },
+         { QStringLiteral("Delete Folder"), QStringLiteral("Ordner löschen") },
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index 79a4d350..6246602d 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -177,6 +177,8 @@ Tab::Tab(BrowserWindow* window, Optional<u64> hub_view_id)
+     : QWidget(window)
+     , WebView::SettingsObserver(Application::settings())
+     , m_window(window)
++    , m_opened_by_script(hub_view_id.has_value())
++    , m_last_active_time(MonotonicTime::now_coarse())
+ {
+     create_tab_shell();
+     initialize(hub_view_id);
+@@ -1060,6 +1062,10 @@ void Tab::create_tab_context_menu()
+ // The window's toolbar can hold the address field while the tab goes away with the window.
+ Tab::~Tab()
+ {
++    // DevToolsPanel holds a reference to m_view and checks devtools_is_attached() in its destructor,
++    // so it must be destroyed before m_splitter deletes m_view.
++    delete m_devtools_panel;
++    m_devtools_panel = nullptr;
+     delete m_location_edit;
+ }
+ 
+@@ -1071,6 +1077,155 @@ void Tab::park_location_editing()
+     m_location_edit->park_editing_session();
+ }
+ 
++void Tab::mark_active()
++{
++    m_last_active_time = MonotonicTime::now_coarse();
++}
++
++AK::Duration Tab::idle_duration() const
++{
++    if (!m_last_active_time.has_value())
++        return AK::Duration::zero();
++    return MonotonicTime::now_coarse() - *m_last_active_time;
++}
++
++WebView::SessionHistorySnapshot const* Tab::deferred_history() const
++{
++    if (!m_deferred_tab.has_value() || !m_deferred_tab->history.has_value())
++        return nullptr;
++    return &*m_deferred_tab->history;
++}
++
++bool Tab::can_be_discarded_locally() const
++{
++    if (!is_loaded() || !m_window || m_window->current_tab() == this)
++        return false;
++    if (m_is_pinned || m_is_loading || m_opened_by_script || is_devtools_open())
++        return false;
++    if (m_already_requested_close || m_window_is_closing)
++        return false;
++    if (m_screen_display_sleep_inhibitor.has_value() || m_report_review_navigation_listener.has_value())
++        return false;
++    if (m_view->tab_indicator_visible(WebView::TabIndicator::PlayingAudio)
++        || m_view->tab_indicator_visible(WebView::TabIndicator::UsingMicrophone)
++        || m_view->tab_indicator_visible(WebView::TabIndicator::UsingLocation))
++        return false;
++    if (m_view->element_picker_session().has_value() || m_view->crash_overlay_active())
++        return false;
++    if ((m_javascript_dialog && m_javascript_dialog->is_open())
++        || m_color_picker_dialog || m_date_picker_dialog || m_file_picker_dialog || m_external_url_confirmation_dialog)
++        return false;
++
++    auto current_url = m_view->url();
++    if (!current_url.scheme().is_one_of("http"sv, "https"sv))
++        return false;
++
++    return true;
++}
++
++bool Tab::can_be_discarded() const
++{
++    if (!can_be_discarded_locally())
++        return false;
++    return !m_view->needs_beforeunload_check();
++}
++
++bool Tab::discard()
++{
++    if (!can_be_discarded())
++        return false;
++
++    auto current_url = m_view->url();
++    DeferredTab deferred {
++        .session_tab_id = m_session_tab_id.value_or(0),
++        .url = current_url,
++        .title = m_title.isEmpty() ? qstring_from_ak_string(current_url.serialize()) : m_title,
++        .favicon = m_favicon,
++        .history = m_view->session_history_snapshot(),
++    };
++
++    close_popovers();
++    m_site_settings_popover_origin.clear();
++    hide_hover_label();
++    m_permission_prompts.ignore_all();
++    m_screen_display_sleep_inhibitor.clear();
++
++    m_window->toolbar().release_location_edit(*this);
++
++    m_view->removeEventFilter(this);
++    m_view->removeEventFilter(&m_window->tab_widget());
++    QObject::disconnect(m_view, nullptr, this, nullptr);
++    QObject::disconnect(m_view, nullptr, m_window, nullptr);
++    m_view->on_close = nullptr;
++    m_view->on_web_content_crashed = nullptr;
++    m_view->on_loading_state_change = nullptr;
++    m_view->on_content_blocking_change = nullptr;
++    m_view->on_performance_stats = nullptr;
++    m_view->on_activate_tab = nullptr;
++    m_view->on_title_change = nullptr;
++    m_view->on_favicon_change = nullptr;
++    m_view->on_url_change = nullptr;
++
++    if (m_location_edit) {
++        m_location_edit->removeEventFilter(this);
++        QObject::disconnect(m_location_edit, nullptr, this, nullptr);
++        m_location_edit->setParent(nullptr);
++        delete m_location_edit;
++        m_location_edit = nullptr;
++    }
++
++    delete m_zoom_popover;
++    m_zoom_popover = nullptr;
++    delete m_site_settings_popover;
++    m_site_settings_popover = nullptr;
++    delete m_bookmark_popover;
++    m_bookmark_popover = nullptr;
++    delete m_private_session_popover;
++    m_private_session_popover = nullptr;
++    delete m_translation_menu;
++    m_translation_menu = nullptr;
++    delete m_select_dropdown;
++    m_select_dropdown = nullptr;
++    m_translate_action = nullptr;
++    delete m_content_blocking_update_timer;
++    m_content_blocking_update_timer = nullptr;
++    delete m_find_in_page;
++    m_find_in_page = nullptr;
++    delete m_element_picker;
++    m_element_picker = nullptr;
++    delete m_hover_label;
++    m_hover_label = nullptr;
++
++    // Destroy DevToolsPanel before m_splitter destroys m_view, since ~DevToolsPanel accesses m_view.
++    delete m_devtools_panel;
++    m_devtools_panel = nullptr;
++
++    m_view->prepare_for_immediate_close();
++    auto* splitter_to_delete = m_splitter;
++    if (splitter_to_delete && layout())
++        layout()->removeWidget(splitter_to_delete);
++    m_javascript_dialog = nullptr;
++    m_view = nullptr;
++    m_splitter = nullptr;
++    delete splitter_to_delete;
++
++    m_is_loading = false;
++    m_is_waiting_for_response = false;
++    m_needs_attention = false;
++    m_has_had_real_size = false;
++    m_performance_stats = {};
++    m_before_unload_completion = nullptr;
++    m_last_active_time.clear();
++    m_deferred_tab = AK::move(deferred);
++    m_was_discarded = true;
++
++    m_window->update_tab_audio_button(*this);
++    m_window->tab_widget().tab_bar()->update_microphone_indicators();
++    m_window->tab_widget().tab_bar()->update_loading_ring_animation();
++    m_window->tab_widget().tab_bar()->update();
++    return true;
++}
++
+ void Tab::ensure_loaded()
+ {
+     if (is_loaded())
+@@ -1078,15 +1233,20 @@ void Tab::ensure_loaded()
+ 
+     // Until initialize() has built the view, url() reads the deferred tab's URL, so the deferred tab stays until then.
+     auto deferred_url = m_deferred_tab->url;
++    auto deferred_history = AK::move(m_deferred_tab->history);
+     initialize({});
+     m_deferred_tab.clear();
++    m_was_discarded = false;
++    mark_active();
+ 
+     if (m_session_tab_id.has_value())
+         view().set_session_tab_id(*m_session_tab_id);
+     emit loaded();
+ 
+     Optional<WebView::SessionHistorySnapshot> history;
+-    if (m_session_tab_id.has_value())
++    if (deferred_history.has_value() && !deferred_history->entries.is_empty())
++        history = AK::move(deferred_history);
++    else if (m_session_tab_id.has_value())
+         history = m_window->session().load_tab_history(*m_session_tab_id);
+     if (!history.has_value() || view().restore_session_history_from_snapshot(history.release_value()).is_error())
+         navigate(deferred_url);
+diff --git a/UI/Qt/Tab.h b/UI/Qt/Tab.h
+index 3030060f..bf883fde 100644
+--- a/UI/Qt/Tab.h
++++ b/UI/Qt/Tab.h
+@@ -11,6 +11,7 @@
+ #include <AK/HashMap.h>
+ #include <AK/Optional.h>
+ #include <AK/String.h>
++#include <AK/Time.h>
+ #include <AK/Vector.h>
+ #include <AK/kmalloc.h>
+ #include <LibWakeLock/DisplaySleepInhibitor.h>
+@@ -64,12 +65,13 @@ public:
+     }
+ };
+ 
+-// What a restored tab shows until it's selected: It has no view, and so no WebContent process, until then.
++// What a restored or discarded tab shows until it's selected: It has no view, and so no WebContent process, until then.
+ struct DeferredTab {
+     SessionTabId session_tab_id { 0 };
+     URL::URL url;
+     QString title;
+     QIcon favicon;
++    Optional<WebView::SessionHistorySnapshot> history {};
+ };
+ 
+ class Popover;
+@@ -98,6 +100,14 @@ public:
+     }
+ 
+     bool is_loaded() const { return m_view != nullptr; }
++    bool is_discarded() const { return m_was_discarded && !is_loaded(); }
++    bool can_be_discarded_locally() const;
++    bool can_be_discarded() const;
++    // Unloads the tab's view and WebContent process while preserving its URL, title, favicon, and session history.
++    bool discard();
++    WebView::SessionHistorySnapshot const* deferred_history() const;
++    void mark_active();
++    AK::Duration idle_duration() const;
+     // Builds the tab's view and toolbar, and restores its history, if it hasn't loaded yet.
+     void ensure_loaded();
+ 
+@@ -165,8 +175,12 @@ public:
+     // BrowserWindow pins and unpins tabs, since it keeps each window's pinned tabs at the start of its strip.
+     void set_pinned(bool);
+ 
+-    bool url_is_hidden() const { return m_location_edit->url_is_hidden(); }
+-    void set_url_is_hidden(bool url_is_hidden) { m_location_edit->set_url_is_hidden(url_is_hidden); }
++    bool url_is_hidden() const { return m_location_edit && m_location_edit->url_is_hidden(); }
++    void set_url_is_hidden(bool url_is_hidden)
++    {
++        if (m_location_edit)
++            m_location_edit->set_url_is_hidden(url_is_hidden);
++    }
+     void set_corner_radius(int);
+ 
+ public:
+@@ -291,6 +305,9 @@ private:
+     bool m_preserve_close_retry_state_on_dialog_dismissal { false };
+     bool m_window_is_closing { false };
+     bool m_is_pinned { false };
++    bool m_opened_by_script { false };
++    bool m_was_discarded { false };
++    Optional<MonotonicTime> m_last_active_time;
+     int m_corner_radius { 0 };
+ 
+     Optional<SessionTabId> m_session_tab_id;
+diff --git a/UI/Qt/TabBar.cpp b/UI/Qt/TabBar.cpp
+index 1c390ebd..7c074315 100644
+--- a/UI/Qt/TabBar.cpp
++++ b/UI/Qt/TabBar.cpp
+@@ -1088,11 +1088,13 @@ Optional<ToolTipContent> TabBar::tooltip_at(QPoint position) const
+     auto* tab = m_tab_widget ? m_tab_widget->tab(hovered_tab) : nullptr;
+ 
+     // A title too long for its tab shows in full, with the site, in a tooltip.
+-    if (tab && m_tabs_with_cut_titles.contains(tab)) {
++    if (tab && (m_tabs_with_cut_titles.contains(tab) || tab->is_discarded())) {
+         auto text = tabText(hovered_tab);
+         // A URL without a host (about:blank, e.g.) has no site to show.
+         if (auto url = tab->url(); url.host().has_value() && !url.serialized_host().is_empty())
+             text = qformatted("{}\n{}", ak_string_from_qstring(text), url.serialized_host());
++        if (tab->is_discarded())
++            text = qformatted("{}\n{}", ak_string_from_qstring(text), ak_string_from_qstring(tr_ui("Sleeping to save memory")));
+         return ToolTipContent { .text = AK::move(text), .rect = visual_tab_rect(hovered_tab) };
+     }
+ 
+@@ -3456,13 +3458,11 @@ void TabWidget::insert_tab(int index, Tab* widget, QString const& label)
+         if (auto* current = as_if<Tab>(m_stacked_widget->currentWidget()); current && current != widget && current->is_loaded())
+             size_page_like(*widget, *current);
+         widget->view().installEventFilter(this);
+-    } else {
+-        // A tab that hasn't loaded gets the filter for its view once it has one.
+-        auto did_load = [this, widget] {
+-            widget->view().installEventFilter(this);
+-        };
+-        connect(widget, &Tab::loaded, this, did_load, Qt::SingleShotConnection);
+     }
++    // Re-install the filter whenever a deferred or discarded tab loads its view.
++    connect(widget, &Tab::loaded, this, [this, widget] {
++        widget->view().installEventFilter(this);
++    });
+ 
+     m_stacked_widget->insertWidget(index, widget);
+     if (widget)

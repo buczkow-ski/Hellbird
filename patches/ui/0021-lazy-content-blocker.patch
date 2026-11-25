@@ -1,0 +1,364 @@
+diff --git a/Libraries/LibWeb/Loader/ContentBlocker.cpp b/Libraries/LibWeb/Loader/ContentBlocker.cpp
+index 5b923c8c..722c5fa7 100644
+--- a/Libraries/LibWeb/Loader/ContentBlocker.cpp
++++ b/Libraries/LibWeb/Loader/ContentBlocker.cpp
+@@ -151,10 +151,89 @@ static bool rules_contain_cosmetic_rules(ReadonlyBytes rules_bytes)
+ void ContentBlocker::wait_for_pending_build_locked() const
+ {
+     m_build_condition.wait_while([&] {
+-        return m_build_in_progress.load(AK::MemoryOrder::memory_order_acquire);
++        return m_state.load(AK::MemoryOrder::memory_order_acquire) == State::Building;
+     });
+ }
+ 
++void ContentBlocker::start_pending_build_locked() const
++{
++    if (!m_pending_rules_buffer.is_valid() || m_pending_rules_buffer.size() == 0)
++        return;
++
++    auto rules_buffer = move(m_pending_rules_buffer);
++    auto event_loop = move(m_pending_origin_event_loop);
++    auto generation = m_build_generation;
++    m_state.store(State::Building, AK::MemoryOrder::memory_order_release);
++
++    Threading::ThreadPool::the().submit([this, rules_buffer = move(rules_buffer), generation, event_loop = move(event_loop)]() mutable {
++        GC::forbid_heap_access_on_this_thread();
++
++        auto rules_bytes = rules_buffer.bytes();
++        auto* engine = ContentBlocking::FFI::rust_content_blocker_create(rules_bytes);
++        auto has_cosmetic_rules = engine ? rules_contain_cosmetic_rules(rules_bytes) : false;
++
++        bool cosmetic_rules_changed = false;
++        {
++            MutexLocker locker(m_mutex);
++            if (m_build_generation != generation) {
++                ContentBlocking::FFI::rust_content_blocker_free(engine);
++                return;
++            }
++
++            auto had_cosmetic_rules = m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_relaxed);
++            if (engine) {
++                ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(engine));
++                m_has_cosmetic_rules.store(has_cosmetic_rules, AK::MemoryOrder::memory_order_release);
++                m_state.store(State::Ready, AK::MemoryOrder::memory_order_release);
++                cosmetic_rules_changed = had_cosmetic_rules || has_cosmetic_rules;
++            } else {
++                dbgln("Failed to create content blocker");
++                bool has_existing_engine = m_engine.load(AK::MemoryOrder::memory_order_relaxed) != nullptr;
++                m_has_cosmetic_rules.store(has_existing_engine && had_cosmetic_rules, AK::MemoryOrder::memory_order_release);
++                m_state.store(has_existing_engine ? State::Ready : State::Empty, AK::MemoryOrder::memory_order_release);
++            }
++            m_build_condition.broadcast();
++        }
++
++        if (!event_loop)
++            return;
++
++        auto origin_event_loop = event_loop->take();
++        if (!origin_event_loop.is_alive())
++            return;
++
++        origin_event_loop->deferred_invoke([this, generation, cosmetic_rules_changed]() {
++            if (m_main_thread_on_complete_generation != generation)
++                return;
++            auto on_complete = move(m_main_thread_on_complete);
++            if (on_complete)
++                on_complete(cosmetic_rules_changed);
++        });
++    });
++}
++
++void ContentBlocker::ensure_engine_built_locked() const
++{
++    m_has_seen_filterable_url.store(true, AK::MemoryOrder::memory_order_release);
++    if (m_state.load(AK::MemoryOrder::memory_order_relaxed) == State::Pending)
++        start_pending_build_locked();
++    wait_for_pending_build_locked();
++}
++
++void ContentBlocker::warm_up_for_url(URL::URL const& url) const
++{
++    if (is_internal_unfiltered_scheme(url.scheme()))
++        return;
++
++    m_has_seen_filterable_url.store(true, AK::MemoryOrder::memory_order_release);
++    if (m_state.load(AK::MemoryOrder::memory_order_acquire) != State::Pending)
++        return;
++
++    MutexLocker locker(m_mutex);
++    if (m_state.load(AK::MemoryOrder::memory_order_relaxed) == State::Pending)
++        start_pending_build_locked();
++}
++
+ ErrorOr<void> ContentBlocker::set_patterns(ReadonlySpan<String> patterns)
+ {
+     StringBuilder builder;
+@@ -178,9 +257,11 @@ ErrorOr<void> ContentBlocker::set_rules_from_bytes(ReadonlyBytes rules_bytes)
+     if (rules_bytes.is_empty()) {
+         MutexLocker locker(m_mutex);
+         ++m_build_generation;
+-        m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
++        m_pending_rules_buffer = {};
++        m_pending_origin_event_loop = nullptr;
+         ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(nullptr));
+         m_has_cosmetic_rules.store(false, AK::MemoryOrder::memory_order_release);
++        m_state.store(State::Empty, AK::MemoryOrder::memory_order_release);
+         m_build_condition.broadcast();
+         return {};
+     }
+@@ -193,9 +274,11 @@ ErrorOr<void> ContentBlocker::set_rules_from_bytes(ReadonlyBytes rules_bytes)
+ 
+     MutexLocker locker(m_mutex);
+     ++m_build_generation;
+-    m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
++    m_pending_rules_buffer = {};
++    m_pending_origin_event_loop = nullptr;
+     ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(engine));
+     m_has_cosmetic_rules.store(has_cosmetic_rules, AK::MemoryOrder::memory_order_release);
++    m_state.store(State::Ready, AK::MemoryOrder::memory_order_release);
+     m_build_condition.broadcast();
+     return {};
+ }
+@@ -204,69 +287,49 @@ void ContentBlocker::set_rules_from_buffer_async(Core::AnonymousBuffer rules_buf
+ {
+     if (!rules_buffer.is_valid() || rules_buffer.size() == 0) {
+         bool had_cosmetic_rules = false;
++        u64 generation = 0;
+         {
+             MutexLocker locker(m_mutex);
+-            ++m_build_generation;
++            generation = ++m_build_generation;
++            m_pending_rules_buffer = {};
++            m_pending_origin_event_loop = nullptr;
+             had_cosmetic_rules = m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_relaxed);
+-            m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
+             ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(nullptr));
+             m_has_cosmetic_rules.store(false, AK::MemoryOrder::memory_order_release);
++            m_state.store(State::Empty, AK::MemoryOrder::memory_order_release);
+             m_build_condition.broadcast();
+         }
++        m_main_thread_on_complete = nullptr;
++        m_main_thread_on_complete_generation = generation;
+         if (on_complete)
+             on_complete(had_cosmetic_rules);
+         return;
+     }
+ 
+-    u64 generation = 0;
+-    {
+-        MutexLocker locker(m_mutex);
+-        generation = ++m_build_generation;
+-        m_build_in_progress.store(true, AK::MemoryOrder::memory_order_release);
+-    }
++    auto const pending_has_cosmetic_rules = rules_contain_cosmetic_rules(rules_buffer.bytes());
+ 
+     RefPtr<Core::WeakEventLoopReference> event_loop;
+     if (Core::EventLoop::is_running())
+         event_loop = Core::EventLoop::current_weak();
+ 
+-    Threading::ThreadPool::the().submit([this, rules_buffer = move(rules_buffer), generation, event_loop = move(event_loop), on_complete = move(on_complete)]() mutable {
+-        GC::forbid_heap_access_on_this_thread();
+-
+-        auto rules_bytes = rules_buffer.bytes();
+-        auto* engine = ContentBlocking::FFI::rust_content_blocker_create(rules_bytes);
+-        auto has_cosmetic_rules = engine ? rules_contain_cosmetic_rules(rules_bytes) : false;
+-
+-        bool cosmetic_rules_changed = false;
+-        {
+-            MutexLocker locker(m_mutex);
+-            if (m_build_generation != generation) {
+-                ContentBlocking::FFI::rust_content_blocker_free(engine);
+-                return;
+-            }
+-
+-            auto had_cosmetic_rules = m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_relaxed);
+-            if (engine) {
+-                ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(engine));
+-                m_has_cosmetic_rules.store(has_cosmetic_rules, AK::MemoryOrder::memory_order_release);
+-                cosmetic_rules_changed = had_cosmetic_rules || has_cosmetic_rules;
+-            } else {
+-                dbgln("Failed to create content blocker");
+-            }
+-            m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
+-            m_build_condition.broadcast();
+-        }
+-
+-        if (!on_complete || !event_loop)
+-            return;
+-
+-        auto origin_event_loop = event_loop->take();
+-        if (!origin_event_loop.is_alive())
+-            return;
+-
+-        origin_event_loop->deferred_invoke([on_complete = move(on_complete), cosmetic_rules_changed]() mutable {
+-            on_complete(cosmetic_rules_changed);
+-        });
+-    });
++    u64 generation = 0;
++    {
++        MutexLocker locker(m_mutex);
++        generation = ++m_build_generation;
++        m_pending_rules_buffer = move(rules_buffer);
++        m_pending_origin_event_loop = move(event_loop);
++        auto had_cosmetic_rules = m_engine.load(AK::MemoryOrder::memory_order_relaxed) != nullptr
++            && m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_relaxed);
++        m_has_cosmetic_rules.store(pending_has_cosmetic_rules || had_cosmetic_rules, AK::MemoryOrder::memory_order_release);
++        m_state.store(State::Pending, AK::MemoryOrder::memory_order_release);
++
++        m_main_thread_on_complete = move(on_complete);
++        m_main_thread_on_complete_generation = generation;
++
++        // Defer engine compilation in spare and WebUI-only processes until they first navigate to or query a filterable URL.
++        if (m_has_seen_filterable_url.load(AK::MemoryOrder::memory_order_acquire) || m_engine.load(AK::MemoryOrder::memory_order_relaxed) != nullptr)
++            start_pending_build_locked();
++    }
+ }
+ 
+ bool ContentBlocker::is_filtered(URL::URL const& url) const
+@@ -284,6 +347,7 @@ bool ContentBlocker::is_filtered(URL::URL const& url, URL::URL const& source_url
+     if (is_internal_unfiltered_scheme(url.scheme()))
+         return false;
+ 
++    m_has_seen_filterable_url.store(true, AK::MemoryOrder::memory_order_release);
+     if (!has_rules())
+         return false;
+ 
+@@ -293,7 +357,7 @@ bool ContentBlocker::is_filtered(URL::URL const& url, URL::URL const& source_url
+     auto request_type = resource_type_to_adblock_request_type(resource_type);
+ 
+     MutexLocker locker(m_mutex);
+-    wait_for_pending_build_locked();
++    ensure_engine_built_locked();
+     auto* engine = m_engine.load(AK::MemoryOrder::memory_order_acquire);
+     if (!engine)
+         return false;
+@@ -314,6 +378,7 @@ Utf16String ContentBlocker::cosmetic_style_sheet_for_url(URL::URL const& url, Re
+     if (is_internal_unfiltered_scheme(url.scheme()))
+         return {};
+ 
++    m_has_seen_filterable_url.store(true, AK::MemoryOrder::memory_order_release);
+     if (!has_cosmetic_rules())
+         return {};
+ 
+@@ -330,7 +395,7 @@ Utf16String ContentBlocker::cosmetic_style_sheet_for_url(URL::URL const& url, Re
+     auto ids_bytes = ids_string.value().bytes_as_string_view();
+ 
+     MutexLocker locker(m_mutex);
+-    wait_for_pending_build_locked();
++    ensure_engine_built_locked();
+     auto* engine = m_engine.load(AK::MemoryOrder::memory_order_acquire);
+     if (!engine || !m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_acquire))
+         return {};
+@@ -346,6 +411,7 @@ bool ContentBlocker::has_generic_cosmetic_selectors_for_url(URL::URL const& url,
+     if (is_internal_unfiltered_scheme(url.scheme()))
+         return false;
+ 
++    m_has_seen_filterable_url.store(true, AK::MemoryOrder::memory_order_release);
+     if (!has_cosmetic_rules())
+         return false;
+ 
+@@ -362,7 +428,7 @@ bool ContentBlocker::has_generic_cosmetic_selectors_for_url(URL::URL const& url,
+     auto ids_bytes = ids_string.value().bytes_as_string_view();
+ 
+     MutexLocker locker(m_mutex);
+-    wait_for_pending_build_locked();
++    ensure_engine_built_locked();
+     auto* engine = m_engine.load(AK::MemoryOrder::memory_order_acquire);
+     if (!engine || !m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_acquire))
+         return false;
+diff --git a/Libraries/LibWeb/Loader/ContentBlocker.h b/Libraries/LibWeb/Loader/ContentBlocker.h
+index a2f6266c..56f2d0e8 100644
+--- a/Libraries/LibWeb/Loader/ContentBlocker.h
++++ b/Libraries/LibWeb/Loader/ContentBlocker.h
+@@ -12,11 +12,13 @@
+ #include <AK/Function.h>
+ #include <AK/Noncopyable.h>
+ #include <AK/OwnPtr.h>
++#include <AK/RefPtr.h>
+ #include <AK/String.h>
+ #include <AK/Utf16FlyString.h>
+ #include <AK/Utf16String.h>
+ #include <AK/kmalloc.h>
+ #include <LibCore/AnonymousBuffer.h>
++#include <LibCore/EventLoop.h>
+ #include <LibURL/URL.h>
+ #include <LibWeb/Export.h>
+ #include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+@@ -49,15 +51,15 @@ public:
+ 
+     bool has_rules() const
+     {
+-        return m_engine.load(AK::MemoryOrder::memory_order_acquire) != nullptr
+-            || m_build_in_progress.load(AK::MemoryOrder::memory_order_acquire);
++        return m_state.load(AK::MemoryOrder::memory_order_acquire) != State::Empty;
+     }
+     bool has_cosmetic_rules() const
+     {
+-        return m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_acquire)
+-            || m_build_in_progress.load(AK::MemoryOrder::memory_order_acquire);
++        return m_state.load(AK::MemoryOrder::memory_order_acquire) != State::Empty
++            && m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_acquire);
+     }
+ 
++    void warm_up_for_url(URL::URL const&) const;
+     bool is_filtered(URL::URL const&) const;
+     bool is_filtered(URL::URL const&, URL::URL const& source_url, ResourceType) const;
+     bool is_filtered(URL::URL const&, URL::URL const& source_url, Optional<Fetch::Infrastructure::Request::Destination> const&, Optional<Fetch::Infrastructure::Request::InitiatorType> const&, Fetch::Infrastructure::Request::Mode) const;
+@@ -76,16 +78,31 @@ private:
+     ContentBlocker();
+     ~ContentBlocker();
+ 
++    enum class State : u8 {
++        Empty,
++        Pending,
++        Building,
++        Ready,
++    };
++
++    void start_pending_build_locked() const;
++    void ensure_engine_built_locked() const;
+     void wait_for_pending_build_locked() const;
+ 
+-    // Agents on any thread ask, and the engine is not one that several threads can use at once. The atomics let a check
+-    // for no rules at all skip the lock.
++    // Agents on any thread ask, and the engine is not one that several threads can use at once. A single atomic state
++    // enum lets lock-free checks avoid any transition gap between pending, building, and ready.
+     mutable Mutex m_mutex;
+     mutable ConditionVariable m_build_condition { m_mutex };
+-    Atomic<bool> m_has_cosmetic_rules { false };
+-    Atomic<bool> m_build_in_progress { false };
+-    Atomic<void*> m_engine { nullptr };
+-    u64 m_build_generation { 0 };
++    mutable Atomic<State> m_state { State::Empty };
++    mutable Atomic<bool> m_has_cosmetic_rules { false };
++    mutable Atomic<bool> m_has_seen_filterable_url { false };
++    mutable Atomic<void*> m_engine { nullptr };
++    mutable u64 m_build_generation { 0 };
++    mutable Core::AnonymousBuffer m_pending_rules_buffer;
++    mutable RefPtr<Core::WeakEventLoopReference> m_pending_origin_event_loop;
++    // Touched strictly on the main event loop thread so captures (such as non-atomic WeakPtrs) never cross threads.
++    mutable Function<void(bool has_cosmetic_rules_change)> m_main_thread_on_complete;
++    u64 m_main_thread_on_complete_generation { 0 };
+ };
+ 
+ // A rule on its own, which tells what it would block if it were one of the content blocker's.
+diff --git a/Services/WebContent/ConnectionFromClient.cpp b/Services/WebContent/ConnectionFromClient.cpp
+index d90e031d..7212fe37 100644
+--- a/Services/WebContent/ConnectionFromClient.cpp
++++ b/Services/WebContent/ConnectionFromClient.cpp
+@@ -627,6 +627,7 @@ void ConnectionFromClient::update_screen_rects(Web::PageId page_id, Vector<Web::
+ 
+ void ConnectionFromClient::populate_navigation(Web::PageId page_id, Web::HTML::NavigationPopulationRequest request, Web::HTML::NavigationPopulationResult result)
+ {
++    Web::ContentBlocker::the().warm_up_for_url(result.redirected_url.value_or(request.history_entry.url));
+     auto page = this->page(page_id);
+     if (!page.has_value()) {
+         async_did_fail_navigation_population(page_id, request.navigable_id, move(request.navigation_id));
+@@ -714,6 +715,7 @@ void ConnectionFromClient::continue_history_navigation_population(Web::PageId pa
+ 
+ void ConnectionFromClient::populate_history_entry_document(Web::PageId page_id, Web::HTML::CrossProcessId operation_id, Web::HTML::SessionHistoryEntryDescriptor target_entry, Optional<Web::Bindings::NavigationType> navigation_type, bool ongoing_navigation_is_traversal, Web::HTML::HistoryNavigationPopulation population)
+ {
++    Web::ContentBlocker::the().warm_up_for_url(target_entry.url);
+     auto navigable_id = population.request.navigable_id;
+     auto page = this->page(page_id);
+     if (!page.has_value()) {
