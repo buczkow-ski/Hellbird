@@ -1,0 +1,91 @@
+diff --git a/UI/Qt/ChromeStyle.cpp b/UI/Qt/ChromeStyle.cpp
+index 0fc3ddf845..c096dafef6 100644
+--- a/UI/Qt/ChromeStyle.cpp
++++ b/UI/Qt/ChromeStyle.cpp
+@@ -557,8 +557,10 @@ QLineEdit#LadybirdLocationEdit:focus {{
+     border-color: {3};
+ }}
+ 
+-QLineEdit#LadybirdLocationEdit[autocompleteOpen="true"] {{
+-    border-color: {15};
++QLineEdit#LadybirdLocationEdit[autocompleteOpen="true"],
++QLineEdit#LadybirdLocationEdit[autocompleteOpen="true"]:focus {{
++    background: transparent;
++    border-color: transparent;
+ }}
+ 
+ QLineEdit#LadybirdLocationEdit:disabled {{
+@@ -2331,6 +2333,12 @@ public:
+ 
+ void install_application_style()
+ {
++#if defined(Q_OS_WIN)
++    auto font = QApplication::font();
++    font.setHintingPreference(QFont::PreferFullHinting);
++    font.setStyleStrategy(static_cast<QFont::StyleStrategy>(font.styleStrategy() | QFont::PreferAntialias));
++    QApplication::setFont(font);
++#endif
+     QApplication::setStyle(new ApplicationStyle);
+ }
+ 
+diff --git a/UI/Qt/WindowToolbar.cpp b/UI/Qt/WindowToolbar.cpp
+index ab784e6f4c..4d05489af9 100644
+--- a/UI/Qt/WindowToolbar.cpp
++++ b/UI/Qt/WindowToolbar.cpp
+@@ -908,11 +908,13 @@ public:
+         if (m_expanded == expanded)
+             return;
+         m_expanded = expanded;
++#if !defined(LADYBIRD_QT_USE_RHI_WIDGET)
+         // The surface casts the shadow of a popover, and the field's focus ring goes around all of it.
+         if (expanded)
+             m_shadow = &cast_floating_shadow(*this, ChromeStyle::LOCATION_EDIT_CORNER_RADIUS, FloatingShadowTone::FollowTheme, FloatingShadowKind::FocusedField);
+         else
+             delete m_shadow.data();
++#endif
+ #if defined(LADYBIRD_QT_USE_RHI_WIDGET)
+         // When collapsing, keep the mask until setGeometry() shrinks the panel so it does not flash square corners.
+         if (expanded)
+@@ -997,11 +999,10 @@ private:
+         if (m_suggestions_area)
+             painter.fillRect(QRect(FIELD_PANEL_DIVIDER_INSET, m_suggestions_area->y(), width() - (2 * FIELD_PANEL_DIVIDER_INSET), 1), Theme::panel().separator_soft);
+ #if defined(LADYBIRD_QT_USE_RHI_WIDGET)
+-        // Continue the focus edge below the address field where the expanded panel overlaps the native web view and
+-        // the alien FloatingShadow cannot paint above it.
++        // Draw a single continuous focus border around the entire expanded panel inside its rounded native window mask.
++        // An alien FloatingShadow would be clipped at the top of the native web content view and double up alongside
++        // this border over the toolbar and tab strip.
+         painter.save();
+-        if (m_suggestions_area)
+-            painter.setClipRect(QRect(0, m_suggestions_area->y(), width(), height() - m_suggestions_area->y()));
+         painter.setRenderHint(QPainter::Antialiasing);
+         painter.setBrush(Qt::NoBrush);
+         painter.setPen(QPen(Theme::focus_edge(), 1));
+@@ -1013,7 +1014,9 @@ private:
+ 
+     bool m_expanded { false };
+     bool m_in_sidebar { false };
++#if !defined(LADYBIRD_QT_USE_RHI_WIDGET)
+     QPointer<QWidget> m_shadow;
++#endif
+     QPointer<QWidget> m_suggestions_area;
+ };
+ 
+diff --git a/UI/Qt/main.cpp b/UI/Qt/main.cpp
+index 60df509824..ae56e9ec21 100644
+--- a/UI/Qt/main.cpp
++++ b/UI/Qt/main.cpp
+@@ -54,6 +54,13 @@ ErrorOr<int> ladybird_main(Main::Arguments arguments)
+     }
+ #endif
+ 
++#if defined(AK_OS_WINDOWS)
++    // Qt 6's default DirectWrite font engine on Windows causes uneven glyph spacing (e.g. colliding "sp"/"st"/"Ust")
++    // on raster UI widgets. Use GDI font metrics for Qt chrome unless explicitly overridden.
++    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
++        qputenv("QT_QPA_PLATFORM", "windows:fontengine=gdi");
++#endif
++
+     // The web content view is presented in a native child window. Without this attribute, a widget
+     // gaining a native window would force every other widget in the browser window to become native
+     // as well.
