@@ -598,7 +598,7 @@ index 1760b34c49..8a3c8cad58 100644
 +#    define HELLBIRD_VERSION "0.1.0-alpha.1"
 +#endif
 +#if !defined(HELLBIRD_ENGINE_VERSION)
-+#    define HELLBIRD_ENGINE_VERSION "2026.47.7"
++#    define HELLBIRD_ENGINE_VERSION "2026.47.8"
 +#endif
 +
  namespace Ladybird {

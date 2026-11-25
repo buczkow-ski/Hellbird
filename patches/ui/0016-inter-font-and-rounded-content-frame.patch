@@ -51,7 +51,15 @@ diff --git a/UI/Qt/Application.cpp b/UI/Qt/Application.cpp
 index f0a266cd5b..984ab9bbb3 100644
 --- a/UI/Qt/Application.cpp
 +++ b/UI/Qt/Application.cpp
-@@ -1391,6 +1391,8 @@ Optional<String> Application::system_font_family() const
+@@ -57,6 +57,7 @@
+ #include <UI/Qt/BookmarkDialog.h>
+ #include <UI/Qt/Bookmarks.h>
+ #include <UI/Qt/ChromeLayout.h>
++#include <UI/Qt/ChromeStyle.h>
+ #include <UI/Qt/DownloadsPage.h>
+ #include <UI/Qt/EventLoopImplementationQt.h>
+ #include <UI/Qt/ExternalURLHandler.h>
+@@ -1391,6 +1392,8 @@ Optional<String> Application::system_font_family() const
  #if defined(AK_OS_MACOS)
      return {};
  #else

@@ -1,0 +1,171 @@
+diff --git a/Libraries/LibWebView/NotificationBackendMacOS.mm b/Libraries/LibWebView/NotificationBackendMacOS.mm
+index f31e66bcbb..1bcc51d84e 100644
+--- a/Libraries/LibWebView/NotificationBackendMacOS.mm
++++ b/Libraries/LibWebView/NotificationBackendMacOS.mm
+@@ -60,7 +60,7 @@ NotificationBackendMacOS::NotificationBackendMacOS()
+     m_launch_token = MUST(String::from_utf8(StringView { [[[NSUUID UUID] UUIDString] UTF8String], strlen([[[NSUUID UUID] UUIDString] UTF8String]) }));
+ 
+     // The center reports a user's dismissal only for a category that asks for it.
+-    auto* category = [UNNotificationCategory categoryWithIdentifier:@"org.ladybird.Ladybird.web-notification"
++    auto* category = [UNNotificationCategory categoryWithIdentifier:@"org.hellbird.Hellbird.web-notification"
+                                                             actions:@[]
+                                                   intentIdentifiers:@[]
+                                                             options:UNNotificationCategoryOptionCustomDismissAction];
+@@ -131,7 +131,7 @@ void NotificationBackendMacOS::show(PlatformNotification const& notification)
+         content.subtitle = ns_string(notification.attribution);
+         content.body = ns_string(platform_text(notification.data.body));
+         content.threadIdentifier = ns_string(notification.attribution);
+-        content.categoryIdentifier = @"org.ladybird.Ladybird.web-notification";
++        content.categoryIdentifier = @"org.hellbird.Hellbird.web-notification";
+         if (notification.data.silent != true)
+             content.sound = [UNNotificationSound defaultSound];
+ 
+diff --git a/UI/CMakeLists.txt b/UI/CMakeLists.txt
+index ce87fa08e9..0d5273e92d 100644
+--- a/UI/CMakeLists.txt
++++ b/UI/CMakeLists.txt
+@@ -7,15 +7,9 @@ if (APPLE)
+         set(LADYBIRD_ENTITLEMENTS_FILE "${LADYBIRD_SOURCE_DIR}/Meta/Entitlements.plist")
+     endif()
+ 
+-    # Icon Composer icons need the asset catalog compiler from Xcode 26 or later.
+-    execute_process(COMMAND xcrun actool --version OUTPUT_VARIABLE actool_version ERROR_QUIET)
+-    if (actool_version MATCHES "<key>short-bundle-version</key>[ \t\r\n]*<string>([0-9]+)" AND CMAKE_MATCH_1 GREATER_EQUAL 26)
+-        set(LADYBIRD_COMPILE_ICON_COMPOSER_ICON TRUE)
+-        set(LADYBIRD_ICON_COMPOSER_PLIST_ENTRY "<key>CFBundleIconName</key>\n        <string>AppIcon</string>")
+-    else()
+-        set(LADYBIRD_ICON_COMPOSER_PLIST_ENTRY "")
+-        message(STATUS "actool is older than Xcode 26, so the app bundle only gets the flat icon")
+-    endif()
++    # Use Hellbird's flat app_icon.icns rather than Ladybird's Icon Composer asset catalog.
++    set(LADYBIRD_COMPILE_ICON_COMPOSER_ICON FALSE)
++    set(LADYBIRD_ICON_COMPOSER_PLIST_ENTRY "")
+ 
+     set(LADYBIRD_SPARKLE_PLIST_ENTRIES "")
+ endif()
+@@ -45,18 +39,15 @@ endif()
+ 
+ function(create_ladybird_bundle target_name)
+     set(_hellbird_output_name "Hellbird")
+-    if (APPLE)
+-        set(_hellbird_output_name "Ladybird")
+-    endif()
+     set_target_properties(${target_name} PROPERTIES
+         OUTPUT_NAME "${_hellbird_output_name}"
+-        MACOSX_BUNDLE_GUI_IDENTIFIER org.ladybird.Ladybird
++        MACOSX_BUNDLE_GUI_IDENTIFIER org.hellbird.Hellbird
+         MACOSX_BUNDLE_BUNDLE_VERSION ${LADYBIRD_BROWSER_VERSION}
+         MACOSX_BUNDLE_SHORT_VERSION_STRING ${LADYBIRD_BROWSER_VERSION}
+         MACOSX_BUNDLE_INFO_PLIST "${LADYBIRD_SOURCE_DIR}/UI/Info.plist"
+         MACOSX_BUNDLE TRUE
+         WIN32_EXECUTABLE TRUE
+-        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.ladybird.Ladybird
++        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.hellbird.Hellbird
+     )
+ 
+     if (WIN32)
+diff --git a/UI/Info.plist b/UI/Info.plist
+index adae3f83c5..607ce9a532 100644
+--- a/UI/Info.plist
++++ b/UI/Info.plist
+@@ -11,17 +11,17 @@
+         <key>CFBundlePackageType</key>
+         <string>APPL</string>
+         <key>CFBundleGetInfoString</key>
+-        <string>Ladybird</string>
++        <string>Hellbird</string>
+         <key>CFBundleName</key>
+-        <string>Ladybird</string>
++        <string>Hellbird</string>
+         <key>CFBundleDisplayName</key>
+-        <string>Ladybird</string>
++        <string>Hellbird</string>
+         <key>CFBundleSignature</key>
+         <string></string>
+         <key>CFBundleExecutable</key>
+-        <string>Ladybird</string>
++        <string>Hellbird</string>
+         <key>CFBundleIdentifier</key>
+-        <string>org.ladybird.Ladybird</string>
++        <string>org.hellbird.Hellbird</string>
+         <key>CFBundleShortVersionString</key>
+         <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+         <key>CFBundleVersion</key>
+@@ -33,11 +33,11 @@
+         <key>NSHighResolutionCapable</key>
+         <string>True</string>
+         <key>NSLocationUsageDescription</key>
+-        <string>Ladybird needs your location to provide it to websites that request geolocation access.</string>
++        <string>Hellbird needs your location to provide it to websites that request geolocation access.</string>
+         <key>NSLocationWhenInUseUsageDescription</key>
+-        <string>Ladybird needs your location to provide it to websites that request geolocation access.</string>
++        <string>Hellbird needs your location to provide it to websites that request geolocation access.</string>
+         <key>NSMicrophoneUsageDescription</key>
+-        <string>Ladybird needs access to your microphone to provide audio capture to websites that request it.</string>
++        <string>Hellbird needs access to your microphone to provide audio capture to websites that request it.</string>
+         <key>CFBundleDocumentTypes</key>
+         <array>
+             <dict>
+diff --git a/UI/Qt/ExternalURLHandler.mm b/UI/Qt/ExternalURLHandler.mm
+index ec993c5895..f7aac951aa 100644
+--- a/UI/Qt/ExternalURLHandler.mm
++++ b/UI/Qt/ExternalURLHandler.mm
+@@ -84,7 +84,7 @@ void resolve_external_url_handler(URL::URL const& url, WebView::ExternalURLHandl
+ 
+     bool is_ladybird = false;
+     if (auto* bundle_identifier = [[NSBundle bundleWithURL:application_url] bundleIdentifier]; bundle_identifier != nil) {
+-        is_ladybird = [bundle_identifier caseInsensitiveCompare:@"org.ladybird.Ladybird"] == NSOrderedSame;
++        is_ladybird = [bundle_identifier caseInsensitiveCompare:@"org.hellbird.Hellbird"] == NSOrderedSame;
+     }
+ 
+     if (!is_ladybird) {
+diff --git a/UI/cmake/InstallRules.cmake b/UI/cmake/InstallRules.cmake
+index e3ff68273c..86ba1e271b 100644
+--- a/UI/cmake/InstallRules.cmake
++++ b/UI/cmake/InstallRules.cmake
+@@ -5,7 +5,7 @@ include(GNUInstallDirs)
+ set(package Ladybird)
+ 
+ if (APPLE)
+-    set(ladybird_executable_install_dir bundle/Ladybird.app/Contents/MacOS)
++    set(ladybird_executable_install_dir bundle/Hellbird.app/Contents/MacOS)
+     set(ladybird_helper_install_dir ${ladybird_executable_install_dir})
+ else()
+     set(ladybird_executable_install_dir ${CMAKE_INSTALL_BINDIR})
+@@ -72,12 +72,12 @@ list(REMOVE_ITEM all_required_lagom_libraries ladybird)
+ 
+ if (APPLE)
+     # Fixup the app bundle and copy:
+-    #   - Shared libraries from lib/ to Ladybird.app/Contents/lib
++    #   - Shared libraries from lib/ to Hellbird.app/Contents/lib
+     # Static libraries are linked into the executables, so nothing loads them from the bundle.
+     # CMake strips every executable it installs except the one inside an application bundle, so strip that one here.
+     # Remove the symlink we created at build time for the lib directory first
+     install(CODE "
+-    set(contents_dir \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bundle/Ladybird.app/Contents)
++    set(contents_dir \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bundle/Hellbird.app/Contents)
+     file(REMOVE \${contents_dir}/lib)
+     set(lib_dir \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR})
+     if (IS_ABSOLUTE ${CMAKE_INSTALL_LIBDIR})
+@@ -97,7 +97,7 @@ if (APPLE)
+             COMPONENT ladybird_Runtime)
+ 
+     install(FILES "${LADYBIRD_SOURCE_DIR}/Meta/Entitlements.plist" DESTINATION entitlements
+-        RENAME Ladybird.release.entitlements COMPONENT ladybird_Runtime)
++        RENAME Hellbird.release.entitlements COMPONENT ladybird_Runtime)
+ endif()
+ 
+ install(TARGETS ${all_required_lagom_libraries}
+@@ -118,9 +118,9 @@ if (vcpkg_runtime_dependencies)
+     set(vcpkg_library_install_dir ${CMAKE_INSTALL_LIBDIR})
+     set(qt_plugins "")
+     if (APPLE)
+-        set(vcpkg_library_install_dir bundle/Ladybird.app/Contents/lib)
+-        set(qt_plugins_dir bundle/Ladybird.app/Contents/PlugIns)
+-        set(qt_conf_dir bundle/Ladybird.app/Contents/Resources)
++        set(vcpkg_library_install_dir bundle/Hellbird.app/Contents/lib)
++        set(qt_plugins_dir bundle/Hellbird.app/Contents/PlugIns)
++        set(qt_conf_dir bundle/Hellbird.app/Contents/Resources)
+         set(qt_conf_plugins PlugIns)
+ 
+         get_target_property(qt_core_type Qt6::Core TYPE)

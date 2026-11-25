@@ -1,4 +1,4 @@
-name: Release Hellbird (Windows + Linux)
+name: Release Hellbird (Windows + Linux + macOS)
 
 on:
   push:
@@ -44,9 +44,16 @@ jobs:
     with:
       preset: Distribution
 
+  macos:
+    needs: [validate-version]
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      preset: Distribution
+      package_format: all
+
   publish:
     name: Create GitHub Release
-    needs: [validate-version, linux, windows]
+    needs: [validate-version, linux, windows, macos]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     permissions:

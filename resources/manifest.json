@@ -25,6 +25,46 @@
       "dest": "UI/Icons/hellbird.rc"
     },
     {
+      "src": "branding/macos/app_icon.iconset/icon_16x16.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_16x16.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_16x16@2x.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_16x16@2x.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_32x32.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_32x32.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_32x32@2x.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_32x32@2x.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_128x128.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_128x128.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_128x128@2x.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_128x128@2x.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_256x256.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_256x256.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_256x256@2x.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_256x256@2x.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_512x512.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_512x512.png"
+    },
+    {
+      "src": "branding/macos/app_icon.iconset/icon_512x512@2x.png",
+      "dest": "UI/Icons/macos/app_icon.iconset/icon_512x512@2x.png"
+    },
+    {
       "src": "fonts/Inter-Regular.ttf",
       "dest": "Base/res/ladybird/fonts/Inter-Regular.ttf"
     },

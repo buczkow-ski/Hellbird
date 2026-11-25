@@ -1,0 +1,336 @@
+diff --git a/Libraries/LibWebView/Autocomplete.cpp b/Libraries/LibWebView/Autocomplete.cpp
+index 6fe38fd200..db3e02ed71 100644
+--- a/Libraries/LibWebView/Autocomplete.cpp
++++ b/Libraries/LibWebView/Autocomplete.cpp
+@@ -251,10 +251,11 @@ Optional<AutocompleteSuggestion> make_verbatim_autocomplete_suggestion(StringVie
+ static AutocompleteSuggestion make_bang_suggestion(StringView query, BangMatch const& match)
+ {
+     auto query_string = MUST(String::from_utf8(query));
++    auto title_string = MUST(String::from_utf8(query.trim_whitespace()));
+     return {
+         .source = AutocompleteSuggestionSource::Search,
+         .text = query_string,
+-        .title = query_string,
++        .title = move(title_string),
+         .subtitle = bang_description(match),
+         .favicon_png = {},
+         .highlight_input = {},
+@@ -266,6 +267,45 @@ static AutocompleteSuggestion make_bang_suggestion(StringView query, BangMatch c
+     };
+ }
+ 
++Vector<AutocompleteSuggestion> bang_autocomplete_suggestions(StringView input, size_t max_results, Optional<StringView> skip_trigger)
++{
++    if (max_results == 0)
++        return {};
++
++    auto suggested_bangs = suggest_bangs(input, skip_trigger.has_value() ? max_results + 1 : max_results);
++    if (suggested_bangs.is_empty())
++        return {};
++
++    Vector<AutocompleteSuggestion> suggestions;
++    suggestions.ensure_capacity(min(max_results, suggested_bangs.size()));
++
++    i32 relevance = 1900;
++    for (auto const* bang : suggested_bangs) {
++        if (skip_trigger.has_value() && bang->trigger.equals_ignoring_ascii_case(*skip_trigger))
++            continue;
++        if (suggestions.size() >= max_results)
++            break;
++
++        auto trigger_text = MUST(String::formatted("!{}", bang->trigger));
++        auto fill_text = MUST(String::formatted("!{} ", bang->trigger));
++        suggestions.unchecked_append({
++            .source = AutocompleteSuggestionSource::Search,
++            .text = move(fill_text),
++            .title = move(trigger_text),
++            .subtitle = MUST(String::from_utf8(bang->name)),
++            .favicon_png = {},
++            .highlight_input = {},
++            .relevance = relevance--,
++            .is_verbatim = false,
++            .can_be_automatically_selected = false,
++            .can_be_inline_completed = false,
++            .fills_omnibox_only = true,
++        });
++    }
++
++    return suggestions;
++}
++
+ // A search for the text as typed, offered below the address that the text is, which is where Return goes. It is not
+ // the row for the text as typed, so it never becomes the default, even when it would outrank the address.
+ static Optional<AutocompleteSuggestion> search_below_address_for_query_suggestion(Optional<SearchEngine> const& search_engine, StringView query)
+@@ -624,6 +664,7 @@ void Autocomplete::deliver_current_result()
+ 
+     auto additional_suggestions = web_ui_autocomplete_suggestions(m_trimmed_query);
+     Optional<AutocompleteSuggestion> verbatim_suggestion;
++    bool showing_bang_commands = false;
+     if (additional_suggestions.is_empty() && m_external_url_handler_query_complete) {
+         if (m_external_url_has_handler) {
+             verbatim_suggestion = make_literal_url_suggestion(m_query);
+@@ -638,15 +679,32 @@ void Autocomplete::deliver_current_result()
+             if (search_engine_settings.bangs && m_classified_query.classification == UserInputClassification::Search)
+                 bang_match = match_bang(m_query);
+ 
++            if (search_engine_settings.bangs && m_classified_query.classification == UserInputClassification::Search) {
++                Optional<StringView> skip_trigger;
++                size_t bang_limit = m_max_suggestions;
++                if (bang_match.has_value()) {
++                    skip_trigger = bang_match->bang->trigger;
++                    bang_limit = m_max_suggestions > 0 ? m_max_suggestions - 1 : 0;
++                }
++                auto bang_suggestions = bang_autocomplete_suggestions(m_query, bang_limit, skip_trigger);
++                if (!bang_suggestions.is_empty()) {
++                    showing_bang_commands = true;
++                    additional_suggestions.extend(move(bang_suggestions));
++                }
++            }
++
+             if (bang_match.has_value())
+                 verbatim_suggestion = make_bang_suggestion(m_query, *bang_match);
+-            else
++            else if (!showing_bang_commands)
+                 verbatim_suggestion = make_verbatim_autocomplete_suggestion(m_query, m_classified_query, search_engine);
+-            if (auto search_suggestion = make_search_suggestion_for_address_like_text(m_query, m_classified_query, search_engine); search_suggestion.has_value())
+-                additional_suggestions.append(search_suggestion.release_value());
++            if (!showing_bang_commands) {
++                if (auto search_suggestion = make_search_suggestion_for_address_like_text(m_query, m_classified_query, search_engine); search_suggestion.has_value())
++                    additional_suggestions.append(search_suggestion.release_value());
++            }
+         }
+     }
+-    additional_suggestions.extend(m_local_suggestions);
++    if (!showing_bang_commands)
++        additional_suggestions.extend(m_local_suggestions);
+     auto remote_suggestions = make_remote_autocomplete_suggestions(m_remote_suggestions.span(), m_visited_host_families,
+         m_local_query_complete ? LocalSuggestionsAreComplete::Yes : LocalSuggestionsAreComplete::No);
+     auto waits_for_remote_query = !m_remote_query_complete && !m_stopped_waiting_for_remote_query;
+diff --git a/Libraries/LibWebView/Autocomplete.h b/Libraries/LibWebView/Autocomplete.h
+index d5ae0a701d..4bee66184c 100644
+--- a/Libraries/LibWebView/Autocomplete.h
++++ b/Libraries/LibWebView/Autocomplete.h
+@@ -79,6 +79,8 @@ struct WEBVIEW_API AutocompleteSuggestion {
+     bool is_verbatim { false };
+     bool can_be_automatically_selected { true };
+     bool can_be_inline_completed { false };
++    // When true, activating the row fills its text into the omnibox for further typing instead of navigating.
++    bool fills_omnibox_only { false };
+ };
+ 
+ struct AutocompleteMatchRange {
+@@ -121,6 +123,7 @@ WEBVIEW_API Optional<AutocompleteSuggestion> make_verbatim_autocomplete_suggesti
+ // For typed text without a scheme that is taken for a web address, such as "setup.py", a search for it as well.
+ WEBVIEW_API Optional<AutocompleteSuggestion> make_search_suggestion_for_address_like_text(StringView query, ClassifiedUserInput const&, Optional<SearchEngine> const&);
+ WEBVIEW_API Vector<AutocompleteSuggestion> web_ui_autocomplete_suggestions(StringView input);
++WEBVIEW_API Vector<AutocompleteSuggestion> bang_autocomplete_suggestions(StringView input, size_t max_results, Optional<StringView> skip_trigger = {});
+ WEBVIEW_API size_t autocomplete_preliminary_limit(size_t max_suggestions);
+ WEBVIEW_API bool autocomplete_url_can_complete(StringView query, StringView suggestion);
+ 
+diff --git a/Libraries/LibWebView/AutocompleteMuxer.cpp b/Libraries/LibWebView/AutocompleteMuxer.cpp
+index 6f68aca8e1..a2b79a310b 100644
+--- a/Libraries/LibWebView/AutocompleteMuxer.cpp
++++ b/Libraries/LibWebView/AutocompleteMuxer.cpp
+@@ -324,6 +324,7 @@ static void merge_suggestion(AutocompleteSuggestion& existing, SuggestionDestina
+     existing.is_verbatim = is_verbatim;
+     existing.can_be_automatically_selected = can_be_automatically_selected;
+     existing.can_be_inline_completed = can_be_inline_completed;
++    existing.fills_omnibox_only = existing.fills_omnibox_only && suggestion.fills_omnibox_only;
+     existing.relevance = relevance;
+     existing.match_relevance = match_relevance;
+     existing.history_relevance = history_relevance;
+@@ -384,6 +385,7 @@ static bool is_remote_suggestion(AutocompleteSuggestion const& suggestion, Strin
+     // NB: A past search is the user's own, so it does not take the place of what the search engine suggests.
+     return suggestion.source == AutocompleteSuggestionSource::Search
+         && !suggestion.is_verbatim
++        && !suggestion.fills_omnibox_only
+         && !is_past_search(suggestion)
+         && normalize_omnibox_destination(suggestion.text, OmniboxDestinationKind::Search) != normalized_query;
+ }
+@@ -526,7 +528,7 @@ Vector<AutocompleteSuggestion> mux_autocomplete_suggestions(
+ 
+     auto query_contains_path = query_contains_url_suffix(query);
+     auto query_length = Utf8View { query }.length();
+-    auto is_short_host_query = !query_contains_path && query_length <= 2;
++    auto is_short_host_query = !query_contains_path && !query.starts_with('!') && query_length <= 2;
+ 
+     if (!query_contains_path)
+         coalesce_equivalent_origin_presentations(candidates);
+diff --git a/Libraries/LibWebView/Bang.cpp b/Libraries/LibWebView/Bang.cpp
+index efbbb3eb49..3fb6418e80 100644
+--- a/Libraries/LibWebView/Bang.cpp
++++ b/Libraries/LibWebView/Bang.cpp
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <AK/Array.h>
++#include <AK/QuickSort.h>
+ #include <LibURL/Parser.h>
+ #include <LibWebView/Bang.h>
+ 
+@@ -155,6 +156,118 @@ bool input_contains_bang_prefix(StringView input)
+     return input.substring_view(*last_separator + 1).starts_with('!');
+ }
+ 
++static bool contains_ignoring_ascii_case(StringView haystack, StringView needle)
++{
++    if (needle.is_empty() || needle.length() > haystack.length())
++        return false;
++    for (size_t offset = 0; offset + needle.length() <= haystack.length(); ++offset) {
++        if (haystack.substring_view(offset, needle.length()).equals_ignoring_ascii_case(needle))
++            return true;
++    }
++    return false;
++}
++
++Vector<Bang const*> suggest_bangs(StringView input, size_t max_results)
++{
++    if (max_results == 0)
++        return {};
++
++    // Trim only leading whitespace: a trailing space (e.g. "!gh ") means the user already selected
++    // the bang and is typing a query, rather than browsing available bang commands.
++    auto leading_trimmed = input.trim_whitespace(TrimMode::Left);
++    if (!leading_trimmed.starts_with('!') || leading_trimmed.find_any_of(ASCII_WHITESPACE).has_value())
++        return {};
++
++    auto prefix = leading_trimmed.substring_view(1);
++    Vector<Bang const*> results;
++    results.ensure_capacity(min(max_results, s_builtin_bangs.size()));
++
++    if (prefix.is_empty()) {
++        static constexpr auto s_featured_triggers = to_array<StringView>({
++            "g"sv,
++            "ddg"sv,
++            "yt"sv,
++            "w"sv,
++            "gh"sv,
++            "r"sv,
++            "maps"sv,
++            "tr"sv,
++            "so"sv,
++            "mdn"sv,
++            "deepl"sv,
++            "a"sv,
++        });
++        for (auto trigger : s_featured_triggers) {
++            if (results.size() >= max_results)
++                break;
++            for (auto const& bang : s_builtin_bangs) {
++                if (bang.trigger == trigger) {
++                    results.unchecked_append(&bang);
++                    break;
++                }
++            }
++        }
++        return results;
++    }
++
++    struct Candidate {
++        Bang const* bang { nullptr };
++        u8 tier { 0 };
++        size_t index { 0 };
++    };
++
++    Vector<Candidate> candidates;
++    for (size_t index = 0; index < s_builtin_bangs.size(); ++index) {
++        auto const& bang = s_builtin_bangs[index];
++        Optional<u8> tier;
++        if (bang.trigger.equals_ignoring_ascii_case(prefix))
++            tier = 0;
++        else if (bang.trigger.starts_with(prefix, CaseSensitivity::CaseInsensitive))
++            tier = 1;
++        else if (bang.name.starts_with(prefix, CaseSensitivity::CaseInsensitive))
++            tier = 2;
++        else if (contains_ignoring_ascii_case(bang.name, prefix))
++            tier = 3;
++
++        if (!tier.has_value())
++            continue;
++
++        // Keep one entry per site (e.g. !g vs !google), preferring the stronger match tier and then shorter trigger.
++        Optional<size_t> existing_index;
++        for (size_t i = 0; i < candidates.size(); ++i) {
++            if (candidates[i].bang->name == bang.name) {
++                existing_index = i;
++                break;
++            }
++        }
++        if (existing_index.has_value()) {
++            auto& existing = candidates[*existing_index];
++            if (*tier < existing.tier
++                || (*tier == existing.tier && bang.trigger.length() < existing.bang->trigger.length())) {
++                existing = { &bang, *tier, index };
++            }
++            continue;
++        }
++
++        candidates.append({ &bang, *tier, index });
++    }
++
++    quick_sort(candidates, [](Candidate const& left, Candidate const& right) {
++        if (left.tier != right.tier)
++            return left.tier < right.tier;
++        if (left.bang->trigger.length() != right.bang->trigger.length())
++            return left.bang->trigger.length() < right.bang->trigger.length();
++        return left.index < right.index;
++    });
++
++    for (auto const& candidate : candidates) {
++        if (results.size() >= max_results)
++            break;
++        results.unchecked_append(candidate.bang);
++    }
++    return results;
++}
++
+ Optional<URL::URL> url_for_bang(BangMatch const& match)
+ {
+     if (match.query.is_empty())
+diff --git a/Libraries/LibWebView/Bang.h b/Libraries/LibWebView/Bang.h
+index d362fb5a32..d6cf7ad2c2 100644
+--- a/Libraries/LibWebView/Bang.h
++++ b/Libraries/LibWebView/Bang.h
+@@ -11,6 +11,7 @@
+ #include <AK/String.h>
+ #include <AK/StringView.h>
+ #include <AK/Types.h>
++#include <AK/Vector.h>
+ #include <LibURL/URL.h>
+ #include <LibWebView/Export.h>
+ #include <LibWebView/Forward.h>
+@@ -48,6 +49,9 @@ WEBVIEW_API Optional<BangMatch> match_bang(StringView input);
+ // True when the first or last token begins with '!', including partially typed suffix bangs.
+ WEBVIEW_API bool input_contains_bang_prefix(StringView input);
+ 
++// Suggests built-in bangs when the user is typing a leading "!" or partial "!prefix" with no whitespace yet.
++WEBVIEW_API Vector<Bang const*> suggest_bangs(StringView input, size_t max_results);
++
+ WEBVIEW_API Optional<URL::URL> url_for_bang(BangMatch const&);
+ 
+ // Where the match goes, such as "Search GitHub".
+diff --git a/Libraries/LibWebView/Omnibox.cpp b/Libraries/LibWebView/Omnibox.cpp
+index a363f2b2d5..ce467ac992 100644
+--- a/Libraries/LibWebView/Omnibox.cpp
++++ b/Libraries/LibWebView/Omnibox.cpp
+@@ -724,6 +724,20 @@ void Omnibox::display_suggestion(size_t suggestion_index)
+ 
+ void Omnibox::commit_suggestion(AutocompleteSuggestion suggestion, bool should_record_engagement, bool was_explicit)
+ {
++    if (suggestion.fills_omnibox_only) {
++        m_provenance = TextProvenance::UserText;
++        m_completion_suggestion = {};
++        m_retained_engagement_input = {};
++        m_completion_suppression = Empty {};
++        m_user_rejected_completion = false;
++        m_cursor_at_end = true;
++        m_query = suggestion.text;
++        set_display(suggestion.text, {});
++        set_selection({});
++        start_query();
++        return;
++    }
++
+     auto destination_kind = suggestion.source == AutocompleteSuggestionSource::Search
+         ? OmniboxDestinationKind::Search
+         : OmniboxDestinationKind::URL;

@@ -8,11 +8,12 @@
 
 ## Overview
 
-**Hellbird** combines the design ethos and ergonomic workflow of [Helium](https://github.com/imputnet/helium) with the from-scratch [Ladybird](https://github.com/ladybirdbrowser/ladybird) browser engine (pinned to Ladybird Alpha **`2026.47.7`**).
+**Hellbird** combines the design ethos and ergonomic workflow of [Helium](https://github.com/imputnet/helium) with the from-scratch [Ladybird](https://github.com/ladybirdbrowser/ladybird) browser engine (pinned to Ladybird Alpha **`2026.47.8`**).
 
 First-class build targets:
 - **Linux (x86_64)** — portable `.tar.xz` archive and `.deb` package
 - **Windows (x86_64)** — portable `.zip` archive (native ClangCL + Qt 6)
+- **macOS (arm64)** — `.dmg` disk image and `.tar.xz` archive (`Hellbird.app`)
 
 ### Key Principles
 - **Privacy & Consent First**: Global Privacy Control (`Sec-GPC: 1`) enabled by default, zero unsolicited upstream update checks or telemetry/report pings, privacy-respecting content blocking and search defaults.
@@ -54,7 +55,7 @@ python3 tools/hellbird.py check --upstream /path/to/ladybird
 python3 tools/hellbird.py prepare
 ```
 
-This checks out Ladybird `2026.47.7` (`4e9acf4c02ca`), applies all patch stages in order, and installs Hellbird's branding and resource overlays into `upstream/ladybird/`.
+This checks out Ladybird `2026.47.8` (`0be55a57cc07`), applies all patch stages in order, and installs Hellbird's branding and resource overlays into `upstream/ladybird/`.
 
 ### 3. Build & Package
 
@@ -82,15 +83,26 @@ python tools\hellbird.py package --preset Distribution --out dist
 
 Output portable archive: `dist/hellbird-0.1.0-alpha.1-Windows-x86_64.zip`
 
+#### macOS (arm64 — Xcode 26 + Homebrew dependencies)
+```bash
+python3 tools/hellbird.py prepare
+python3 tools/hellbird.py bootstrap-vcpkg --preset Distribution
+python3 tools/hellbird.py build --preset Distribution --no-tests
+python3 tools/hellbird.py package --preset Distribution --format all --out dist
+```
+
+Output release assets: `dist/hellbird-<version>-macOS-arm64.dmg` and `dist/hellbird-<version>-macOS-arm64.tar.xz`
+
 ---
 
 ## Automated Builds (GitHub Actions)
 
-Four workflows are pre-configured in `.github/workflows/`:
-1. **`verify.yml`** — Runs on every push/PR: Python unit tests, resource checks, and full patch stack apply + reverse-apply verification against Ladybird `2026.47.7`.
+Five workflows are pre-configured in `.github/workflows/`:
+1. **`verify.yml`** — Runs on every push/PR: Python unit tests, resource checks, and full patch stack apply + reverse-apply verification against Ladybird `2026.47.8`.
 2. **`build-linux.yml`** — Builds Hellbird on Linux x64 using Ladybird's CI container and uploads `.tar.xz` and `.deb` artifacts.
 3. **`build-windows.yml`** — Builds Hellbird natively on `windows-2025` with `clang-cl` + vcpkg + Qt 6 and uploads the portable `.zip` archive.
-4. **`release.yml`** — Runs both Linux and Windows builds on `v*` git tags and publishes a GitHub prerelease with SHA-256 checksums.
+4. **`build-macos.yml`** — Builds Hellbird natively on `macos-26` (Apple Silicon `arm64`) with Xcode + vcpkg + Qt 6 and uploads the `.dmg` disk image and `.tar.xz` archive.
+5. **`release.yml`** — Runs Linux, Windows, and macOS builds on `v*` git tags and publishes a GitHub prerelease with SHA-256 checksums.
 
 ---
 

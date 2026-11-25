@@ -1,0 +1,4350 @@
+diff --git a/UI/Qt/Actions.h b/UI/Qt/Actions.h
+index 37ac3343e4..dd83cfa542 100644
+--- a/UI/Qt/Actions.h
++++ b/UI/Qt/Actions.h
+@@ -78,6 +78,8 @@ enum class ActionID {
+     OpenAboutPage,
+     OpenTaskManager,
+     OpenSettingsPage,
++    OpenDevTools,
++    OpenDevToolsConsole,
+     ToggleDevTools,
+     ViewSource,
+     InspectElement,
+diff --git a/UI/Qt/ApplicationActions.cpp b/UI/Qt/ApplicationActions.cpp
+index e701cb8fc2..86e0d43dd2 100644
+--- a/UI/Qt/ApplicationActions.cpp
++++ b/UI/Qt/ApplicationActions.cpp
+@@ -229,12 +229,25 @@ ApplicationActions::ApplicationActions(PageOptions const& options)
+ 
+     m_inspect_menu = Menu::create("Inspect"sv);
+ 
++    m_open_devtools_action = Action::create("Developer Tools"sv, ActionID::OpenDevTools, [] {
++        if (auto* tab = Application::the().active_tab())
++            tab->toggle_devtools(DevToolsPanel::PanelTab::Elements);
++    });
++    m_inspect_menu->add_action(*m_open_devtools_action);
++
++    m_open_devtools_console_action = Action::create("JavaScript Console"sv, ActionID::OpenDevToolsConsole, [] {
++        if (auto* tab = Application::the().active_tab())
++            tab->open_devtools(DevToolsPanel::PanelTab::Console);
++    });
++    m_inspect_menu->add_action(*m_open_devtools_console_action);
++    m_inspect_menu->add_separator();
++
+     m_view_source_action = Action::create("View Page Source"sv, ActionID::ViewSource, on_active_view([](RemoteView& view) {
+         HubConnection::the().async_view_get_source(view.view_id());
+     }));
+     m_inspect_menu->add_action(*m_view_source_action);
+ 
+-    m_toggle_devtools_action = Action::create("Enable DevTools"sv, ActionID::ToggleDevTools, [] {
++    m_toggle_devtools_action = Action::create("Enable Remote Debugging (Firefox)"sv, ActionID::ToggleDevTools, [] {
+         HubConnection::the().async_toggle_devtools_enabled();
+     });
+     m_inspect_menu->add_action(*m_toggle_devtools_action);
+@@ -371,7 +384,7 @@ void ApplicationActions::update_force_dark_action()
+ 
+ void ApplicationActions::devtools_enabled_changed(bool enabled)
+ {
+-    m_toggle_devtools_action->set_text(enabled ? "Disable DevTools"sv : "Enable DevTools"sv);
++    m_toggle_devtools_action->set_text(enabled ? "Disable Remote Debugging (Firefox)"sv : "Enable Remote Debugging (Firefox)"sv);
+ }
+ 
+ void ApplicationActions::update_website_color_scheme_actions()
+diff --git a/UI/Qt/ApplicationActions.h b/UI/Qt/ApplicationActions.h
+index dd1afedef9..9627e107e1 100644
+--- a/UI/Qt/ApplicationActions.h
++++ b/UI/Qt/ApplicationActions.h
+@@ -100,6 +100,8 @@ private:
+     RefPtr<Action> m_force_dark_action;
+     RefPtr<Action> m_toggle_vertical_tabs_expanded_action;
+     RefPtr<Action> m_toggle_menu_bar_action;
++    RefPtr<Action> m_open_devtools_action;
++    RefPtr<Action> m_open_devtools_console_action;
+     RefPtr<Action> m_view_source_action;
+     RefPtr<Action> m_toggle_devtools_action;
+     RefPtr<Action> m_report_website_issue_action;
+diff --git a/UI/Qt/BrowserWindow.cpp b/UI/Qt/BrowserWindow.cpp
+index d8c582f48e..12b9df9560 100644
+--- a/UI/Qt/BrowserWindow.cpp
++++ b/UI/Qt/BrowserWindow.cpp
+@@ -142,6 +142,7 @@ void FullscreenMode::exit(ExitInitiatedBy initiated_by, Tab const* requesting_ta
+         if (initiated_by == ExitInitiatedBy::UI)
+             tab->view().exit_fullscreen();
+         tab->view().set_is_fullscreen(Web::ViewportIsFullscreen::No);
++        tab->set_devtools_hidden_for_fullscreen(false);
+     }
+     emit on_exit_fullscreen();
+ }
+@@ -176,6 +177,7 @@ void FullscreenMode::entered_fullscreen()
+     if (!m_fullscreen_tab || m_window->tab_index(m_fullscreen_tab) == -1)
+         return;
+     m_fullscreen_tab->view().set_is_fullscreen(Web::ViewportIsFullscreen::Yes);
++    m_fullscreen_tab->set_devtools_hidden_for_fullscreen(true);
+     m_exit_button->set_host(m_fullscreen_tab->url().host().has_value() ? qstring_from_ak_string(m_fullscreen_tab->url().serialized_host()) : QString {});
+     // Let button float in place for 3 times the time it takes to animate it in place.
+     m_debounce.start(*this, button_animation_time() * 3);
+@@ -519,6 +521,12 @@ void BrowserWindow::initialize_application_actions()
+     addAction(application.zoom_out_action());
+     addAction(application.reset_zoom_action());
+     addAction(application.quit_action());
++    if (auto* inspect_menu = application.inspect_menu()) {
++        for (auto* action : inspect_menu->actions()) {
++            if (!action->isSeparator())
++                addAction(action);
++        }
++    }
+ 
+     for (int i = 0; i < 8; ++i) {
+         new QShortcut(QKeySequence(Qt::CTRL | static_cast<Qt::Key>(Qt::Key_1 + i)), this, [this, i]() {
+diff --git a/UI/Qt/CMakeLists.txt b/UI/Qt/CMakeLists.txt
+index cc747a4936..e6d854a334 100644
+--- a/UI/Qt/CMakeLists.txt
++++ b/UI/Qt/CMakeLists.txt
+@@ -32,6 +32,7 @@ add_library(ladybird_impl STATIC
+     CrashReportReviewWidget.cpp
+     CustomFilters.cpp
+     DevToolsBanner.cpp
++    DevToolsPanel.cpp
+     ElementPickerWidget.cpp
+     ElidedLabel.cpp
+     EventLoopImplementationQt.cpp
+diff --git a/UI/Qt/DevToolsPanel.cpp b/UI/Qt/DevToolsPanel.cpp
+new file mode 100644
+index 0000000000..641fc55f89
+--- /dev/null
++++ b/UI/Qt/DevToolsPanel.cpp
+@@ -0,0 +1,3348 @@
++/*
++ * Copyright (c) 2026, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/HashTable.h>
++#include <AK/JsonArray.h>
++#include <AK/QuickSort.h>
++#include <AK/StringBuilder.h>
++#include <UI/Qt/ChromeStyle.h>
++#include <UI/Qt/DevToolsPanel.h>
++#include <UI/Qt/Icon.h>
++#include <UI/Qt/Localization.h>
++#include <UI/Qt/StringUtils.h>
++#include <UI/Qt/Theme.h>
++#include <UI/Qt/WebContentView.h>
++
++#include <QApplication>
++#include <QCheckBox>
++#include <QClipboard>
++#include <QComboBox>
++#include <QDateTime>
++#include <QDialog>
++#include <QDialogButtonBox>
++#include <QEvent>
++#include <QFontDatabase>
++#include <QFontMetrics>
++#include <QFormLayout>
++#include <QGuiApplication>
++#include <QHBoxLayout>
++#include <QHeaderView>
++#include <QKeyEvent>
++#include <QLabel>
++#include <QLineEdit>
++#include <QMenu>
++#include <QPainter>
++#include <QPixmap>
++#include <QPlainTextEdit>
++#include <QPushButton>
++#include <QRegularExpression>
++#include <QSplitter>
++#include <QStackedWidget>
++#include <QStyledItemDelegate>
++#include <QTabWidget>
++#include <QTimer>
++#include <QToolButton>
++#include <QTreeWidget>
++#include <QUrl>
++#include <QVBoxLayout>
++
++namespace Ladybird {
++
++namespace {
++
++enum DomItemRole {
++    NodeIdRole = Qt::UserRole + 1,
++    NodePseudoRole,
++    NodeTypeRole,
++    NodeTagRole,
++    NodeIdAttrRole,
++    NodeClassAttrRole,
++    NodeAttrsListRole,
++    NodeInlineTextRole,
++    NodeIsLeafRole,
++    NodeFullSearchTextRole,
++};
++
++enum ConsoleItemRole {
++    ConsoleObjectIdRole = Qt::UserRole + 1,
++    ConsoleObjectLoadedRole,
++    ConsoleCopyTextRole,
++};
++
++enum NetworkItemRole {
++    NetworkRequestIdRole = Qt::UserRole + 1,
++};
++
++enum SourceItemRole {
++    SourceKeyRole = Qt::UserRole + 1,
++    SourceUrlRole,
++    SourceContentTypeRole,
++};
++
++enum StorageItemRole {
++    StorageCookieIndexRole = Qt::UserRole + 1,
++    StorageKeyNameRole,
++};
++
++static QFont devtools_mono_font(int pixel_size = 12)
++{
++    auto font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
++    font.setPixelSize(pixel_size);
++    return font;
++}
++
++static QString format_bytes_human(u64 bytes)
++{
++    if (bytes < 1024)
++        return QStringLiteral("%1 B").arg(bytes);
++    if (bytes < 1024 * 1024)
++        return QStringLiteral("%1 KB").arg(static_cast<double>(bytes) / 1024.0, 0, 'f', 1);
++    return QStringLiteral("%1 MB").arg(static_cast<double>(bytes) / (1024.0 * 1024.0), 0, 'f', 2);
++}
++
++static QString format_duration_ms(double ms)
++{
++    if (ms < 0.0)
++        return QStringLiteral("…");
++    if (ms < 1000.0)
++        return QStringLiteral("%1 ms").arg(qRound(ms));
++    return QStringLiteral("%1 s").arg(ms / 1000.0, 0, 'f', 2);
++}
++
++static QIcon create_picker_icon(QColor const& color)
++{
++    QPixmap pixmap(32, 32);
++    pixmap.setDevicePixelRatio(2.0);
++    pixmap.fill(Qt::transparent);
++    QPainter p(&pixmap);
++    p.setRenderHint(QPainter::Antialiasing, true);
++    QPen dashed_pen(color, 1.3, Qt::DashLine);
++    p.setPen(dashed_pen);
++    p.setBrush(Qt::NoBrush);
++    p.drawRoundedRect(QRectF(2.0, 2.0, 10.5, 10.5), 1.5, 1.5);
++
++    p.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
++    p.setBrush(color);
++    QPolygonF arrow;
++    arrow << QPointF(8.5, 8.5) << QPointF(14.5, 10.5) << QPointF(11.8, 11.8) << QPointF(10.5, 14.5);
++    p.drawPolygon(arrow);
++    return QIcon(pixmap);
++}
++
++static QIcon create_dock_icon(DevToolsPanel::DockSide current_side, QColor const& color)
++{
++    QPixmap pixmap(32, 32);
++    pixmap.setDevicePixelRatio(2.0);
++    pixmap.fill(Qt::transparent);
++    QPainter p(&pixmap);
++    p.setRenderHint(QPainter::Antialiasing, true);
++    p.setPen(QPen(color, 1.3));
++    p.setBrush(Qt::NoBrush);
++    p.drawRoundedRect(QRectF(2.0, 2.5, 12.0, 11.0), 2.0, 2.0);
++    p.setBrush(color);
++    p.setPen(Qt::NoPen);
++    // Show the target dock side (if currently Right, show Bottom dock icon and vice versa).
++    if (current_side == DevToolsPanel::DockSide::Right)
++        p.drawRect(QRectF(2.5, 9.0, 11.0, 4.0));
++    else
++        p.drawRect(QRectF(9.5, 3.0, 4.0, 10.0));
++    return QIcon(pixmap);
++}
++
++static QIcon create_color_swatch_icon(QColor const& color)
++{
++    QPixmap pixmap(20, 20);
++    pixmap.setDevicePixelRatio(2.0);
++    pixmap.fill(Qt::transparent);
++    QPainter p(&pixmap);
++    p.setRenderHint(QPainter::Antialiasing, true);
++    p.setPen(QPen(Theme::panel().separator, 1.0));
++    p.setBrush(color);
++    p.drawRoundedRect(QRectF(1.0, 1.0, 8.0, 8.0), 2.0, 2.0);
++    return QIcon(pixmap);
++}
++
++static Optional<QColor> parse_css_color_swatch(QString const& value)
++{
++    auto trimmed = value.trimmed();
++    if (trimmed.startsWith(QLatin1Char('#'))) {
++        QColor color(trimmed);
++        if (color.isValid())
++            return color;
++    }
++    if (trimmed.startsWith(QLatin1StringView("rgb("), Qt::CaseInsensitive)
++        || trimmed.startsWith(QLatin1StringView("rgba("), Qt::CaseInsensitive)) {
++        auto open = trimmed.indexOf(QLatin1Char('('));
++        auto close = trimmed.indexOf(QLatin1Char(')'), open + 1);
++        if (open > 0 && close > open) {
++            auto inner = trimmed.mid(open + 1, close - open - 1);
++            inner.replace(QLatin1Char('/'), QLatin1Char(','));
++            auto parts = inner.split(QRegularExpression(QStringLiteral("[,\\s]+")), Qt::SkipEmptyParts);
++            if (parts.size() >= 3) {
++                bool ok0 = false;
++                bool ok1 = false;
++                bool ok2 = false;
++                auto r = parts[0].toInt(&ok0);
++                auto g = parts[1].toInt(&ok1);
++                auto b = parts[2].toInt(&ok2);
++                int a = 255;
++                if (parts.size() >= 4) {
++                    bool ok3 = false;
++                    auto af = parts[3].toDouble(&ok3);
++                    if (ok3)
++                        a = af <= 1.0 ? qBound(0, qRound(af * 255.0), 255) : qBound(0, qRound(af), 255);
++                }
++                if (ok0 && ok1 && ok2)
++                    return QColor(qBound(0, r, 255), qBound(0, g, 255), qBound(0, b, 255), a);
++            }
++        }
++    }
++    return {};
++}
++
++static QString truncate_display(QString const& text, qsizetype max_len)
++{
++    if (text.size() <= max_len)
++        return text;
++    return text.left(max_len - 1) + QChar(0x2026);
++}
++
++}
++
++class ConsolePromptEdit final : public QLineEdit {
++    Q_OBJECT
++
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    explicit ConsolePromptEdit(QWidget* parent = nullptr)
++        : QLineEdit(parent)
++    {
++    }
++
++signals:
++    void history_previous();
++    void history_next();
++    void complete_requested();
++
++protected:
++    virtual bool event(QEvent* event) override
++    {
++        if (event->type() == QEvent::KeyPress) {
++            auto* key_event = static_cast<QKeyEvent*>(event);
++            if (key_event->key() == Qt::Key_Tab && key_event->modifiers() == Qt::NoModifier) {
++                emit complete_requested();
++                return true;
++            }
++        }
++        return QLineEdit::event(event);
++    }
++
++    virtual void keyPressEvent(QKeyEvent* event) override
++    {
++        if (event->key() == Qt::Key_Up && event->modifiers() == Qt::NoModifier) {
++            emit history_previous();
++            event->accept();
++            return;
++        }
++        if (event->key() == Qt::Key_Down && event->modifiers() == Qt::NoModifier) {
++            emit history_next();
++            event->accept();
++            return;
++        }
++        QLineEdit::keyPressEvent(event);
++    }
++};
++
++class DomTreeDelegate final : public QStyledItemDelegate {
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    using QStyledItemDelegate::QStyledItemDelegate;
++
++    virtual void paint(QPainter* painter, QStyleOptionViewItem const& option, QModelIndex const& index) const override
++    {
++        QStyleOptionViewItem opt = option;
++        initStyleOption(&opt, index);
++
++        painter->save();
++        bool selected = (opt.state & QStyle::State_Selected) != 0;
++        bool hovered = (opt.state & QStyle::State_MouseOver) != 0;
++        auto const& panel = Theme::panel();
++        if (selected)
++            painter->fillRect(opt.rect, Theme::selected_row());
++        else if (hovered)
++            painter->fillRect(opt.rect, panel.control);
++
++        auto font = devtools_mono_font(12);
++        painter->setFont(font);
++        QFontMetrics fm(font);
++
++        auto dark = Theme::is_dark();
++        QColor bracket_color = selected ? QColor(255, 255, 255, 190) : panel.muted;
++        QColor tag_color = selected ? Qt::white : (dark ? QColor(0x7d, 0xd3, 0xfc) : QColor(0x88, 0x12, 0x80));
++        QColor attr_name_color = selected ? QColor(255, 240, 200) : (dark ? QColor(0xfd, 0xba, 0x74) : QColor(0x99, 0x45, 0x00));
++        QColor attr_val_color = selected ? QColor(220, 245, 255) : (dark ? QColor(0xfc, 0xa5, 0xa5) : QColor(0x1a, 0x1a, 0xa6));
++        QColor text_color = selected ? Qt::white : panel.text;
++        QColor comment_color = selected ? QColor(220, 255, 220) : (dark ? QColor(0x86, 0xef, 0xac) : QColor(0x23, 0x6e, 0x25));
++        QColor pseudo_color = selected ? Qt::white : (dark ? QColor(0xc4, 0xb5, 0xfd) : QColor(0x6d, 0x28, 0xd9));
++
++        int x = opt.rect.left() + 4;
++        int max_x = opt.rect.right() - 4;
++        int y = opt.rect.top() + (opt.rect.height() + fm.ascent() - fm.descent()) / 2;
++
++        auto draw_chunk = [&](QString const& text, QColor const& color) {
++            if (text.isEmpty() || x >= max_x)
++                return;
++            auto elided = fm.elidedText(text, Qt::ElideRight, max_x - x);
++            painter->setPen(color);
++            painter->drawText(x, y, elided);
++            x += fm.horizontalAdvance(elided);
++        };
++
++        auto node_type = index.data(NodeTypeRole).toString();
++        auto tag_name = index.data(NodeTagRole).toString();
++        auto inline_text = index.data(NodeInlineTextRole).toString();
++
++        if (node_type == QLatin1StringView("element")) {
++            draw_chunk(QStringLiteral("<"), bracket_color);
++            draw_chunk(tag_name, tag_color);
++
++            auto attrs = index.data(NodeAttrsListRole).toStringList();
++            for (qsizetype i = 0; i + 1 < attrs.size(); i += 2) {
++                draw_chunk(QStringLiteral(" "), bracket_color);
++                draw_chunk(attrs[i], attr_name_color);
++                if (!attrs[i + 1].isEmpty()) {
++                    draw_chunk(QStringLiteral("=\""), bracket_color);
++                    draw_chunk(truncate_display(attrs[i + 1], 64), attr_val_color);
++                    draw_chunk(QStringLiteral("\""), bracket_color);
++                }
++            }
++            draw_chunk(QStringLiteral(">"), bracket_color);
++            if (!inline_text.isEmpty()) {
++                draw_chunk(truncate_display(inline_text, 80), text_color);
++                draw_chunk(QStringLiteral("</"), bracket_color);
++                draw_chunk(tag_name, tag_color);
++                draw_chunk(QStringLiteral(">"), bracket_color);
++            } else if (index.data(NodeIsLeafRole).toBool()) {
++                draw_chunk(QStringLiteral("</"), bracket_color);
++                draw_chunk(tag_name, tag_color);
++                draw_chunk(QStringLiteral(">"), bracket_color);
++            }
++        } else if (node_type == QLatin1StringView("text")) {
++            draw_chunk(QStringLiteral("\""), bracket_color);
++            draw_chunk(truncate_display(inline_text, 120), text_color);
++            draw_chunk(QStringLiteral("\""), bracket_color);
++        } else if (node_type == QLatin1StringView("comment")) {
++            draw_chunk(QStringLiteral("<!-- ") + truncate_display(inline_text, 100) + QStringLiteral(" -->"), comment_color);
++        } else if (node_type == QLatin1StringView("pseudo-element") || node_type == QLatin1StringView("shadow-root")) {
++            draw_chunk(tag_name, pseudo_color);
++        } else {
++            draw_chunk(index.data(Qt::DisplayRole).toString(), bracket_color);
++        }
++
++        painter->restore();
++    }
++
++    virtual QSize sizeHint(QStyleOptionViewItem const& option, QModelIndex const& index) const override
++    {
++        auto sz = QStyledItemDelegate::sizeHint(option, index);
++        sz.setHeight(max(sz.height(), 20));
++        return sz;
++    }
++};
++
++class BoxModelWidget final : public QWidget {
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    explicit BoxModelWidget(QWidget* parent = nullptr)
++        : QWidget(parent)
++    {
++        setMinimumHeight(188);
++        setMaximumHeight(210);
++    }
++
++    void set_layout_metrics(Optional<JsonObject> const& layout)
++    {
++        m_has_metrics = layout.has_value() && !layout->is_empty();
++        if (!m_has_metrics) {
++            update();
++            return;
++        }
++        auto num_str = [&](StringView key) -> QString {
++            auto val = layout->get_double_with_precision_loss(key);
++            if (!val.has_value())
++                return QStringLiteral("-");
++            auto rounded = qRound(*val * 10.0) / 10.0;
++            if (qAbs(rounded) < 0.05)
++                return QStringLiteral("-");
++            if (qAbs(rounded - qRound(rounded)) < 0.05)
++                return QString::number(qRound(rounded));
++            return QString::number(rounded, 'f', 1);
++        };
++        auto dim_str = [&](StringView key) -> QString {
++            if (auto s = layout->get_string(key); s.has_value())
++                return qstring_from_ak_string(*s);
++            if (auto d = layout->get_double_with_precision_loss(key); d.has_value())
++                return QString::number(qRound(*d));
++            return QStringLiteral("0");
++        };
++
++        m_margin = { num_str("margin-top"sv), num_str("margin-right"sv), num_str("margin-bottom"sv), num_str("margin-left"sv) };
++        m_border = { num_str("border-top-width"sv), num_str("border-right-width"sv), num_str("border-bottom-width"sv), num_str("border-left-width"sv) };
++        m_padding = { num_str("padding-top"sv), num_str("padding-right"sv), num_str("padding-bottom"sv), num_str("padding-left"sv) };
++        m_content_size = QStringLiteral("%1 \u00d7 %2").arg(dim_str("width"sv), dim_str("height"sv));
++        update();
++    }
++
++protected:
++    virtual void paintEvent(QPaintEvent*) override
++    {
++        QPainter p(this);
++        p.setRenderHint(QPainter::Antialiasing, true);
++
++        auto const& panel = Theme::panel();
++        auto dark = Theme::is_dark();
++
++        if (!m_has_metrics) {
++            p.setPen(panel.muted);
++            p.drawText(rect(), Qt::AlignCenter, tr_ui("No box model metrics for this node"));
++            return;
++        }
++
++        auto outer = rect().adjusted(10, 8, -10, -8);
++        if (outer.width() < 160 || outer.height() < 120)
++            return;
++
++        QColor margin_bg = dark ? QColor(0x52, 0x3b, 0x22) : QColor(0xf9, 0xcc, 0x9d);
++        QColor border_bg = dark ? QColor(0x57, 0x4d, 0x24) : QColor(0xfd, 0xdd, 0x9b);
++        QColor padding_bg = dark ? QColor(0x28, 0x4b, 0x32) : QColor(0xc3, 0xd0, 0x8b);
++        QColor content_bg = dark ? QColor(0x24, 0x46, 0x62) : QColor(0x8c, 0xb6, 0xc0);
++        QColor ink = dark ? QColor(0xf2, 0xf2, 0xf2) : QColor(0x1f, 0x1f, 0x1f);
++        QColor edge = dark ? QColor(255, 255, 255, 60) : QColor(0, 0, 0, 70);
++
++        auto label_font = devtools_mono_font(10);
++        auto value_font = devtools_mono_font(11);
++
++        auto draw_layer = [&](QRect const& r, QColor const& fill, QString const& label, Array<QString, 4> const& sides, Qt::PenStyle border_style) {
++            p.setBrush(fill);
++            p.setPen(QPen(edge, 1.0, border_style));
++            p.drawRect(r);
++
++            p.setPen(ink);
++            p.setFont(label_font);
++            p.drawText(r.left() + 4, r.top() + 12, label);
++
++            p.setFont(value_font);
++            p.drawText(QRect(r.left(), r.top(), r.width(), 20), Qt::AlignCenter, sides[0]);
++            p.drawText(QRect(r.right() - 28, r.top(), 28, r.height()), Qt::AlignCenter, sides[1]);
++            p.drawText(QRect(r.left(), r.bottom() - 20, r.width(), 20), Qt::AlignCenter, sides[2]);
++            p.drawText(QRect(r.left(), r.top(), 28, r.height()), Qt::AlignCenter, sides[3]);
++        };
++
++        auto border_rect = outer.adjusted(28, 22, -28, -22);
++        auto padding_rect = border_rect.adjusted(28, 22, -28, -22);
++        auto content_rect = padding_rect.adjusted(28, 22, -28, -22);
++
++        draw_layer(outer, margin_bg, QStringLiteral("margin"), m_margin, Qt::DashLine);
++        draw_layer(border_rect, border_bg, QStringLiteral("border"), m_border, Qt::SolidLine);
++        draw_layer(padding_rect, padding_bg, QStringLiteral("padding"), m_padding, Qt::DashLine);
++
++        p.setBrush(content_bg);
++        p.setPen(QPen(edge, 1.0, Qt::SolidLine));
++        p.drawRect(content_rect);
++        p.setPen(ink);
++        p.setFont(value_font);
++        p.drawText(content_rect, Qt::AlignCenter, m_content_size);
++    }
++
++private:
++    bool m_has_metrics { false };
++    Array<QString, 4> m_margin {};
++    Array<QString, 4> m_border {};
++    Array<QString, 4> m_padding {};
++    QString m_content_size;
++};
++
++DevToolsPanel::DevToolsPanel(WebContentView& view, QWidget* parent)
++    : QWidget(parent)
++    , m_view(view)
++{
++    setObjectName(QStringLiteral("HellbirdDevToolsPanel"));
++    setAttribute(Qt::WA_StyledBackground, true);
++    setMinimumSize(260, 180);
++
++    auto* root_layout = new QVBoxLayout(this);
++    root_layout->setContentsMargins(0, 0, 0, 0);
++    root_layout->setSpacing(0);
++
++    build_header();
++    root_layout->addWidget(m_header);
++
++    m_banner = new QWidget(this);
++    m_banner->setObjectName(QStringLiteral("HellbirdDevToolsBanner"));
++    auto* banner_layout = new QHBoxLayout(m_banner);
++    banner_layout->setContentsMargins(10, 5, 10, 5);
++    banner_layout->setSpacing(8);
++    m_banner_label = new QLabel(m_banner);
++    m_banner_label->setTextFormat(Qt::PlainText);
++    m_banner_label->setWordWrap(true);
++    banner_layout->addWidget(m_banner_label, 1);
++    m_banner_reattach_button = new QPushButton(m_banner);
++    bind_localized_text(*m_banner_reattach_button, QStringLiteral("Reattach"));
++    connect(m_banner_reattach_button, &QPushButton::clicked, this, [this] {
++        m_external_detached = false;
++        hide_status_banner();
++        m_view.devtools_attach();
++    });
++    banner_layout->addWidget(m_banner_reattach_button);
++    m_banner->hide();
++    root_layout->addWidget(m_banner);
++
++    m_stack = new QStackedWidget(this);
++    root_layout->addWidget(m_stack, 1);
++
++    build_elements_tab();
++    build_console_tab();
++    build_network_tab();
++    build_sources_tab();
++    build_storage_tab();
++
++    set_active_tab(PanelTab::Elements);
++    update_chrome_style();
++    hide();
++}
++
++DevToolsPanel::~DevToolsPanel()
++{
++    if (m_is_open || m_view.devtools_is_attached()) {
++        stop_picker_if_active();
++        m_view.devtools_clear_highlight();
++        m_view.devtools_detach();
++    }
++}
++
++void DevToolsPanel::build_header()
++{
++    m_header = new QWidget(this);
++    m_header->setObjectName(QStringLiteral("HellbirdDevToolsHeader"));
++    m_header->setFixedHeight(32);
++
++    auto* layout = new QHBoxLayout(m_header);
++    layout->setContentsMargins(6, 0, 6, 0);
++    layout->setSpacing(2);
++
++    m_picker_button = new QToolButton(m_header);
++    m_picker_button->setObjectName(QStringLiteral("HellbirdDevToolsIconButton"));
++    m_picker_button->setCheckable(true);
++    m_picker_button->setFixedSize(26, 24);
++    m_picker_button->setIconSize(QSize(16, 16));
++    bind_localized_tooltip(*m_picker_button, QStringLiteral("Select an element on the page to inspect it"));
++    connect(m_picker_button, &QToolButton::clicked, this, [this] {
++        if (m_picker_active) {
++            m_picker_active = false;
++            m_view.devtools_stop_picker();
++            update_picker_button_state();
++        } else {
++            emit picker_starting();
++            m_picker_active = true;
++            m_view.devtools_start_picker();
++            update_picker_button_state();
++        }
++    });
++    layout->addWidget(m_picker_button);
++
++    auto add_tab_button = [&](QString const& source_label, PanelTab tab) -> QToolButton* {
++        auto* btn = new QToolButton(m_header);
++        btn->setObjectName(QStringLiteral("HellbirdDevToolsTabButton"));
++        btn->setCheckable(true);
++        btn->setFixedHeight(32);
++        btn->setCursor(Qt::PointingHandCursor);
++        bind_localized_text(*btn, source_label);
++        connect(btn, &QToolButton::clicked, this, [this, tab] {
++            set_active_tab(tab);
++        });
++        layout->addWidget(btn);
++        return btn;
++    };
++
++    m_tab_elements_button = add_tab_button(QStringLiteral("Elements"), PanelTab::Elements);
++    m_tab_console_button = add_tab_button(QStringLiteral("Console"), PanelTab::Console);
++    m_tab_network_button = add_tab_button(QStringLiteral("Network"), PanelTab::Network);
++    m_tab_sources_button = add_tab_button(QStringLiteral("Sources"), PanelTab::Sources);
++    m_tab_storage_button = add_tab_button(QStringLiteral("Storage"), PanelTab::Storage);
++
++    layout->addStretch(1);
++
++    m_error_badge_button = new QToolButton(m_header);
++    m_error_badge_button->setObjectName(QStringLiteral("HellbirdDevToolsErrorBadge"));
++    m_error_badge_button->setCursor(Qt::PointingHandCursor);
++    m_error_badge_button->hide();
++    connect(m_error_badge_button, &QToolButton::clicked, this, [this] {
++        set_active_tab(PanelTab::Console);
++    });
++    layout->addWidget(m_error_badge_button);
++
++    m_warn_badge_button = new QToolButton(m_header);
++    m_warn_badge_button->setObjectName(QStringLiteral("HellbirdDevToolsWarnBadge"));
++    m_warn_badge_button->setCursor(Qt::PointingHandCursor);
++    m_warn_badge_button->hide();
++    connect(m_warn_badge_button, &QToolButton::clicked, this, [this] {
++        set_active_tab(PanelTab::Console);
++    });
++    layout->addWidget(m_warn_badge_button);
++
++    m_dock_button = new QToolButton(m_header);
++    m_dock_button->setObjectName(QStringLiteral("HellbirdDevToolsIconButton"));
++    m_dock_button->setFixedSize(26, 24);
++    m_dock_button->setIconSize(QSize(16, 16));
++    bind_localized_tooltip(*m_dock_button, QStringLiteral("Switch dock position"));
++    connect(m_dock_button, &QToolButton::clicked, this, [this] {
++        set_dock_side(m_dock_side == DockSide::Right ? DockSide::Bottom : DockSide::Right);
++    });
++    layout->addWidget(m_dock_button);
++
++    m_close_button = new QToolButton(m_header);
++    m_close_button->setObjectName(QStringLiteral("HellbirdDevToolsIconButton"));
++    m_close_button->setFixedSize(26, 24);
++    m_close_button->setIconSize(QSize(14, 14));
++    bind_localized_tooltip(*m_close_button, QStringLiteral("Close"));
++    connect(m_close_button, &QToolButton::clicked, this, [this] {
++        close_panel();
++    });
++    layout->addWidget(m_close_button);
++}
++
++void DevToolsPanel::build_elements_tab()
++{
++    auto* page = new QWidget(m_stack);
++    auto* page_layout = new QVBoxLayout(page);
++    page_layout->setContentsMargins(0, 0, 0, 0);
++    page_layout->setSpacing(0);
++
++    m_elements_splitter = new QSplitter(Qt::Horizontal, page);
++    m_elements_splitter->setChildrenCollapsible(false);
++
++    // Left: DOM tree + filter + breadcrumbs
++    auto* dom_container = new QWidget(m_elements_splitter);
++    auto* dom_layout = new QVBoxLayout(dom_container);
++    dom_layout->setContentsMargins(0, 0, 0, 0);
++    dom_layout->setSpacing(0);
++
++    auto* dom_toolbar = new QWidget(dom_container);
++    dom_toolbar->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    auto* dom_tb_layout = new QHBoxLayout(dom_toolbar);
++    dom_tb_layout->setContentsMargins(6, 4, 6, 4);
++    dom_tb_layout->setSpacing(6);
++
++    m_dom_filter_edit = new QLineEdit(dom_toolbar);
++    m_dom_filter_edit->setClearButtonEnabled(true);
++    bind_localized_placeholder(*m_dom_filter_edit, QStringLiteral("Filter DOM (tag, #id, .class, text)"));
++    connect(m_dom_filter_edit, &QLineEdit::textChanged, this, &DevToolsPanel::filter_dom_tree);
++    dom_tb_layout->addWidget(m_dom_filter_edit, 1);
++
++    auto* refresh_dom_btn = new QToolButton(dom_toolbar);
++    refresh_dom_btn->setObjectName(QStringLiteral("HellbirdDevToolsIconButton"));
++    refresh_dom_btn->setFixedSize(24, 24);
++    bind_localized_tooltip(*refresh_dom_btn, QStringLiteral("Refresh"));
++    refresh_dom_btn->setIcon(create_chrome_icon(ChromeIcon::Reload, Theme::panel().body));
++    connect(refresh_dom_btn, &QToolButton::clicked, this, &DevToolsPanel::refresh_dom_tree);
++    dom_tb_layout->addWidget(refresh_dom_btn);
++    dom_layout->addWidget(dom_toolbar);
++
++    m_dom_status_label = new QLabel(dom_container);
++    m_dom_status_label->setTextFormat(Qt::PlainText);
++    m_dom_status_label->setContentsMargins(10, 6, 10, 6);
++    m_dom_status_label->setWordWrap(true);
++    m_dom_status_label->hide();
++    dom_layout->addWidget(m_dom_status_label);
++
++    m_dom_tree = new QTreeWidget(dom_container);
++    m_dom_tree->setHeaderHidden(true);
++    m_dom_tree->setIndentation(14);
++    m_dom_tree->setUniformRowHeights(true);
++    m_dom_tree->setMouseTracking(true);
++    m_dom_tree->setContextMenuPolicy(Qt::CustomContextMenu);
++    m_dom_tree->setSelectionMode(QAbstractItemView::SingleSelection);
++    m_dom_delegate = new DomTreeDelegate(m_dom_tree);
++    m_dom_tree->setItemDelegate(m_dom_delegate);
++    m_dom_tree->viewport()->installEventFilter(this);
++    m_dom_tree->installEventFilter(this);
++
++    connect(m_dom_tree, &QTreeWidget::itemSelectionChanged, this, &DevToolsPanel::on_dom_selection_changed);
++    connect(m_dom_tree, &QTreeWidget::customContextMenuRequested, this, &DevToolsPanel::show_dom_context_menu);
++    connect(m_dom_tree, &QTreeWidget::entered, this, [this](QModelIndex const& index) {
++        if (!index.isValid())
++            return;
++        bool ok = false;
++        auto node_id = index.data(NodeIdRole).toLongLong(&ok);
++        if (!ok || node_id <= 0)
++            return;
++        Optional<u32> pseudo;
++        auto pseudo_val = index.data(NodePseudoRole);
++        if (pseudo_val.isValid() && !pseudo_val.isNull())
++            pseudo = static_cast<u32>(pseudo_val.toUInt());
++        if (m_hovered_node_id != node_id) {
++            m_hovered_node_id = node_id;
++            m_view.devtools_highlight_node(node_id, pseudo);
++        }
++    });
++    dom_layout->addWidget(m_dom_tree, 1);
++
++    m_breadcrumb_bar = new QWidget(dom_container);
++    m_breadcrumb_bar->setObjectName(QStringLiteral("HellbirdDevToolsBreadcrumbs"));
++    m_breadcrumb_bar->setFixedHeight(24);
++    m_breadcrumb_layout = new QHBoxLayout(m_breadcrumb_bar);
++    m_breadcrumb_layout->setContentsMargins(6, 0, 6, 0);
++    m_breadcrumb_layout->setSpacing(2);
++    m_breadcrumb_layout->addStretch(1);
++    dom_layout->addWidget(m_breadcrumb_bar);
++
++    // Right: Inspector sidebar (Styles, Computed, Layout)
++    m_inspector_tabs = new QTabWidget(m_elements_splitter);
++    m_inspector_tabs->setDocumentMode(true);
++
++    // Styles sub-tab
++    auto* styles_page = new QWidget(m_inspector_tabs);
++    auto* styles_layout = new QVBoxLayout(styles_page);
++    styles_layout->setContentsMargins(0, 0, 0, 0);
++    styles_layout->setSpacing(0);
++    auto* styles_bar = new QWidget(styles_page);
++    styles_bar->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    auto* styles_bar_layout = new QHBoxLayout(styles_bar);
++    styles_bar_layout->setContentsMargins(6, 4, 6, 4);
++    m_styles_filter_edit = new QLineEdit(styles_bar);
++    m_styles_filter_edit->setClearButtonEnabled(true);
++    bind_localized_placeholder(*m_styles_filter_edit, QStringLiteral("Filter styles"));
++    connect(m_styles_filter_edit, &QLineEdit::textChanged, this, &DevToolsPanel::filter_styles_tree);
++    styles_bar_layout->addWidget(m_styles_filter_edit);
++    styles_layout->addWidget(styles_bar);
++
++    m_styles_tree = new QTreeWidget(styles_page);
++    m_styles_tree->setHeaderHidden(true);
++    m_styles_tree->setColumnCount(2);
++    m_styles_tree->header()->setStretchLastSection(true);
++    m_styles_tree->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
++    m_styles_tree->setIndentation(12);
++    m_styles_tree->setFont(devtools_mono_font(12));
++    styles_layout->addWidget(m_styles_tree, 1);
++    m_inspector_tabs->addTab(styles_page, tr_ui("Styles"));
++
++    // Computed sub-tab
++    auto* computed_page = new QWidget(m_inspector_tabs);
++    auto* computed_layout = new QVBoxLayout(computed_page);
++    computed_layout->setContentsMargins(0, 0, 0, 0);
++    computed_layout->setSpacing(0);
++    auto* computed_bar = new QWidget(computed_page);
++    computed_bar->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    auto* computed_bar_layout = new QHBoxLayout(computed_bar);
++    computed_bar_layout->setContentsMargins(6, 4, 6, 4);
++    m_computed_filter_edit = new QLineEdit(computed_bar);
++    m_computed_filter_edit->setClearButtonEnabled(true);
++    bind_localized_placeholder(*m_computed_filter_edit, QStringLiteral("Filter computed styles"));
++    connect(m_computed_filter_edit, &QLineEdit::textChanged, this, &DevToolsPanel::filter_computed_tree);
++    computed_bar_layout->addWidget(m_computed_filter_edit);
++    computed_layout->addWidget(computed_bar);
++
++    m_computed_tree = new QTreeWidget(computed_page);
++    m_computed_tree->setColumnCount(2);
++    m_computed_tree->setHeaderLabels({ tr_ui("Property"), tr_ui("Value") });
++    m_computed_tree->setRootIsDecorated(false);
++    m_computed_tree->header()->setStretchLastSection(true);
++    m_computed_tree->header()->setSectionResizeMode(0, QHeaderView::Interactive);
++    m_computed_tree->setColumnWidth(0, 150);
++    m_computed_tree->setFont(devtools_mono_font(12));
++    computed_layout->addWidget(m_computed_tree, 1);
++    m_inspector_tabs->addTab(computed_page, tr_ui("Computed"));
++
++    // Layout (Box Model) sub-tab
++    auto* layout_page = new QWidget(m_inspector_tabs);
++    auto* layout_vbox = new QVBoxLayout(layout_page);
++    layout_vbox->setContentsMargins(0, 0, 0, 0);
++    layout_vbox->setSpacing(0);
++    m_box_model_widget = new BoxModelWidget(layout_page);
++    layout_vbox->addWidget(m_box_model_widget);
++
++    m_layout_props_tree = new QTreeWidget(layout_page);
++    m_layout_props_tree->setColumnCount(2);
++    m_layout_props_tree->setHeaderLabels({ tr_ui("Property"), tr_ui("Value") });
++    m_layout_props_tree->setRootIsDecorated(false);
++    m_layout_props_tree->header()->setStretchLastSection(true);
++    m_layout_props_tree->setColumnWidth(0, 120);
++    m_layout_props_tree->setFont(devtools_mono_font(12));
++    layout_vbox->addWidget(m_layout_props_tree, 1);
++    m_inspector_tabs->addTab(layout_page, tr_ui("Layout"));
++
++    m_elements_splitter->setStretchFactor(0, 3);
++    m_elements_splitter->setStretchFactor(1, 2);
++
++    page_layout->addWidget(m_elements_splitter, 1);
++    m_stack->addWidget(page);
++}
++
++void DevToolsPanel::build_console_tab()
++{
++    auto* page = new QWidget(m_stack);
++    auto* layout = new QVBoxLayout(page);
++    layout->setContentsMargins(0, 0, 0, 0);
++    layout->setSpacing(0);
++
++    auto* toolbar = new QWidget(page);
++    toolbar->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    auto* tb = new QHBoxLayout(toolbar);
++    tb->setContentsMargins(6, 4, 6, 4);
++    tb->setSpacing(6);
++
++    auto* clear_btn = new QPushButton(toolbar);
++    bind_localized_text(*clear_btn, QStringLiteral("Clear"));
++    connect(clear_btn, &QPushButton::clicked, this, &DevToolsPanel::clear_console);
++    tb->addWidget(clear_btn);
++
++    m_console_filter_edit = new QLineEdit(toolbar);
++    m_console_filter_edit->setClearButtonEnabled(true);
++    bind_localized_placeholder(*m_console_filter_edit, QStringLiteral("Filter console output"));
++    connect(m_console_filter_edit, &QLineEdit::textChanged, this, &DevToolsPanel::apply_console_filter);
++    tb->addWidget(m_console_filter_edit, 1);
++
++    m_console_level_combo = new QComboBox(toolbar);
++    m_console_level_combo->addItem(tr_ui("All"), static_cast<int>(ConsoleFilter::All));
++    m_console_level_combo->addItem(tr_ui("Errors"), static_cast<int>(ConsoleFilter::Errors));
++    m_console_level_combo->addItem(tr_ui("Warnings"), static_cast<int>(ConsoleFilter::Warnings));
++    m_console_level_combo->addItem(tr_ui("Info"), static_cast<int>(ConsoleFilter::Info));
++    m_console_level_combo->addItem(tr_ui("Log"), static_cast<int>(ConsoleFilter::Log));
++    connect(m_console_level_combo, &QComboBox::currentIndexChanged, this, [this](int) {
++        apply_console_filter();
++    });
++    tb->addWidget(m_console_level_combo);
++    layout->addWidget(toolbar);
++
++    m_console_tree = new QTreeWidget(page);
++    m_console_tree->setHeaderHidden(true);
++    m_console_tree->setColumnCount(2);
++    m_console_tree->header()->setStretchLastSection(false);
++    m_console_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
++    m_console_tree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
++    m_console_tree->setWordWrap(true);
++    m_console_tree->setIndentation(14);
++    m_console_tree->setFont(devtools_mono_font(12));
++    m_console_tree->setContextMenuPolicy(Qt::CustomContextMenu);
++    connect(m_console_tree, &QTreeWidget::itemExpanded, this, &DevToolsPanel::expand_console_object);
++    connect(m_console_tree, &QTreeWidget::customContextMenuRequested, this, [this](QPoint const& pos) {
++        auto* item = m_console_tree->itemAt(pos);
++        if (!item)
++            return;
++        auto copy_text = item->data(0, ConsoleCopyTextRole).toString();
++        if (copy_text.isEmpty())
++            copy_text = item->text(0);
++        QMenu menu(this);
++        auto* copy_action = menu.addAction(tr_ui("Copy message"));
++        connect(copy_action, &QAction::triggered, this, [copy_text] {
++            if (auto* clipboard = QApplication::clipboard())
++                clipboard->setText(copy_text);
++        });
++        menu.exec(m_console_tree->viewport()->mapToGlobal(pos));
++    });
++    layout->addWidget(m_console_tree, 1);
++
++    auto* prompt_bar = new QWidget(page);
++    prompt_bar->setObjectName(QStringLiteral("HellbirdDevToolsPromptBar"));
++    auto* prompt_layout = new QHBoxLayout(prompt_bar);
++    prompt_layout->setContentsMargins(8, 4, 8, 4);
++    prompt_layout->setSpacing(6);
++
++    auto* chevron = new QLabel(QStringLiteral("\u276f"), prompt_bar);
++    chevron->setFont(devtools_mono_font(12));
++    prompt_layout->addWidget(chevron);
++
++    m_console_input = new ConsolePromptEdit(prompt_bar);
++    m_console_input->setObjectName(QStringLiteral("HellbirdDevToolsConsoleInput"));
++    m_console_input->setFont(devtools_mono_font(12));
++    bind_localized_placeholder(*m_console_input, QStringLiteral("Evaluate JavaScript…"));
++    connect(m_console_input, &QLineEdit::returnPressed, this, &DevToolsPanel::submit_console_expression);
++    connect(m_console_input, &ConsolePromptEdit::complete_requested, this, &DevToolsPanel::request_console_completion);
++    connect(m_console_input, &ConsolePromptEdit::history_previous, this, [this] {
++        if (m_console_history.isEmpty())
++            return;
++        if (m_console_history_index < 0) {
++            m_console_draft = m_console_input->text();
++            m_console_history_index = static_cast<int>(m_console_history.size()) - 1;
++        } else if (m_console_history_index > 0) {
++            --m_console_history_index;
++        }
++        m_console_input->setText(m_console_history[m_console_history_index]);
++    });
++    connect(m_console_input, &ConsolePromptEdit::history_next, this, [this] {
++        if (m_console_history_index < 0)
++            return;
++        if (m_console_history_index + 1 < m_console_history.size()) {
++            ++m_console_history_index;
++            m_console_input->setText(m_console_history[m_console_history_index]);
++        } else {
++            m_console_history_index = -1;
++            m_console_input->setText(m_console_draft);
++        }
++    });
++    prompt_layout->addWidget(m_console_input, 1);
++    layout->addWidget(prompt_bar);
++
++    m_stack->addWidget(page);
++}
++
++void DevToolsPanel::build_network_tab()
++{
++    auto* page = new QWidget(m_stack);
++    auto* layout = new QVBoxLayout(page);
++    layout->setContentsMargins(0, 0, 0, 0);
++    layout->setSpacing(0);
++
++    auto* toolbar = new QWidget(page);
++    toolbar->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    auto* tb = new QHBoxLayout(toolbar);
++    tb->setContentsMargins(6, 4, 6, 4);
++    tb->setSpacing(6);
++
++    auto* clear_btn = new QPushButton(toolbar);
++    bind_localized_text(*clear_btn, QStringLiteral("Clear"));
++    connect(clear_btn, &QPushButton::clicked, this, &DevToolsPanel::clear_network);
++    tb->addWidget(clear_btn);
++
++    m_network_preserve_checkbox = new QCheckBox(toolbar);
++    bind_localized_text(*m_network_preserve_checkbox, QStringLiteral("Preserve log"));
++    tb->addWidget(m_network_preserve_checkbox);
++
++    m_network_filter_edit = new QLineEdit(toolbar);
++    m_network_filter_edit->setClearButtonEnabled(true);
++    bind_localized_placeholder(*m_network_filter_edit, QStringLiteral("Filter requests"));
++    connect(m_network_filter_edit, &QLineEdit::textChanged, this, &DevToolsPanel::apply_network_filter);
++    tb->addWidget(m_network_filter_edit, 1);
++
++    m_network_type_combo = new QComboBox(toolbar);
++    m_network_type_combo->addItem(tr_ui("All"), QStringLiteral("all"));
++    m_network_type_combo->addItem(QStringLiteral("Doc"), QStringLiteral("doc"));
++    m_network_type_combo->addItem(QStringLiteral("Fetch/XHR"), QStringLiteral("xhr"));
++    m_network_type_combo->addItem(QStringLiteral("JS"), QStringLiteral("js"));
++    m_network_type_combo->addItem(QStringLiteral("CSS"), QStringLiteral("css"));
++    m_network_type_combo->addItem(QStringLiteral("Img"), QStringLiteral("img"));
++    m_network_type_combo->addItem(tr_ui("Other"), QStringLiteral("other"));
++    connect(m_network_type_combo, &QComboBox::currentIndexChanged, this, [this](int) {
++        apply_network_filter();
++    });
++    tb->addWidget(m_network_type_combo);
++    layout->addWidget(toolbar);
++
++    m_network_splitter = new QSplitter(Qt::Vertical, page);
++    m_network_splitter->setChildrenCollapsible(false);
++
++    auto* table_container = new QWidget(m_network_splitter);
++    auto* table_layout = new QVBoxLayout(table_container);
++    table_layout->setContentsMargins(0, 0, 0, 0);
++    table_layout->setSpacing(0);
++
++    m_network_empty_label = new QLabel(table_container);
++    m_network_empty_label->setTextFormat(Qt::PlainText);
++    m_network_empty_label->setAlignment(Qt::AlignCenter);
++    m_network_empty_label->setContentsMargins(12, 16, 12, 16);
++    bind_localized_text(*m_network_empty_label, QStringLiteral("Recording network activity… Reload the page to capture all requests."));
++    table_layout->addWidget(m_network_empty_label);
++
++    m_network_tree = new QTreeWidget(table_container);
++    m_network_tree->setColumnCount(6);
++    m_network_tree->setHeaderLabels({
++        tr_ui("Name"),
++        tr_ui("Status"),
++        tr_ui("Method"),
++        tr_ui("Type"),
++        tr_ui("Size"),
++        tr_ui("Time"),
++    });
++    m_network_tree->setRootIsDecorated(false);
++    m_network_tree->setUniformRowHeights(true);
++    m_network_tree->setAlternatingRowColors(false);
++    m_network_tree->setFont(devtools_mono_font(12));
++    m_network_tree->header()->setStretchLastSection(false);
++    m_network_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
++    for (int col = 1; col <= 5; ++col)
++        m_network_tree->header()->setSectionResizeMode(col, QHeaderView::ResizeToContents);
++    connect(m_network_tree, &QTreeWidget::itemSelectionChanged, this, &DevToolsPanel::on_network_selection_changed);
++    table_layout->addWidget(m_network_tree, 1);
++
++    m_network_detail_container = new QWidget(m_network_splitter);
++    auto* detail_layout = new QVBoxLayout(m_network_detail_container);
++    detail_layout->setContentsMargins(0, 0, 0, 0);
++    detail_layout->setSpacing(0);
++
++    m_network_detail_tabs = new QTabWidget(m_network_detail_container);
++    m_network_detail_tabs->setDocumentMode(true);
++    auto* close_detail_btn = new QToolButton(m_network_detail_tabs);
++    close_detail_btn->setObjectName(QStringLiteral("HellbirdDevToolsIconButton"));
++    close_detail_btn->setFixedSize(22, 22);
++    close_detail_btn->setIcon(create_chrome_icon(ChromeIcon::Close, Theme::panel().muted));
++    connect(close_detail_btn, &QToolButton::clicked, this, [this] {
++        m_network_tree->clearSelection();
++        m_network_detail_container->hide();
++        m_selected_network_id.clear();
++    });
++    m_network_detail_tabs->setCornerWidget(close_detail_btn, Qt::TopRightCorner);
++
++    m_network_headers_view = new QPlainTextEdit(m_network_detail_tabs);
++    m_network_headers_view->setReadOnly(true);
++    m_network_headers_view->setFont(devtools_mono_font(12));
++    m_network_detail_tabs->addTab(m_network_headers_view, tr_ui("Headers"));
++
++    m_network_response_view = new QPlainTextEdit(m_network_detail_tabs);
++    m_network_response_view->setReadOnly(true);
++    m_network_response_view->setFont(devtools_mono_font(12));
++    m_network_detail_tabs->addTab(m_network_response_view, tr_ui("Response"));
++
++    m_network_timing_view = new QPlainTextEdit(m_network_detail_tabs);
++    m_network_timing_view->setReadOnly(true);
++    m_network_timing_view->setFont(devtools_mono_font(12));
++    m_network_detail_tabs->addTab(m_network_timing_view, tr_ui("Timing"));
++
++    connect(m_network_detail_tabs, &QTabWidget::currentChanged, this, [this](int idx) {
++        if (idx == 1 && m_selected_network_id.has_value())
++            fetch_network_response_body(*m_selected_network_id);
++    });
++
++    detail_layout->addWidget(m_network_detail_tabs, 1);
++    m_network_detail_container->hide();
++
++    layout->addWidget(m_network_splitter, 1);
++
++    m_network_summary_label = new QLabel(page);
++    m_network_summary_label->setObjectName(QStringLiteral("HellbirdDevToolsBreadcrumbs"));
++    m_network_summary_label->setTextFormat(Qt::PlainText);
++    m_network_summary_label->setFixedHeight(22);
++    m_network_summary_label->setContentsMargins(8, 0, 8, 0);
++    layout->addWidget(m_network_summary_label);
++    update_network_summary();
++
++    m_stack->addWidget(page);
++}
++
++void DevToolsPanel::build_sources_tab()
++{
++    auto* page = new QWidget(m_stack);
++    auto* layout = new QVBoxLayout(page);
++    layout->setContentsMargins(0, 0, 0, 0);
++    layout->setSpacing(0);
++
++    auto* toolbar = new QWidget(page);
++    toolbar->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    auto* tb = new QHBoxLayout(toolbar);
++    tb->setContentsMargins(6, 4, 6, 4);
++    tb->setSpacing(6);
++
++    auto* refresh_btn = new QPushButton(toolbar);
++    bind_localized_text(*refresh_btn, QStringLiteral("Refresh"));
++    connect(refresh_btn, &QPushButton::clicked, this, &DevToolsPanel::refresh_sources);
++    tb->addWidget(refresh_btn);
++
++    m_sources_filter_edit = new QLineEdit(toolbar);
++    m_sources_filter_edit->setClearButtonEnabled(true);
++    bind_localized_placeholder(*m_sources_filter_edit, QStringLiteral("Filter scripts & stylesheets"));
++    connect(m_sources_filter_edit, &QLineEdit::textChanged, this, &DevToolsPanel::filter_sources_tree);
++    tb->addWidget(m_sources_filter_edit, 1);
++    layout->addWidget(toolbar);
++
++    m_sources_splitter = new QSplitter(Qt::Horizontal, page);
++    m_sources_splitter->setChildrenCollapsible(false);
++
++    m_sources_tree = new QTreeWidget(m_sources_splitter);
++    m_sources_tree->setHeaderHidden(true);
++    m_sources_tree->setIndentation(14);
++    m_sources_tree->setMinimumWidth(140);
++    connect(m_sources_tree, &QTreeWidget::itemSelectionChanged, this, &DevToolsPanel::on_source_selected);
++
++    auto* editor_container = new QWidget(m_sources_splitter);
++    auto* editor_layout = new QVBoxLayout(editor_container);
++    editor_layout->setContentsMargins(0, 0, 0, 0);
++    editor_layout->setSpacing(0);
++
++    m_source_header_label = new QLabel(editor_container);
++    m_source_header_label->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    m_source_header_label->setTextFormat(Qt::PlainText);
++    m_source_header_label->setContentsMargins(8, 4, 8, 4);
++    m_source_header_label->setText(tr_ui("Select a script or stylesheet to view its source"));
++    editor_layout->addWidget(m_source_header_label);
++
++    m_source_editor = new QPlainTextEdit(editor_container);
++    m_source_editor->setReadOnly(true);
++    m_source_editor->setLineWrapMode(QPlainTextEdit::NoWrap);
++    m_source_editor->setFont(devtools_mono_font(12));
++    editor_layout->addWidget(m_source_editor, 1);
++
++    m_sources_splitter->setStretchFactor(0, 1);
++    m_sources_splitter->setStretchFactor(1, 3);
++    layout->addWidget(m_sources_splitter, 1);
++
++    m_stack->addWidget(page);
++}
++
++void DevToolsPanel::build_storage_tab()
++{
++    auto* page = new QWidget(m_stack);
++    auto* layout = new QVBoxLayout(page);
++    layout->setContentsMargins(0, 0, 0, 0);
++    layout->setSpacing(0);
++
++    auto* toolbar = new QWidget(page);
++    toolbar->setObjectName(QStringLiteral("HellbirdDevToolsSubBar"));
++    auto* tb = new QHBoxLayout(toolbar);
++    tb->setContentsMargins(6, 4, 6, 4);
++    tb->setSpacing(6);
++
++    m_storage_kind_combo = new QComboBox(toolbar);
++    m_storage_kind_combo->addItem(tr_ui("Cookies"), static_cast<int>(StorageKind::Cookies));
++    m_storage_kind_combo->addItem(QStringLiteral("Local Storage"), static_cast<int>(StorageKind::LocalStorage));
++    m_storage_kind_combo->addItem(QStringLiteral("Session Storage"), static_cast<int>(StorageKind::SessionStorage));
++    connect(m_storage_kind_combo, &QComboBox::currentIndexChanged, this, [this](int) {
++        refresh_storage();
++    });
++    tb->addWidget(m_storage_kind_combo);
++
++    auto* refresh_btn = new QPushButton(toolbar);
++    bind_localized_text(*refresh_btn, QStringLiteral("Refresh"));
++    connect(refresh_btn, &QPushButton::clicked, this, &DevToolsPanel::refresh_storage);
++    tb->addWidget(refresh_btn);
++
++    m_storage_add_button = new QPushButton(toolbar);
++    bind_localized_text(*m_storage_add_button, QStringLiteral("Add"));
++    connect(m_storage_add_button, &QPushButton::clicked, this, &DevToolsPanel::add_storage_item_dialog);
++    tb->addWidget(m_storage_add_button);
++
++    m_storage_delete_button = new QPushButton(toolbar);
++    bind_localized_text(*m_storage_delete_button, QStringLiteral("Delete"));
++    connect(m_storage_delete_button, &QPushButton::clicked, this, &DevToolsPanel::delete_selected_storage_item);
++    tb->addWidget(m_storage_delete_button);
++
++    m_storage_clear_button = new QPushButton(toolbar);
++    bind_localized_text(*m_storage_clear_button, QStringLiteral("Clear"));
++    connect(m_storage_clear_button, &QPushButton::clicked, this, &DevToolsPanel::clear_current_storage);
++    tb->addWidget(m_storage_clear_button);
++
++    tb->addStretch(1);
++    layout->addWidget(toolbar);
++
++    m_storage_tree = new QTreeWidget(page);
++    m_storage_tree->setRootIsDecorated(false);
++    m_storage_tree->setFont(devtools_mono_font(12));
++    layout->addWidget(m_storage_tree, 1);
++
++    m_stack->addWidget(page);
++}
++
++void DevToolsPanel::open(PanelTab tab)
++{
++    auto was_open = m_is_open;
++    m_is_open = true;
++    set_active_tab(tab);
++    update_effective_visibility();
++
++    if (!m_view.devtools_is_attached() && !m_external_detached)
++        m_view.devtools_attach();
++    else if (was_open && m_view.devtools_is_attached()) {
++        if (tab == PanelTab::Elements)
++            refresh_dom_tree();
++        else if (tab == PanelTab::Sources)
++            refresh_sources();
++        else if (tab == PanelTab::Storage)
++            refresh_storage();
++    }
++
++    if (tab == PanelTab::Console && m_console_input)
++        m_console_input->setFocus();
++
++    if (!was_open)
++        emit visibility_changed(true);
++}
++
++void DevToolsPanel::open_and_inspect(i64 node_id)
++{
++    m_pending_inspect_node_id = node_id;
++    open(PanelTab::Elements);
++    if (m_view.devtools_is_attached()) {
++        if (m_dom_items_by_id.contains(node_id)) {
++            select_dom_node_by_id(node_id, true);
++            m_pending_inspect_node_id.clear();
++        } else {
++            refresh_dom_tree();
++        }
++    }
++}
++
++void DevToolsPanel::close_panel()
++{
++    if (!m_is_open)
++        return;
++    stop_picker_if_active();
++    m_view.devtools_clear_highlight();
++    m_view.devtools_set_dom_mutations_enabled(false);
++    m_view.devtools_detach();
++    m_is_open = false;
++    m_external_detached = false;
++    m_crash_detached = false;
++    m_pending_inspect_node_id.clear();
++    hide_status_banner();
++    update_effective_visibility();
++    emit visibility_changed(false);
++}
++
++void DevToolsPanel::toggle(PanelTab tab)
++{
++    if (m_is_open)
++        close_panel();
++    else
++        open(tab);
++}
++
++void DevToolsPanel::set_dock_side(DockSide side)
++{
++    if (m_dock_side == side)
++        return;
++    m_dock_side = side;
++    if (m_elements_splitter)
++        m_elements_splitter->setOrientation(Qt::Horizontal);
++    if (m_dock_button)
++        m_dock_button->setIcon(create_dock_icon(m_dock_side, Theme::panel().body));
++    emit dock_side_changed(m_dock_side);
++}
++
++void DevToolsPanel::set_corner_radius(int radius)
++{
++    radius = max(0, radius);
++    if (m_corner_radius == radius)
++        return;
++    m_corner_radius = radius;
++    update_corner_mask();
++    update();
++}
++
++void DevToolsPanel::set_temporarily_hidden_for_fullscreen(bool hidden)
++{
++    if (m_hidden_for_fullscreen == hidden)
++        return;
++    m_hidden_for_fullscreen = hidden;
++    if (hidden)
++        stop_picker_if_active();
++    update_effective_visibility();
++}
++
++void DevToolsPanel::update_effective_visibility()
++{
++    auto should_show = m_is_open && !m_hidden_for_fullscreen;
++    setVisible(should_show);
++    if (should_show)
++        update_corner_mask();
++}
++
++void DevToolsPanel::update_corner_mask()
++{
++    if (m_corner_radius > 0 && !rect().isEmpty() && !QGuiApplication::platformName().startsWith(QLatin1StringView("wayland")))
++        setMask(ChromeStyle::rounded_rect_region(rect(), m_corner_radius));
++    else
++        clearMask();
++}
++
++void DevToolsPanel::paintEvent(QPaintEvent* event)
++{
++    QWidget::paintEvent(event);
++    if (m_corner_radius > 0 && !rect().isEmpty()) {
++        QPainter painter(this);
++        painter.setRenderHint(QPainter::Antialiasing, true);
++        painter.setBrush(Qt::NoBrush);
++        painter.setPen(QPen(ChromeStyle::chrome_border(Theme::chrome_palette(*this)), 1));
++        auto r = static_cast<qreal>(m_corner_radius) - 0.5;
++        painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), r, r);
++    }
++}
++
++void DevToolsPanel::resizeEvent(QResizeEvent* event)
++{
++    QWidget::resizeEvent(event);
++    update_corner_mask();
++}
++
++bool DevToolsPanel::eventFilter(QObject* watched, QEvent* event)
++{
++    if (watched == m_dom_tree->viewport() && event->type() == QEvent::Leave) {
++        if (m_hovered_node_id.has_value()) {
++            m_hovered_node_id.clear();
++            m_view.devtools_clear_highlight();
++        }
++    } else if (watched == m_dom_tree && event->type() == QEvent::KeyPress) {
++        auto* key_event = static_cast<QKeyEvent*>(event);
++        if ((key_event->key() == Qt::Key_Delete || key_event->key() == Qt::Key_Backspace) && m_selected_node_id.has_value()) {
++            auto node_id = *m_selected_node_id;
++            QPointer<DevToolsPanel> weak_this { this };
++            m_view.devtools_remove_node(node_id, [weak_this](ErrorOr<JsonValue, String> result) {
++                if (!weak_this || result.is_error())
++                    return;
++                if (result.value().is_object()) {
++                    if (auto next_id = result.value().as_object().get_i64("nodeId"sv); next_id.has_value())
++                        weak_this->m_pending_inspect_node_id = *next_id;
++                }
++                weak_this->refresh_dom_tree();
++            });
++            return true;
++        }
++    }
++    return QWidget::eventFilter(watched, event);
++}
++
++void DevToolsPanel::set_active_tab(PanelTab tab)
++{
++    m_active_tab = tab;
++    m_stack->setCurrentIndex(static_cast<int>(tab));
++    update_tab_buttons_style();
++    sync_dom_mutation_subscription();
++
++    if (!m_view.devtools_is_attached())
++        return;
++
++    if (tab == PanelTab::Elements && m_dom_tree->topLevelItemCount() == 0)
++        refresh_dom_tree();
++    else if (tab == PanelTab::Sources && m_source_items_by_key.is_empty())
++        refresh_sources();
++    else if (tab == PanelTab::Storage)
++        refresh_storage();
++}
++
++void DevToolsPanel::sync_dom_mutation_subscription()
++{
++    if (!m_view.devtools_is_attached())
++        return;
++    bool want_mutations = m_is_open && m_active_tab == PanelTab::Elements;
++    m_view.devtools_set_dom_mutations_enabled(want_mutations);
++}
++
++void DevToolsPanel::stop_picker_if_active()
++{
++    if (!m_picker_active)
++        return;
++    m_picker_active = false;
++    m_view.devtools_stop_picker();
++    update_picker_button_state();
++}
++
++void DevToolsPanel::update_picker_button_state()
++{
++    if (!m_picker_button)
++        return;
++    m_picker_button->setChecked(m_picker_active);
++    auto color = m_picker_active ? Theme::accent() : Theme::panel().body;
++    m_picker_button->setIcon(create_picker_icon(color));
++}
++
++void DevToolsPanel::update_tab_buttons_style()
++{
++    m_tab_elements_button->setChecked(m_active_tab == PanelTab::Elements);
++    m_tab_console_button->setChecked(m_active_tab == PanelTab::Console);
++    m_tab_network_button->setChecked(m_active_tab == PanelTab::Network);
++    m_tab_sources_button->setChecked(m_active_tab == PanelTab::Sources);
++    m_tab_storage_button->setChecked(m_active_tab == PanelTab::Storage);
++}
++
++void DevToolsPanel::update_console_badges()
++{
++    if (m_console_error_count > 0) {
++        m_error_badge_button->setText(QStringLiteral("\u00d7 %1").arg(m_console_error_count));
++        m_error_badge_button->show();
++    } else {
++        m_error_badge_button->hide();
++    }
++
++    if (m_console_warning_count > 0) {
++        m_warn_badge_button->setText(QStringLiteral("\u26a0 %1").arg(m_console_warning_count));
++        m_warn_badge_button->show();
++    } else {
++        m_warn_badge_button->hide();
++    }
++}
++
++void DevToolsPanel::show_status_banner(QString const& message, bool show_reattach_button)
++{
++    m_banner_label->setText(message);
++    m_banner_reattach_button->setVisible(show_reattach_button);
++    m_banner->show();
++}
++
++void DevToolsPanel::hide_status_banner()
++{
++    m_banner->hide();
++}
++
++void DevToolsPanel::update_chrome_style()
++{
++    if (m_is_updating_style)
++        return;
++    m_is_updating_style = true;
++
++    auto const& panel = Theme::panel();
++    auto const& chrome = Theme::chrome(*this);
++    auto accent = Theme::accent();
++    auto dark = Theme::is_dark();
++
++    auto bg = ChromeStyle::style_sheet_color(panel.surface);
++    auto page_bg = ChromeStyle::style_sheet_color(panel.page);
++    auto sub_bg = ChromeStyle::style_sheet_color(chrome.toolbar);
++    auto text = ChromeStyle::style_sheet_color(panel.text);
++    auto muted = ChromeStyle::style_sheet_color(panel.muted);
++    auto border = ChromeStyle::style_sheet_color(panel.separator);
++    auto soft_border = ChromeStyle::style_sheet_color(panel.separator_soft);
++    auto control = ChromeStyle::style_sheet_color(panel.control);
++    auto hover = ChromeStyle::style_sheet_color(chrome.hover);
++    auto accent_css = ChromeStyle::style_sheet_color(accent);
++    auto selected_css = ChromeStyle::style_sheet_color(Theme::selected_row());
++    auto err_color = dark ? QStringLiteral("#f87171") : QStringLiteral("#dc2626");
++    auto warn_color = dark ? QStringLiteral("#fbbf24") : QStringLiteral("#b45309");
++
++    setStyleSheet(qformatted(R"(
++        QWidget#HellbirdDevToolsPanel {{
++            background: {0};
++            color: {3};
++        }}
++        QWidget#HellbirdDevToolsHeader {{
++            background: {2};
++            border-bottom: 1px solid {5};
++        }}
++        QWidget#HellbirdDevToolsSubBar {{
++            background: {0};
++            border-bottom: 1px solid {6};
++        }}
++        QWidget#HellbirdDevToolsBreadcrumbs {{
++            background: {2};
++            border-top: 1px solid {5};
++            color: {4};
++            font-size: 11px;
++        }}
++        QWidget#HellbirdDevToolsPromptBar {{
++            background: {1};
++            border-top: 1px solid {5};
++        }}
++        QWidget#HellbirdDevToolsBanner {{
++            background: {7};
++            border-bottom: 1px solid {5};
++        }}
++        QToolButton#HellbirdDevToolsTabButton {{
++            background: transparent;
++            color: {4};
++            border: none;
++            border-bottom: 2px solid transparent;
++            padding: 0 9px;
++            font-size: 12px;
++            font-weight: 500;
++        }}
++        QToolButton#HellbirdDevToolsTabButton:hover {{
++            color: {3};
++            background: {8};
++        }}
++        QToolButton#HellbirdDevToolsTabButton:checked {{
++            color: {3};
++            border-bottom: 2px solid {9};
++        }}
++        QToolButton#HellbirdDevToolsIconButton {{
++            background: transparent;
++            border: none;
++            border-radius: 4px;
++            padding: 2px;
++        }}
++        QToolButton#HellbirdDevToolsIconButton:hover {{
++            background: {8};
++        }}
++        QToolButton#HellbirdDevToolsIconButton:checked {{
++            background: {7};
++        }}
++        QToolButton#HellbirdDevToolsErrorBadge {{
++            background: transparent;
++            border: none;
++            border-radius: 4px;
++            padding: 2px 5px;
++            color: {11};
++            font-size: 11px;
++            font-weight: 600;
++        }}
++        QToolButton#HellbirdDevToolsWarnBadge {{
++            background: transparent;
++            border: none;
++            border-radius: 4px;
++            padding: 2px 5px;
++            color: {12};
++            font-size: 11px;
++            font-weight: 600;
++        }}
++        QTreeWidget, QPlainTextEdit {{
++            background: {1};
++            color: {3};
++            border: none;
++            selection-background-color: {10};
++            selection-color: #ffffff;
++        }}
++        QHeaderView::section {{
++            background: {2};
++            color: {4};
++            border: none;
++            border-bottom: 1px solid {5};
++            border-right: 1px solid {6};
++            padding: 3px 6px;
++            font-size: 11px;
++            font-weight: 500;
++        }}
++        QLineEdit, QComboBox {{
++            background: {1};
++            color: {3};
++            border: 1px solid {5};
++            border-radius: 4px;
++            padding: 2px 6px;
++            font-size: 12px;
++        }}
++        QLineEdit#HellbirdDevToolsConsoleInput {{
++            background: transparent;
++            border: none;
++            padding: 2px 0;
++        }}
++        QPushButton {{
++            background: {7};
++            color: {3};
++            border: 1px solid {5};
++            border-radius: 4px;
++            padding: 2px 8px;
++            font-size: 12px;
++        }}
++        QPushButton:hover {{
++            background: {8};
++        }}
++        QTabWidget::pane {{
++            border: none;
++            background: {1};
++        }}
++        QTabBar::tab {{
++            background: {2};
++            color: {4};
++            border: none;
++            border-bottom: 2px solid transparent;
++            padding: 5px 10px;
++            font-size: 12px;
++        }}
++        QTabBar::tab:selected {{
++            color: {3};
++            border-bottom: 2px solid {9};
++        }}
++        QSplitter::handle {{
++            background: {5};
++        }}
++        QCheckBox {{
++            color: {3};
++            font-size: 12px;
++        }}
++    )",
++        bg, page_bg, sub_bg, text, muted, border, soft_border, control, hover, accent_css, selected_css, err_color, warn_color));
++
++    update_picker_button_state();
++    if (m_dock_button)
++        m_dock_button->setIcon(create_dock_icon(m_dock_side, panel.body));
++    if (m_close_button)
++        m_close_button->setIcon(create_chrome_icon(ChromeIcon::Close, panel.body));
++    if (m_box_model_widget)
++        m_box_model_widget->update();
++    if (m_dom_tree)
++        m_dom_tree->viewport()->update();
++
++    m_is_updating_style = false;
++}
++
++void DevToolsPanel::handle_devtools_event(RemoteView::DevToolsEvent event, JsonObject const& payload)
++{
++    switch (event) {
++    case RemoteView::DevToolsEvent::Attached:
++        m_external_detached = false;
++        m_crash_detached = false;
++        hide_status_banner();
++        // Clear console before upstream replays buffered messages to avoid duplicates.
++        clear_console();
++        sync_dom_mutation_subscription();
++        refresh_dom_tree();
++        if (m_active_tab == PanelTab::Sources)
++            refresh_sources();
++        else if (m_active_tab == PanelTab::Storage)
++            refresh_storage();
++        break;
++
++    case RemoteView::DevToolsEvent::Detached: {
++        auto reason = payload.get_string("reason"sv).value_or(String {});
++        m_picker_active = false;
++        update_picker_button_state();
++        if (reason == "external"sv) {
++            m_external_detached = true;
++            m_crash_detached = false;
++            show_status_banner(tr_ui("External Firefox DevTools connected to this tab."), false);
++        } else if (reason == "crash"sv) {
++            m_external_detached = false;
++            m_crash_detached = true;
++            show_status_banner(tr_ui("Page crashed. Reload the page to continue inspecting."), false);
++        } else {
++            m_external_detached = false;
++            m_crash_detached = false;
++        }
++        break;
++    }
++
++    case RemoteView::DevToolsEvent::Available:
++        if (m_is_open && m_crash_detached) {
++            m_crash_detached = false;
++            m_view.devtools_attach();
++        } else if (m_is_open && m_external_detached) {
++            show_status_banner(tr_ui("External DevTools disconnected. Click Reattach to resume."), true);
++        }
++        break;
++
++    case RemoteView::DevToolsEvent::InspectElement: {
++        auto node_id = payload.get_i64("nodeId"sv);
++        if (node_id.has_value())
++            open_and_inspect(*node_id);
++        break;
++    }
++
++    case RemoteView::DevToolsEvent::Navigated:
++        m_selected_node_id.clear();
++        m_selected_pseudo.clear();
++        m_hovered_node_id.clear();
++        m_dom_items_by_id.clear();
++        m_dom_tree->clear();
++        m_styles_tree->clear();
++        m_computed_tree->clear();
++        m_box_model_widget->set_layout_metrics({});
++        m_layout_props_tree->clear();
++        m_source_items_by_key.clear();
++        m_sources_tree->clear();
++        m_scripts_group_item = nullptr;
++        m_stylesheets_group_item = nullptr;
++        m_source_editor->clear();
++        if (!m_network_preserve_checkbox->isChecked())
++            clear_network_before_latest_navigation();
++        if (m_is_open && m_view.devtools_is_attached()) {
++            refresh_dom_tree();
++            if (m_active_tab == PanelTab::Sources)
++                refresh_sources();
++            else if (m_active_tab == PanelTab::Storage)
++                refresh_storage();
++        }
++        break;
++
++    case RemoteView::DevToolsEvent::Picker: {
++        auto type = payload.get_string("type"sv).value_or(String {});
++        auto node_id = payload.get_i64("nodeId"sv);
++        if (type == "hovered"sv && node_id.has_value()) {
++            if (m_is_open && m_active_tab == PanelTab::Elements)
++                select_dom_node_by_id(*node_id, true);
++        } else if (type == "picked"sv) {
++            m_picker_active = false;
++            update_picker_button_state();
++            if (node_id.has_value())
++                open_and_inspect(*node_id);
++        } else if (type == "canceled"sv || type == "stopped"sv) {
++            m_picker_active = false;
++            update_picker_button_state();
++        }
++        break;
++    }
++
++    case RemoteView::DevToolsEvent::DomMutated:
++        if (m_is_open && m_active_tab == PanelTab::Elements)
++            refresh_dom_tree();
++        break;
++
++    case RemoteView::DevToolsEvent::Console:
++        handle_console_event(payload);
++        break;
++
++    case RemoteView::DevToolsEvent::EvalResult:
++        handle_eval_result_event(payload);
++        break;
++
++    case RemoteView::DevToolsEvent::NetworkStarted:
++        handle_network_started(payload);
++        break;
++
++    case RemoteView::DevToolsEvent::NetworkHeaders:
++        handle_network_headers(payload);
++        break;
++
++    case RemoteView::DevToolsEvent::NetworkFinished:
++        handle_network_finished(payload);
++        break;
++
++    case RemoteView::DevToolsEvent::SourceAdded:
++        add_source_entry(payload);
++        break;
++
++    case RemoteView::DevToolsEvent::StorageChanged:
++        if (m_is_open && m_active_tab == PanelTab::Storage)
++            refresh_storage();
++        break;
++    }
++}
++
++// ============================================================================
++// Elements Tab
++// ============================================================================
++
++void DevToolsPanel::refresh_dom_tree()
++{
++    if (!m_view.devtools_is_attached())
++        return;
++
++    auto gen = ++m_dom_request_generation;
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_get_dom_tree([weak_this, gen](ErrorOr<JsonValue, String> result) {
++        if (!weak_this || weak_this->m_dom_request_generation != gen)
++            return;
++        if (result.is_error()) {
++            auto err = result.error();
++            if (err == "too-deep"sv)
++                weak_this->m_dom_status_label->setText(tr_ui("DOM tree is too deeply nested to inspect (>255 levels)."));
++            else
++                weak_this->m_dom_status_label->setText(tr_ui("Unable to load DOM tree."));
++            weak_this->m_dom_status_label->show();
++            return;
++        }
++        weak_this->m_dom_status_label->hide();
++        if (result.value().is_object())
++            weak_this->populate_dom_tree(result.value().as_object());
++    });
++}
++
++void DevToolsPanel::populate_dom_tree(JsonObject const& root)
++{
++    QHash<qint64, bool> previously_expanded;
++    for (auto const& entry : m_dom_items_by_id) {
++        if (entry.value)
++            previously_expanded.insert(entry.key, entry.value->isExpanded());
++    }
++
++    auto target_select_id = m_pending_inspect_node_id.has_value() ? m_pending_inspect_node_id : m_selected_node_id;
++
++    m_dom_tree->blockSignals(true);
++    m_dom_tree->clear();
++    m_dom_items_by_id.clear();
++
++    populate_dom_node(nullptr, root, previously_expanded);
++    m_dom_tree->blockSignals(false);
++
++    if (!m_dom_filter_edit->text().isEmpty())
++        filter_dom_tree(m_dom_filter_edit->text());
++
++    if (target_select_id.has_value() && m_dom_items_by_id.contains(*target_select_id)) {
++        m_pending_inspect_node_id.clear();
++        select_dom_node_by_id(*target_select_id, true);
++    } else if (m_dom_tree->topLevelItemCount() > 0 && !m_selected_node_id.has_value()) {
++        // Auto-expand root document and <html> so the page structure is immediately visible.
++        auto* doc_item = m_dom_tree->topLevelItem(0);
++        doc_item->setExpanded(true);
++        for (int i = 0; i < doc_item->childCount(); ++i)
++            doc_item->child(i)->setExpanded(true);
++    }
++}
++
++void DevToolsPanel::populate_dom_node(QTreeWidgetItem* parent, JsonObject const& node, QHash<qint64, bool> const& previously_expanded)
++{
++    auto type_str = node.get_string("type"sv);
++    auto name_str = node.get_string("name"sv).value_or(String {});
++    auto node_id = node.get_i64("id"sv);
++    auto parent_id = node.get_i64("parent-id"sv);
++    auto pseudo_element = node.get_u32("pseudo-element"sv);
++
++    auto q_type = type_str.has_value() ? qstring_from_ak_string(*type_str) : QStringLiteral("doctype");
++    auto q_name = qstring_from_ak_string(name_str);
++
++    // Check if this element has a single short text child to inline it cleanly (<p>Hello</p>).
++    auto children_array = node.get_array("children"sv);
++    QString inline_text;
++    bool inline_single_text_child = false;
++    if (q_type == QLatin1StringView("element") && children_array.has_value() && children_array->size() == 1) {
++        auto const& only_child = children_array->at(0);
++        if (only_child.is_object()) {
++            auto child_type = only_child.as_object().get_string("type"sv);
++            if (child_type.has_value() && *child_type == "text"sv) {
++                auto text_val = only_child.as_object().get_string("text"sv);
++                if (text_val.has_value()) {
++                    auto q_txt = qstring_from_ak_string(*text_val).simplified();
++                    if (q_txt.size() <= 80) {
++                        inline_text = q_txt;
++                        inline_single_text_child = true;
++                    }
++                }
++            }
++        }
++    }
++
++    auto* item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_dom_tree);
++    auto effective_id = node_id.has_value() ? *node_id : parent_id.value_or(0);
++    item->setData(0, NodeIdRole, static_cast<qint64>(effective_id));
++    if (pseudo_element.has_value())
++        item->setData(0, NodePseudoRole, static_cast<quint32>(*pseudo_element));
++    item->setData(0, NodeTypeRole, q_type);
++
++    QString search_blob;
++    if (q_type == QLatin1StringView("element")) {
++        auto lower_tag = q_name.toLower();
++        item->setData(0, NodeTagRole, lower_tag);
++        search_blob = lower_tag;
++
++        QStringList attrs_flat;
++        if (auto attrs_obj = node.get_object("attributes"sv); attrs_obj.has_value()) {
++            attrs_obj->for_each_member([&](String const& key, JsonValue const& val) {
++                auto k = qstring_from_ak_string(key);
++                auto v = val.is_string() ? qstring_from_ak_string(val.as_string()) : QString {};
++                attrs_flat.append(k);
++                attrs_flat.append(v);
++                if (k == QLatin1StringView("id")) {
++                    item->setData(0, NodeIdAttrRole, v);
++                    search_blob += QStringLiteral(" #") + v;
++                } else if (k == QLatin1StringView("class")) {
++                    item->setData(0, NodeClassAttrRole, v);
++                    search_blob += QStringLiteral(" .") + v;
++                }
++                search_blob += QStringLiteral(" ") + k + QStringLiteral("=") + v;
++            });
++        }
++        item->setData(0, NodeAttrsListRole, attrs_flat);
++        if (!inline_text.isEmpty()) {
++            item->setData(0, NodeInlineTextRole, inline_text);
++            search_blob += QStringLiteral(" ") + inline_text;
++        }
++        bool is_leaf = inline_single_text_child || !children_array.has_value() || children_array->is_empty();
++        item->setData(0, NodeIsLeafRole, is_leaf);
++        item->setText(0, QStringLiteral("<%1>").arg(lower_tag));
++    } else if (q_type == QLatin1StringView("text")) {
++        auto txt = qstring_from_ak_string(node.get_string("text"sv).value_or(String {})).simplified();
++        item->setData(0, NodeInlineTextRole, txt);
++        item->setText(0, txt);
++        search_blob = txt;
++    } else if (q_type == QLatin1StringView("comment")) {
++        auto txt = qstring_from_ak_string(node.get_string("data"sv).value_or(String {})).simplified();
++        item->setData(0, NodeInlineTextRole, txt);
++        item->setText(0, txt);
++        search_blob = txt;
++    } else if (q_type == QLatin1StringView("pseudo-element")) {
++        item->setData(0, NodeTagRole, q_name);
++        item->setText(0, q_name);
++        search_blob = q_name;
++    } else if (q_type == QLatin1StringView("shadow-root")) {
++        auto mode = node.get_string("mode"sv).value_or("open"_string);
++        auto label = QStringLiteral("#shadow-root (%1)").arg(qstring_from_ak_string(mode));
++        item->setData(0, NodeTagRole, label);
++        item->setText(0, label);
++        search_blob = label;
++    } else if (q_type == QLatin1StringView("document")) {
++        item->setText(0, QStringLiteral("#document"));
++        search_blob = QStringLiteral("#document");
++    } else {
++        auto label = QStringLiteral("<!DOCTYPE %1>").arg(q_name.isEmpty() ? QStringLiteral("html") : q_name);
++        item->setText(0, label);
++        search_blob = label;
++    }
++
++    item->setData(0, NodeFullSearchTextRole, search_blob.toLower());
++
++    if (node_id.has_value() && !pseudo_element.has_value())
++        m_dom_items_by_id.set(*node_id, item);
++
++    if (children_array.has_value() && !inline_single_text_child) {
++        children_array->for_each([&](JsonValue const& child) {
++            if (child.is_object())
++                populate_dom_node(item, child.as_object(), previously_expanded);
++        });
++    }
++
++    if (node_id.has_value() && previously_expanded.contains(*node_id))
++        item->setExpanded(previously_expanded.value(*node_id));
++    else if (q_type == QLatin1StringView("document") || (q_type == QLatin1StringView("element") && q_name.compare(QLatin1StringView("html"), Qt::CaseInsensitive) == 0))
++        item->setExpanded(true);
++}
++
++void DevToolsPanel::select_dom_node_by_id(i64 node_id, bool scroll_to)
++{
++    auto it = m_dom_items_by_id.find(node_id);
++    if (it == m_dom_items_by_id.end() || !it->value)
++        return;
++
++    auto* item = it->value;
++    for (auto* p = item->parent(); p; p = p->parent())
++        p->setExpanded(true);
++
++    m_dom_tree->setCurrentItem(item);
++    if (scroll_to)
++        m_dom_tree->scrollToItem(item, QAbstractItemView::PositionAtCenter);
++}
++
++void DevToolsPanel::on_dom_selection_changed()
++{
++    auto items = m_dom_tree->selectedItems();
++    if (items.isEmpty()) {
++        m_selected_node_id.clear();
++        m_selected_pseudo.clear();
++        update_dom_breadcrumbs(nullptr);
++        return;
++    }
++
++    auto* item = items.first();
++    bool ok = false;
++    auto node_id = item->data(0, NodeIdRole).toLongLong(&ok);
++    if (!ok || node_id <= 0)
++        return;
++
++    Optional<u32> pseudo;
++    auto pseudo_val = item->data(0, NodePseudoRole);
++    if (pseudo_val.isValid() && !pseudo_val.isNull())
++        pseudo = static_cast<u32>(pseudo_val.toUInt());
++
++    m_selected_node_id = node_id;
++    m_selected_pseudo = pseudo;
++    update_dom_breadcrumbs(item);
++    fetch_selected_node_properties();
++}
++
++void DevToolsPanel::update_dom_breadcrumbs(QTreeWidgetItem* item)
++{
++    while (m_breadcrumb_layout->count() > 0) {
++        auto* child = m_breadcrumb_layout->takeAt(0);
++        if (child->widget())
++            child->widget()->deleteLater();
++        delete child;
++    }
++
++    Vector<QTreeWidgetItem*> chain;
++    for (auto* cur = item; cur; cur = cur->parent()) {
++        auto type = cur->data(0, NodeTypeRole).toString();
++        if (type == QLatin1StringView("element") || type == QLatin1StringView("pseudo-element") || type == QLatin1StringView("shadow-root"))
++            chain.append(cur);
++    }
++
++    for (size_t i = chain.size(); i > 0; --i) {
++        auto* node_item = chain[i - 1];
++        if (i < chain.size()) {
++            auto* sep = new QLabel(QStringLiteral("\u203a"), m_breadcrumb_bar);
++            sep->setTextFormat(Qt::PlainText);
++            m_breadcrumb_layout->addWidget(sep);
++        }
++
++        auto label = node_item->data(0, NodeTagRole).toString();
++        auto id_attr = node_item->data(0, NodeIdAttrRole).toString();
++        auto class_attr = node_item->data(0, NodeClassAttrRole).toString();
++        if (!id_attr.isEmpty())
++            label += QStringLiteral("#") + id_attr;
++        else if (!class_attr.isEmpty()) {
++            auto first_cls = class_attr.simplified().section(QLatin1Char(' '), 0, 0);
++            if (!first_cls.isEmpty())
++                label += QStringLiteral(".") + first_cls;
++        }
++
++        auto* crumb = new QToolButton(m_breadcrumb_bar);
++        crumb->setObjectName(QStringLiteral("HellbirdDevToolsIconButton"));
++        crumb->setText(label);
++        crumb->setCursor(Qt::PointingHandCursor);
++        auto target_id = node_item->data(0, NodeIdRole).toLongLong();
++        connect(crumb, &QToolButton::clicked, this, [this, target_id] {
++            select_dom_node_by_id(target_id, true);
++        });
++        m_breadcrumb_layout->addWidget(crumb);
++    }
++
++    m_breadcrumb_layout->addStretch(1);
++}
++
++void DevToolsPanel::filter_dom_tree(QString const& query)
++{
++    auto needle = query.trimmed().toLower();
++    for (int i = 0; i < m_dom_tree->topLevelItemCount(); ++i)
++        filter_dom_item_recursive(m_dom_tree->topLevelItem(i), needle);
++}
++
++bool DevToolsPanel::filter_dom_item_recursive(QTreeWidgetItem* item, QString const& needle)
++{
++    if (!item)
++        return false;
++    bool child_matched = false;
++    for (int i = 0; i < item->childCount(); ++i) {
++        if (filter_dom_item_recursive(item->child(i), needle))
++            child_matched = true;
++    }
++    bool self_matched = needle.isEmpty() || item->data(0, NodeFullSearchTextRole).toString().contains(needle);
++    bool visible = self_matched || child_matched;
++    item->setHidden(!visible);
++    if (!needle.isEmpty() && child_matched)
++        item->setExpanded(true);
++    return visible;
++}
++
++QString DevToolsPanel::build_css_selector(QTreeWidgetItem* item) const
++{
++    QStringList parts;
++    for (auto* cur = item; cur; cur = cur->parent()) {
++        if (cur->data(0, NodeTypeRole).toString() != QLatin1StringView("element"))
++            continue;
++        auto tag = cur->data(0, NodeTagRole).toString();
++        auto id_attr = cur->data(0, NodeIdAttrRole).toString();
++        if (!id_attr.isEmpty()) {
++            parts.prepend(QStringLiteral("#%1").arg(id_attr));
++            break;
++        }
++        auto cls = cur->data(0, NodeClassAttrRole).toString().simplified();
++        QString segment = tag;
++        if (!cls.isEmpty()) {
++            auto classes = cls.split(QLatin1Char(' '), Qt::SkipEmptyParts);
++            for (qsizetype i = 0; i < min(classes.size(), static_cast<qsizetype>(2)); ++i)
++                segment += QStringLiteral(".") + classes[i];
++        }
++        parts.prepend(segment);
++    }
++    return parts.join(QStringLiteral(" > "));
++}
++
++void DevToolsPanel::show_dom_context_menu(QPoint const& pos)
++{
++    auto* item = m_dom_tree->itemAt(pos);
++    if (!item)
++        return;
++    bool ok = false;
++    auto node_id = item->data(0, NodeIdRole).toLongLong(&ok);
++    if (!ok || node_id <= 0)
++        return;
++    auto node_type = item->data(0, NodeTypeRole).toString();
++
++    QMenu menu(this);
++    if (node_type == QLatin1StringView("element")) {
++        auto* edit_html = menu.addAction(tr_ui("Edit as HTML\u2026"));
++        connect(edit_html, &QAction::triggered, this, [this, node_id] {
++            open_edit_html_dialog(node_id);
++        });
++        menu.addSeparator();
++
++        auto* copy_outer = menu.addAction(tr_ui("Copy outerHTML"));
++        connect(copy_outer, &QAction::triggered, this, [this, node_id] {
++            m_view.devtools_get_html(node_id, true, [](ErrorOr<JsonValue, String> res) {
++                if (!res.is_error() && res.value().is_string()) {
++                    if (auto* cb = QApplication::clipboard())
++                        cb->setText(qstring_from_ak_string(res.value().as_string()));
++                }
++            });
++        });
++
++        auto* copy_inner = menu.addAction(tr_ui("Copy innerHTML"));
++        connect(copy_inner, &QAction::triggered, this, [this, node_id] {
++            m_view.devtools_get_html(node_id, false, [](ErrorOr<JsonValue, String> res) {
++                if (!res.is_error() && res.value().is_string()) {
++                    if (auto* cb = QApplication::clipboard())
++                        cb->setText(qstring_from_ak_string(res.value().as_string()));
++                }
++            });
++        });
++
++        auto selector = build_css_selector(item);
++        auto* copy_sel = menu.addAction(tr_ui("Copy CSS selector"));
++        connect(copy_sel, &QAction::triggered, this, [selector] {
++            if (auto* cb = QApplication::clipboard())
++                cb->setText(selector);
++        });
++
++        menu.addSeparator();
++        auto* dup_action = menu.addAction(tr_ui("Duplicate element"));
++        connect(dup_action, &QAction::triggered, this, [this, node_id] {
++            QPointer<DevToolsPanel> weak_this { this };
++            m_view.devtools_clone_node(node_id, [weak_this](ErrorOr<JsonValue, String> res) {
++                if (!weak_this || res.is_error())
++                    return;
++                if (res.value().is_object()) {
++                    if (auto new_id = res.value().as_object().get_i64("nodeId"sv); new_id.has_value())
++                        weak_this->m_pending_inspect_node_id = *new_id;
++                }
++                weak_this->refresh_dom_tree();
++            });
++        });
++
++        auto* del_action = menu.addAction(tr_ui("Delete element"));
++        connect(del_action, &QAction::triggered, this, [this, node_id] {
++            QPointer<DevToolsPanel> weak_this { this };
++            m_view.devtools_remove_node(node_id, [weak_this](ErrorOr<JsonValue, String> res) {
++                if (!weak_this || res.is_error())
++                    return;
++                if (res.value().is_object()) {
++                    if (auto next_id = res.value().as_object().get_i64("nodeId"sv); next_id.has_value())
++                        weak_this->m_pending_inspect_node_id = *next_id;
++                }
++                weak_this->refresh_dom_tree();
++            });
++        });
++    }
++
++    if (!menu.isEmpty())
++        menu.exec(m_dom_tree->viewport()->mapToGlobal(pos));
++}
++
++void DevToolsPanel::open_edit_html_dialog(i64 node_id)
++{
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_get_html(node_id, true, [weak_this, node_id](ErrorOr<JsonValue, String> res) {
++        if (!weak_this || res.is_error() || !res.value().is_string())
++            return;
++
++        auto initial_html = qstring_from_ak_string(res.value().as_string());
++        // Defer modal dialog execution out of the IPC reply dispatch stack.
++        QTimer::singleShot(0, weak_this, [weak_this, node_id, initial_html = AK::move(initial_html)]() {
++            if (!weak_this || !weak_this->m_is_open)
++                return;
++
++            QDialog dialog(weak_this);
++            dialog.setWindowTitle(tr_ui("Edit as HTML"));
++            dialog.resize(520, 320);
++            auto* vbox = new QVBoxLayout(&dialog);
++            auto* editor = new QPlainTextEdit(&dialog);
++            editor->setFont(devtools_mono_font(12));
++            editor->setPlainText(initial_html);
++            vbox->addWidget(editor, 1);
++
++            auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
++            QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
++            QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
++            vbox->addWidget(buttons);
++
++            if (dialog.exec() == QDialog::Accepted && weak_this) {
++                auto updated_html = ak_string_from_qstring(editor->toPlainText());
++                weak_this->m_view.devtools_set_outer_html(node_id, AK::move(updated_html), [weak_this](ErrorOr<JsonValue, String> edit_res) {
++                    if (!weak_this || edit_res.is_error())
++                        return;
++                    if (edit_res.value().is_object()) {
++                        if (auto new_id = edit_res.value().as_object().get_i64("nodeId"sv); new_id.has_value())
++                            weak_this->m_pending_inspect_node_id = *new_id;
++                    }
++                    weak_this->refresh_dom_tree();
++                });
++            }
++        });
++    });
++}
++
++void DevToolsPanel::fetch_selected_node_properties()
++{
++    if (!m_selected_node_id.has_value() || !m_view.devtools_is_attached())
++        return;
++
++    auto node_id = *m_selected_node_id;
++    auto pseudo = m_selected_pseudo;
++    auto gen = ++m_props_request_generation;
++    QPointer<DevToolsPanel> weak_this { this };
++
++    m_view.devtools_get_node_properties(node_id, pseudo, RemoteView::DevToolsNodeProperties::AppliedRules,
++        [weak_this, gen](ErrorOr<JsonValue, String> res) {
++            if (!weak_this || weak_this->m_props_request_generation != gen)
++                return;
++            if (!res.is_error() && res.value().is_array())
++                weak_this->populate_applied_rules(res.value().as_array());
++            else
++                weak_this->m_styles_tree->clear();
++        });
++
++    m_view.devtools_get_node_properties(node_id, pseudo, RemoteView::DevToolsNodeProperties::Computed,
++        [weak_this, gen](ErrorOr<JsonValue, String> res) {
++            if (!weak_this || weak_this->m_props_request_generation != gen)
++                return;
++            if (!res.is_error() && res.value().is_object())
++                weak_this->populate_computed_styles(res.value().as_object());
++            else
++                weak_this->m_computed_tree->clear();
++        });
++
++    m_view.devtools_get_node_properties(node_id, pseudo, RemoteView::DevToolsNodeProperties::Layout,
++        [weak_this, gen](ErrorOr<JsonValue, String> res) {
++            if (!weak_this || weak_this->m_props_request_generation != gen)
++                return;
++            weak_this->m_layout_props_tree->clear();
++            if (!res.is_error() && res.value().is_object()) {
++                auto const& obj = res.value().as_object();
++                weak_this->m_box_model_widget->set_layout_metrics(obj);
++                static constexpr Array layout_keys {
++                    "display"sv,
++                    "position"sv,
++                    "box-sizing"sv,
++                    "float"sv,
++                    "line-height"sv,
++                    "z-index"sv,
++                };
++                for (auto key : layout_keys) {
++                    if (auto val = obj.get_string(key); val.has_value() && !val->is_empty()) {
++                        auto* row = new QTreeWidgetItem(weak_this->m_layout_props_tree);
++                        row->setText(0, qstring_from_ak_string(key));
++                        row->setText(1, qstring_from_ak_string(*val));
++                        row->setForeground(0, Theme::panel().muted);
++                    }
++                }
++            } else {
++                weak_this->m_box_model_widget->set_layout_metrics({});
++            }
++        });
++}
++
++void DevToolsPanel::populate_applied_rules(JsonArray const& rules)
++{
++    m_styles_tree->clear();
++
++    auto const& panel = Theme::panel();
++    auto dark = Theme::is_dark();
++    QColor selector_color = dark ? QColor(0x93, 0xc5, 0xfd) : QColor(0x1d, 0x4e, 0xd8);
++    QColor prop_color = dark ? QColor(0xfd, 0xba, 0x74) : QColor(0x99, 0x45, 0x00);
++    QColor val_color = panel.text;
++
++    HashTable<String> seen_important;
++    HashTable<String> seen_normal;
++    Optional<i64> last_inherited_node_id;
++
++    rules.for_each([&](JsonValue const& entry_val) {
++        if (!entry_val.is_object())
++            return;
++        auto const& entry = entry_val.as_object();
++        auto rule_opt = entry.get_object("rule"sv);
++        if (!rule_opt.has_value())
++            return;
++        auto const& rule = *rule_opt;
++
++        Optional<i64> inherited_from = entry.get_i64("inheritedNodeId"sv);
++        if (!inherited_from.has_value()) {
++            if (auto inh = entry.get("inherited"sv); inh.has_value() && !inh->is_null())
++                inherited_from = inh->get_integer<i64>();
++        }
++
++        bool is_inline = rule.get_integer<i64>("type"sv).value_or(0) == 100
++            || rule.get_integer<i64>("className"sv).value_or(0) == 100;
++
++        auto decls_opt = rule.get_array("declarations"sv);
++        if (!decls_opt.has_value() || decls_opt->is_empty())
++            return;
++
++        // If inherited, skip rules that have no inheritable declarations.
++        if (inherited_from.has_value()) {
++            bool any_inheritable = false;
++            decls_opt->for_each([&](JsonValue const& d) {
++                if (d.is_object() && d.as_object().get_bool("inherits"sv).value_or(false))
++                    any_inheritable = true;
++            });
++            if (!any_inheritable)
++                return;
++        }
++
++        if (inherited_from.has_value() && inherited_from != last_inherited_node_id) {
++            last_inherited_node_id = inherited_from;
++            auto* divider = new QTreeWidgetItem(m_styles_tree);
++            QString ancestor_label = QStringLiteral("#%1").arg(*inherited_from);
++            if (auto it = m_dom_items_by_id.find(*inherited_from); it != m_dom_items_by_id.end() && it->value)
++                ancestor_label = it->value->data(0, NodeTagRole).toString();
++            divider->setText(0, tr_ui("Inherited from") + QStringLiteral(" ") + ancestor_label);
++            divider->setForeground(0, panel.muted);
++            divider->setFirstColumnSpanned(true);
++            divider->setFlags(Qt::ItemIsEnabled);
++        }
++
++        QString header_text;
++        if (is_inline) {
++            header_text = QStringLiteral("element.style");
++        } else if (auto selectors = rule.get_array("selectors"sv); selectors.has_value() && !selectors->is_empty()) {
++            QStringList sel_list;
++            selectors->for_each([&](JsonValue const& s) {
++                if (s.is_string())
++                    sel_list.append(qstring_from_ak_string(s.as_string()));
++            });
++            header_text = sel_list.join(QStringLiteral(", "));
++        } else {
++            header_text = QStringLiteral("rule");
++        }
++
++        QString source_label;
++        if (auto rule_id = rule.get_object("ruleId"sv); rule_id.has_value()) {
++            if (auto url_s = rule_id->get_string("url"sv); url_s.has_value() && !url_s->is_empty()) {
++                QUrl qurl(qstring_from_ak_string(*url_s));
++                source_label = qurl.fileName().isEmpty() ? qurl.host() : qurl.fileName();
++            } else if (auto st = rule_id->get_string("type"sv); st.has_value()) {
++                source_label = qstring_from_ak_string(*st);
++            }
++        }
++
++        auto* rule_item = new QTreeWidgetItem(m_styles_tree);
++        rule_item->setText(0, header_text + QStringLiteral(" {"));
++        rule_item->setText(1, source_label);
++        rule_item->setForeground(0, selector_color);
++        rule_item->setForeground(1, panel.muted);
++
++        decls_opt->for_each([&](JsonValue const& decl_val) {
++            if (!decl_val.is_object())
++                return;
++            auto const& decl = decl_val.as_object();
++            if (inherited_from.has_value() && !decl.get_bool("inherits"sv).value_or(false))
++                return;
++
++            auto prop_name = decl.get_string("name"sv).value_or(String {});
++            auto prop_value = decl.get_string("value"sv).value_or(String {});
++            auto priority = decl.get_string("priority"sv).value_or(String {});
++            bool is_important = priority == "important"sv;
++            bool is_valid = decl.get_bool("isValid"sv).value_or(true) && decl.get_bool("isNameValid"sv).value_or(true);
++
++            bool overridden = !is_valid || seen_important.contains(prop_name) || (!is_important && seen_normal.contains(prop_name));
++            if (is_valid) {
++                if (is_important)
++                    seen_important.set(prop_name);
++                else
++                    seen_normal.set(prop_name);
++            }
++
++            auto q_prop = qstring_from_ak_string(prop_name);
++            auto q_val = qstring_from_ak_string(prop_value);
++            if (is_important)
++                q_val += QStringLiteral(" !important");
++
++            auto* decl_item = new QTreeWidgetItem(rule_item);
++            decl_item->setText(0, q_prop + QStringLiteral(":"));
++            decl_item->setText(1, q_val + QStringLiteral(";"));
++            decl_item->setForeground(0, overridden ? panel.muted : prop_color);
++            decl_item->setForeground(1, overridden ? panel.muted : val_color);
++
++            if (overridden) {
++                auto f = devtools_mono_font(12);
++                f.setStrikeOut(true);
++                decl_item->setFont(0, f);
++                decl_item->setFont(1, f);
++            }
++
++            if (auto swatch = parse_css_color_swatch(qstring_from_ak_string(prop_value)); swatch.has_value())
++                decl_item->setIcon(1, create_color_swatch_icon(*swatch));
++        });
++
++        rule_item->setExpanded(true);
++    });
++
++    if (!m_styles_filter_edit->text().isEmpty())
++        filter_styles_tree(m_styles_filter_edit->text());
++}
++
++void DevToolsPanel::populate_computed_styles(JsonObject const& computed)
++{
++    m_computed_tree->clear();
++
++    struct ComputedStyleRow {
++        String name;
++        String value;
++    };
++    Vector<ComputedStyleRow> rows;
++    rows.ensure_capacity(computed.size());
++    computed.for_each_member([&](String const& name, JsonValue const& val) {
++        if (val.is_string())
++            rows.unchecked_append({ name, val.as_string() });
++    });
++    quick_sort(rows, [](auto const& a, auto const& b) {
++        return a.name < b.name;
++    });
++
++    auto const& panel = Theme::panel();
++    auto dark = Theme::is_dark();
++    QColor prop_color = dark ? QColor(0xfd, 0xba, 0x74) : QColor(0x99, 0x45, 0x00);
++
++    for (auto const& row : rows) {
++        auto q_name = qstring_from_ak_string(row.name);
++        auto q_val = qstring_from_ak_string(row.value);
++        auto* item = new QTreeWidgetItem(m_computed_tree);
++        item->setText(0, q_name);
++        item->setText(1, q_val);
++        item->setForeground(0, prop_color);
++        item->setForeground(1, panel.text);
++        if (auto swatch = parse_css_color_swatch(q_val); swatch.has_value())
++            item->setIcon(1, create_color_swatch_icon(*swatch));
++    }
++
++    if (!m_computed_filter_edit->text().isEmpty())
++        filter_computed_tree(m_computed_filter_edit->text());
++}
++
++void DevToolsPanel::filter_styles_tree(QString const& query)
++{
++    auto needle = query.trimmed().toLower();
++    for (int i = 0; i < m_styles_tree->topLevelItemCount(); ++i) {
++        auto* rule_item = m_styles_tree->topLevelItem(i);
++        if (rule_item->childCount() == 0) {
++            rule_item->setHidden(!needle.isEmpty());
++            continue;
++        }
++        bool header_match = needle.isEmpty() || rule_item->text(0).toLower().contains(needle);
++        bool any_child = false;
++        for (int j = 0; j < rule_item->childCount(); ++j) {
++            auto* decl = rule_item->child(j);
++            bool match = header_match || decl->text(0).toLower().contains(needle) || decl->text(1).toLower().contains(needle);
++            decl->setHidden(!match);
++            if (match)
++                any_child = true;
++        }
++        rule_item->setHidden(!any_child);
++    }
++}
++
++void DevToolsPanel::filter_computed_tree(QString const& query)
++{
++    auto needle = query.trimmed().toLower();
++    for (int i = 0; i < m_computed_tree->topLevelItemCount(); ++i) {
++        auto* item = m_computed_tree->topLevelItem(i);
++        bool match = needle.isEmpty() || item->text(0).toLower().contains(needle) || item->text(1).toLower().contains(needle);
++        item->setHidden(!match);
++    }
++}
++
++// ============================================================================
++// Console Tab
++// ============================================================================
++
++void DevToolsPanel::clear_console()
++{
++    ++m_console_generation;
++    m_console_tree->clear();
++    m_console_entries.clear();
++    m_console_error_count = 0;
++    m_console_warning_count = 0;
++    update_console_badges();
++}
++
++QString DevToolsPanel::format_grip(JsonValue const& value, int depth)
++{
++    if (value.is_null())
++        return QStringLiteral("null");
++    if (value.is_bool())
++        return value.as_bool() ? QStringLiteral("true") : QStringLiteral("false");
++    if (value.is_number())
++        return qstring_from_ak_string(value.serialized());
++    if (value.is_string()) {
++        auto s = qstring_from_ak_string(value.as_string());
++        return depth > 0 ? QStringLiteral("\"%1\"").arg(truncate_display(s, 120)) : s;
++    }
++    if (value.is_object()) {
++        auto const& obj = value.as_object();
++        auto type = obj.get_string("type"sv).value_or(String {});
++        if (type == "undefined"sv || type == "null"sv || type == "NaN"sv || type == "Infinity"sv || type == "-Infinity"sv || type == "-0"sv)
++            return qstring_from_ak_string(type);
++        if (type == "BigInt"sv)
++            return qstring_from_ak_string(obj.get_string("text"sv).value_or("0n"_string));
++        if (type == "object"sv) {
++            if (auto ds = obj.get_string("displayString"sv); ds.has_value() && !ds->is_empty())
++                return qstring_from_ak_string(*ds);
++            if (auto preview = obj.get_string("preview"sv); preview.has_value() && !preview->is_empty())
++                return qstring_from_ak_string(*preview);
++            auto cls = obj.get_string("class"sv).value_or("Object"_string);
++            if (auto name = obj.get_string("name"sv); name.has_value() && !name->is_empty())
++                return QStringLiteral("%1 (%2)").arg(qstring_from_ak_string(cls), qstring_from_ak_string(*name));
++            return qstring_from_ak_string(cls);
++        }
++    }
++    return qstring_from_ak_string(value.serialized());
++}
++
++void DevToolsPanel::handle_console_event(JsonObject const& payload)
++{
++    auto kind = payload.get_string("kind"sv).value_or(String {});
++    if (kind == "groupEnd"sv)
++        return;
++
++    auto format_location = [](Optional<JsonObject const&> loc) -> QString {
++        if (!loc.has_value())
++            return {};
++        auto file = loc->get_string("file"sv).value_or(String {});
++        auto line = loc->get_u64("line"sv);
++        if (file.is_empty())
++            return {};
++        QUrl qurl(qstring_from_ak_string(file));
++        auto base = qurl.fileName().isEmpty() ? qstring_from_ak_string(file) : qurl.fileName();
++        if (line.has_value())
++            return QStringLiteral("%1:%2").arg(base).arg(*line);
++        return base;
++    };
++
++    auto extract_stack = [&](Optional<JsonArray const&> stack) -> Vector<QString> {
++        Vector<QString> lines;
++        if (!stack.has_value())
++            return lines;
++        stack->for_each([&](JsonValue const& fval) {
++            if (!fval.is_object())
++                return;
++            auto const& f = fval.as_object();
++            auto fn = qstring_from_ak_string(f.get_string("function"sv).value_or("(anonymous)"_string));
++            auto loc = format_location(f);
++            lines.append(loc.isEmpty() ? QStringLiteral("  at %1").arg(fn) : QStringLiteral("  at %1 (%2)").arg(fn, loc));
++        });
++        return lines;
++    };
++
++    if (kind == "error"sv) {
++        auto name = qstring_from_ak_string(payload.get_string("name"sv).value_or("Error"_string));
++        auto msg = qstring_from_ak_string(payload.get_string("message"sv).value_or(String {}));
++        bool in_promise = payload.get_bool("inPromise"sv).value_or(false);
++        auto full = in_promise
++            ? QStringLiteral("Uncaught (in promise) %1: %2").arg(name, msg)
++            : QStringLiteral("Uncaught %1: %2").arg(name, msg);
++        auto stack = extract_stack(payload.get_array("stack"sv));
++        QString loc;
++        if (auto stack_arr = payload.get_array("stack"sv); stack_arr.has_value() && !stack_arr->is_empty() && stack_arr->at(0).is_object())
++            loc = format_location(stack_arr->at(0).as_object());
++        ++m_console_error_count;
++        update_console_badges();
++        append_console_item(QStringLiteral("\u00d7 "), full, loc, ConsoleFilter::Errors, {}, stack);
++        return;
++    }
++
++    if (kind == "trace"sv) {
++        auto label = qstring_from_ak_string(payload.get_string("label"sv).value_or("console.trace"_string));
++        auto stack = extract_stack(payload.get_array("stack"sv));
++        append_console_item(QStringLiteral("\u2139 "), label, {}, ConsoleFilter::Info, {}, stack);
++        return;
++    }
++
++    if (kind == "log"sv) {
++        auto level = payload.get_string("level"sv).value_or("log"_string);
++        ConsoleFilter cat = ConsoleFilter::Log;
++        QString prefix;
++        if (level == "error"sv || level == "assert"sv) {
++            cat = ConsoleFilter::Errors;
++            prefix = QStringLiteral("\u00d7 ");
++            ++m_console_error_count;
++            update_console_badges();
++        } else if (level == "warn"sv) {
++            cat = ConsoleFilter::Warnings;
++            prefix = QStringLiteral("\u26a0 ");
++            ++m_console_warning_count;
++            update_console_badges();
++        } else if (level == "info"sv || level == "debug"sv) {
++            cat = ConsoleFilter::Info;
++            prefix = QStringLiteral("\u2139 ");
++        }
++
++        QStringList parts;
++        Optional<u64> first_object_id;
++        if (auto args = payload.get_array("args"sv); args.has_value()) {
++            args->for_each([&](JsonValue const& arg) {
++                parts.append(format_grip(arg, 0));
++                if (!first_object_id.has_value() && arg.is_object()) {
++                    if (auto oid = arg.as_object().get_u64("objectId"sv); oid.has_value())
++                        first_object_id = *oid;
++                }
++            });
++        }
++        auto loc = format_location(payload.get_object("location"sv));
++        append_console_item(prefix, parts.join(QLatin1Char(' ')), loc, cat, first_object_id);
++    }
++}
++
++void DevToolsPanel::handle_eval_result_event(JsonObject const& payload)
++{
++    auto val = payload.get("value"sv);
++    if (!val.has_value())
++        return;
++
++    Optional<u64> object_id;
++    if (val->is_object()) {
++        if (auto oid = val->as_object().get_u64("objectId"sv); oid.has_value())
++            object_id = *oid;
++    }
++
++    append_console_item(QStringLiteral("\u2190 "), format_grip(*val, 1), {}, ConsoleFilter::Log, object_id);
++}
++
++void DevToolsPanel::append_console_item(QString const& prefix, QString const& text, QString const& location, ConsoleFilter category, Optional<u64> object_id, Vector<QString> const& stack_lines)
++{
++    auto* item = new QTreeWidgetItem(m_console_tree);
++    auto display_line = prefix + text;
++    item->setText(0, display_line);
++    item->setText(1, location);
++    item->setData(0, ConsoleCopyTextRole, text);
++
++    auto const& panel = Theme::panel();
++    auto dark = Theme::is_dark();
++    if (category == ConsoleFilter::Errors) {
++        item->setForeground(0, dark ? QColor(0xfc, 0xa5, 0xa5) : QColor(0xb9, 0x1c, 0x1c));
++        auto err_bg = dark ? QColor(0x45, 0x1a, 0x1a) : QColor(0xfe, 0xf2, 0xf2);
++        item->setBackground(0, err_bg);
++        item->setBackground(1, err_bg);
++    } else if (category == ConsoleFilter::Warnings) {
++        item->setForeground(0, dark ? QColor(0xfd, 0xe6, 0x8a) : QColor(0x92, 0x40, 0x0e));
++        auto warn_bg = dark ? QColor(0x42, 0x33, 0x14) : QColor(0xff, 0xfb, 0xeb);
++        item->setBackground(0, warn_bg);
++        item->setBackground(1, warn_bg);
++    } else {
++        item->setForeground(0, panel.text);
++    }
++    item->setForeground(1, panel.muted);
++
++    for (auto const& frame : stack_lines) {
++        auto* frame_item = new QTreeWidgetItem(item);
++        frame_item->setText(0, frame);
++        frame_item->setForeground(0, panel.muted);
++    }
++
++    if (object_id.has_value()) {
++        item->setData(0, ConsoleObjectIdRole, static_cast<qulonglong>(*object_id));
++        item->setData(0, ConsoleObjectLoadedRole, false);
++        auto* placeholder = new QTreeWidgetItem(item);
++        placeholder->setText(0, tr_ui("Loading\u2026"));
++        placeholder->setForeground(0, panel.muted);
++    }
++
++    ConsoleEntry entry {
++        .category = category,
++        .search_text = (display_line + QLatin1Char(' ') + location).toLower(),
++        .item = item,
++    };
++    m_console_entries.append(AK::move(entry));
++    apply_console_filter();
++    m_console_tree->scrollToBottom();
++}
++
++void DevToolsPanel::expand_console_object(QTreeWidgetItem* item)
++{
++    if (!item || item->data(0, ConsoleObjectLoadedRole).toBool())
++        return;
++    bool ok = false;
++    auto object_id = item->data(0, ConsoleObjectIdRole).toULongLong(&ok);
++    if (!ok || object_id == 0)
++        return;
++
++    item->setData(0, ConsoleObjectLoadedRole, true);
++    auto gen = m_console_generation;
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_get_object_properties(static_cast<u64>(object_id), [weak_this, gen, item](ErrorOr<JsonValue, String> res) {
++        if (!weak_this || weak_this->m_console_generation != gen)
++            return;
++        // Verify item is still alive in the tree.
++        if (weak_this->m_console_tree->indexFromItem(item).isValid() == false)
++            return;
++        while (item->childCount() > 0)
++            delete item->takeChild(0);
++
++        if (res.is_error() || !res.value().is_object()) {
++            auto* err_item = new QTreeWidgetItem(item);
++            err_item->setText(0, tr_ui("(unavailable)"));
++            err_item->setForeground(0, Theme::panel().muted);
++            return;
++        }
++
++        auto const& obj = res.value().as_object();
++        if (auto props = obj.get_array("properties"sv); props.has_value()) {
++            props->for_each([&](JsonValue const& pval) {
++                if (!pval.is_object())
++                    return;
++                auto const& prop = pval.as_object();
++                auto name = qstring_from_ak_string(prop.get_string("name"sv).value_or(String {}));
++                auto val_opt = prop.get("value"sv);
++                auto val_str = val_opt.has_value() ? format_grip(*val_opt, 1) : QStringLiteral("[Accessor]");
++                auto* child = new QTreeWidgetItem(item);
++                child->setText(0, QStringLiteral("%1: %2").arg(name, val_str));
++                child->setData(0, ConsoleCopyTextRole, val_str);
++                if (val_opt.has_value() && val_opt->is_object()) {
++                    if (auto nested_id = val_opt->as_object().get_u64("objectId"sv); nested_id.has_value()) {
++                        child->setData(0, ConsoleObjectIdRole, static_cast<qulonglong>(*nested_id));
++                        child->setData(0, ConsoleObjectLoadedRole, false);
++                        auto* ph = new QTreeWidgetItem(child);
++                        ph->setText(0, tr_ui("Loading\u2026"));
++                        ph->setForeground(0, Theme::panel().muted);
++                    }
++                }
++            });
++        }
++    });
++}
++
++void DevToolsPanel::apply_console_filter()
++{
++    auto filter_level = static_cast<ConsoleFilter>(m_console_level_combo->currentData().toInt());
++    auto needle = m_console_filter_edit->text().trimmed().toLower();
++    for (auto const& entry : m_console_entries) {
++        if (!entry.item)
++            continue;
++        bool level_ok = filter_level == ConsoleFilter::All || entry.category == filter_level;
++        bool text_ok = needle.isEmpty() || entry.search_text.contains(needle);
++        entry.item->setHidden(!(level_ok && text_ok));
++    }
++}
++
++void DevToolsPanel::submit_console_expression()
++{
++    auto expr = m_console_input->text().trimmed();
++    if (expr.isEmpty())
++        return;
++
++    m_console_input->clear();
++    m_console_history_index = -1;
++    m_console_draft.clear();
++    if (m_console_history.isEmpty() || m_console_history.last() != expr) {
++        m_console_history.append(expr);
++        if (m_console_history.size() > 100)
++            m_console_history.removeFirst();
++    }
++
++    append_console_item(QStringLiteral("\u276f "), expr, {}, ConsoleFilter::Log);
++    if (m_view.devtools_is_attached())
++        m_view.devtools_evaluate(ak_string_from_qstring(expr));
++}
++
++void DevToolsPanel::request_console_completion()
++{
++    if (!m_view.devtools_is_attached())
++        return;
++    auto current = m_console_input->text();
++    if (current.isEmpty())
++        return;
++
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_complete(ak_string_from_qstring(current), [weak_this, current](ErrorOr<JsonValue, String> res) {
++        if (!weak_this || res.is_error() || !res.value().is_object())
++            return;
++        if (weak_this->m_console_input->text() != current)
++            return;
++        auto const& obj = res.value().as_object();
++        auto matches = obj.get_array("matches"sv);
++        auto match_prop = qstring_from_ak_string(obj.get_string("matchProp"sv).value_or(String {}));
++        if (!matches.has_value() || matches->is_empty())
++            return;
++        if (!matches->at(0).is_string())
++            return;
++        auto first = qstring_from_ak_string(matches->at(0).as_string());
++        if (first.startsWith(match_prop) && current.endsWith(match_prop)) {
++            auto completed = current.left(current.size() - match_prop.size()) + first;
++            weak_this->m_console_input->setText(completed);
++        }
++    });
++}
++
++// ============================================================================
++// Network Tab
++// ============================================================================
++
++void DevToolsPanel::clear_network()
++{
++    m_network_tree->clear();
++    m_network_entries.clear();
++    m_network_order.clear();
++    m_selected_network_id.clear();
++    m_network_detail_container->hide();
++    m_network_empty_label->show();
++    update_network_summary();
++}
++
++void DevToolsPanel::clear_network_before_latest_navigation()
++{
++    // A navigation's own NetworkStarted can arrive before Navigated commits. Keep entries from the
++    // latest navigation request onward so the main document row is not wiped on commit.
++    Optional<size_t> keep_from_index;
++    for (size_t i = m_network_order.size(); i > 0; --i) {
++        auto id = m_network_order[i - 1];
++        if (auto it = m_network_entries.find(id); it != m_network_entries.end() && it->value->is_navigation) {
++            keep_from_index = i - 1;
++            break;
++        }
++    }
++
++    if (!keep_from_index.has_value()) {
++        clear_network();
++        return;
++    }
++
++    if (*keep_from_index == 0)
++        return;
++
++    for (size_t i = 0; i < *keep_from_index; ++i) {
++        auto id = m_network_order[i];
++        if (m_selected_network_id == id) {
++            m_selected_network_id.clear();
++            m_network_detail_container->hide();
++        }
++        if (auto entry = m_network_entries.take(id); entry.has_value() && (*entry)->item) {
++            auto idx = m_network_tree->indexOfTopLevelItem((*entry)->item);
++            if (idx >= 0)
++                delete m_network_tree->takeTopLevelItem(idx);
++        }
++    }
++
++    Vector<u64> remaining;
++    remaining.ensure_capacity(m_network_order.size() - *keep_from_index);
++    for (size_t i = *keep_from_index; i < m_network_order.size(); ++i)
++        remaining.unchecked_append(m_network_order[i]);
++    m_network_order = AK::move(remaining);
++
++    m_network_empty_label->setVisible(m_network_order.is_empty());
++    update_network_summary();
++}
++
++QString DevToolsPanel::classify_network_type(QString const& mime_type, QString const& initiator, bool is_navigation, QString const& url)
++{
++    if (is_navigation || mime_type.contains(QLatin1StringView("html"), Qt::CaseInsensitive))
++        return QStringLiteral("doc");
++    if (mime_type.contains(QLatin1StringView("javascript"), Qt::CaseInsensitive) || mime_type.contains(QLatin1StringView("ecmascript"), Qt::CaseInsensitive) || initiator == QLatin1StringView("script"))
++        return QStringLiteral("js");
++    if (mime_type.contains(QLatin1StringView("css"), Qt::CaseInsensitive) || initiator == QLatin1StringView("css"))
++        return QStringLiteral("css");
++    if (mime_type.startsWith(QLatin1StringView("image/"), Qt::CaseInsensitive) || initiator == QLatin1StringView("img"))
++        return QStringLiteral("img");
++    if (initiator == QLatin1StringView("fetch") || initiator == QLatin1StringView("xmlhttprequest") || mime_type.contains(QLatin1StringView("json"), Qt::CaseInsensitive))
++        return QStringLiteral("xhr");
++    auto lower_url = url.toLower();
++    if (lower_url.endsWith(QLatin1StringView(".js")) || lower_url.endsWith(QLatin1StringView(".mjs")))
++        return QStringLiteral("js");
++    if (lower_url.endsWith(QLatin1StringView(".css")))
++        return QStringLiteral("css");
++    return QStringLiteral("other");
++}
++
++void DevToolsPanel::handle_network_started(JsonObject const& payload)
++{
++    auto id = payload.get_u64("id"sv);
++    if (!id.has_value())
++        return;
++
++    m_network_empty_label->hide();
++
++    auto entry = make<NetworkEntry>();
++    entry->id = *id;
++    entry->url = qstring_from_ak_string(payload.get_string("url"sv).value_or(String {}));
++    QUrl qurl(entry->url);
++    entry->name = qurl.fileName().isEmpty() ? (qurl.path().isEmpty() || qurl.path() == QLatin1StringView("/") ? qurl.host() : qurl.path()) : qurl.fileName();
++    if (entry->name.isEmpty())
++        entry->name = entry->url;
++    entry->method = qstring_from_ak_string(payload.get_string("method"sv).value_or("GET"_string));
++    entry->start_time_ms = payload.get_i64("startTime"sv).value_or(0);
++    entry->initiator = qstring_from_ak_string(payload.get_string("initiator"sv).value_or(String {}));
++    entry->referrer_policy = qstring_from_ak_string(payload.get_string("referrerPolicy"sv).value_or(String {}));
++    entry->priority = qstring_from_ak_string(payload.get_string("priority"sv).value_or("auto"_string));
++    entry->is_navigation = payload.get_bool("isNavigation"sv).value_or(false);
++    entry->type = classify_network_type({}, entry->initiator, entry->is_navigation, entry->url);
++
++    if (auto headers = payload.get_array("headers"sv); headers.has_value()) {
++        headers->for_each([&](JsonValue const& h) {
++            if (!h.is_object())
++                return;
++            auto n = qstring_from_ak_string(h.as_object().get_string("name"sv).value_or(String {}));
++            auto v = qstring_from_ak_string(h.as_object().get_string("value"sv).value_or(String {}));
++            entry->request_headers.append({ AK::move(n), AK::move(v) });
++        });
++    }
++
++    auto* item = new QTreeWidgetItem(m_network_tree);
++    item->setData(0, NetworkRequestIdRole, static_cast<qulonglong>(*id));
++    item->setToolTip(0, entry->url);
++    entry->item = item;
++    update_network_row(*entry);
++
++    if (!m_network_entries.contains(*id))
++        m_network_order.append(*id);
++    m_network_entries.set(*id, AK::move(entry));
++
++    apply_network_filter();
++    update_network_summary();
++}
++
++void DevToolsPanel::handle_network_headers(JsonObject const& payload)
++{
++    auto id = payload.get_u64("id"sv);
++    if (!id.has_value())
++        return;
++    auto it = m_network_entries.find(*id);
++    if (it == m_network_entries.end())
++        return;
++
++    auto& entry = *it->value;
++    entry.status = payload.get_u32("status"sv).value_or(0);
++    entry.reason = qstring_from_ak_string(payload.get_string("reason"sv).value_or(String {}));
++    entry.cache_state = qstring_from_ak_string(payload.get_string("cache"sv).value_or("none"_string));
++    entry.mime_type = qstring_from_ak_string(payload.get_string("mimeType"sv).value_or(String {}));
++    entry.type = classify_network_type(entry.mime_type, entry.initiator, entry.is_navigation, entry.url);
++
++    entry.response_headers.clear();
++    if (auto headers = payload.get_array("headers"sv); headers.has_value()) {
++        headers->for_each([&](JsonValue const& h) {
++            if (!h.is_object())
++                return;
++            auto n = qstring_from_ak_string(h.as_object().get_string("name"sv).value_or(String {}));
++            auto v = qstring_from_ak_string(h.as_object().get_string("value"sv).value_or(String {}));
++            entry.response_headers.append({ AK::move(n), AK::move(v) });
++        });
++    }
++
++    update_network_row(entry);
++    apply_network_filter();
++    if (m_selected_network_id == *id)
++        on_network_selection_changed();
++}
++
++void DevToolsPanel::handle_network_finished(JsonObject const& payload)
++{
++    auto id = payload.get_u64("id"sv);
++    if (!id.has_value())
++        return;
++    auto it = m_network_entries.find(*id);
++    if (it == m_network_entries.end())
++        return;
++
++    auto& entry = *it->value;
++    entry.finished = true;
++    entry.size = payload.get_u64("size"sv).value_or(0);
++    entry.error = qstring_from_ak_string(payload.get_string("error"sv).value_or(String {}));
++    if (auto timing = payload.get_object("timing"sv); timing.has_value()) {
++        entry.timing = *timing;
++        auto req_start = timing->get_double_with_precision_loss("requestStart"sv).value_or(0.0);
++        auto res_end = timing->get_double_with_precision_loss("responseEnd"sv).value_or(0.0);
++        if (res_end >= req_start && res_end > 0.0)
++            entry.duration_ms = (res_end - req_start) / 1000.0;
++    }
++
++    update_network_row(entry);
++    update_network_summary();
++    if (m_selected_network_id == *id)
++        on_network_selection_changed();
++}
++
++void DevToolsPanel::update_network_row(NetworkEntry& entry)
++{
++    if (!entry.item)
++        return;
++
++    auto* item = entry.item;
++    item->setText(0, entry.name);
++    if (!entry.error.isEmpty())
++        item->setText(1, tr_ui("Failed"));
++    else if (entry.status > 0)
++        item->setText(1, QString::number(entry.status));
++    else
++        item->setText(1, tr_ui("Pending"));
++
++    item->setText(2, entry.method);
++    item->setText(3, entry.type);
++    item->setText(4, entry.finished ? format_bytes_human(entry.size) : QStringLiteral("…"));
++    item->setText(5, entry.finished ? format_duration_ms(entry.duration_ms) : QStringLiteral("…"));
++
++    auto dark = Theme::is_dark();
++    if (!entry.error.isEmpty() || entry.status >= 400)
++        item->setForeground(1, dark ? QColor(0xf8, 0x71, 0x71) : QColor(0xdc, 0x26, 0x26));
++    else if (entry.status >= 300)
++        item->setForeground(1, dark ? QColor(0xfb, 0xbf, 0x24) : QColor(0xb4, 0x53, 0x09));
++    else if (entry.status >= 200)
++        item->setForeground(1, dark ? QColor(0x4a, 0xde, 0x80) : QColor(0x15, 0x80, 0x3d));
++    else
++        item->setForeground(1, Theme::panel().muted);
++}
++
++void DevToolsPanel::apply_network_filter()
++{
++    auto needle = m_network_filter_edit->text().trimmed().toLower();
++    auto type_filter = m_network_type_combo->currentData().toString();
++
++    for (auto id : m_network_order) {
++        auto it = m_network_entries.find(id);
++        if (it == m_network_entries.end() || !it->value->item)
++            continue;
++        auto const& e = *it->value;
++        bool type_ok = type_filter == QLatin1StringView("all") || e.type == type_filter;
++        bool text_ok = needle.isEmpty() || e.url.toLower().contains(needle) || e.method.toLower().contains(needle);
++        e.item->setHidden(!(type_ok && text_ok));
++    }
++}
++
++void DevToolsPanel::update_network_summary()
++{
++    u64 total_bytes = 0;
++    for (auto id : m_network_order) {
++        if (auto it = m_network_entries.find(id); it != m_network_entries.end())
++            total_bytes += it->value->size;
++    }
++    m_network_summary_label->setText(
++        QStringLiteral("%1 %2 \u00b7 %3").arg(m_network_order.size()).arg(tr_ui("requests"), format_bytes_human(total_bytes)));
++}
++
++void DevToolsPanel::on_network_selection_changed()
++{
++    auto items = m_network_tree->selectedItems();
++    if (items.isEmpty()) {
++        m_selected_network_id.clear();
++        m_network_detail_container->hide();
++        return;
++    }
++    auto id = static_cast<u64>(items.first()->data(0, NetworkRequestIdRole).toULongLong());
++    auto it = m_network_entries.find(id);
++    if (it == m_network_entries.end())
++        return;
++
++    m_selected_network_id = id;
++    auto const& entry = *it->value;
++
++    // Headers view (strictly plain text)
++    QString headers_text;
++    headers_text += QStringLiteral("=== General ===\n");
++    headers_text += QStringLiteral("Request URL: %1\n").arg(entry.url);
++    headers_text += QStringLiteral("Request Method: %1\n").arg(entry.method);
++    if (entry.status > 0)
++        headers_text += QStringLiteral("Status Code: %1 %2\n").arg(entry.status).arg(entry.reason);
++    if (!entry.error.isEmpty())
++        headers_text += QStringLiteral("Error: %1\n").arg(entry.error);
++    if (!entry.cache_state.isEmpty())
++        headers_text += QStringLiteral("Cache: %1\n").arg(entry.cache_state);
++    if (!entry.referrer_policy.isEmpty())
++        headers_text += QStringLiteral("Referrer Policy: %1\n").arg(entry.referrer_policy);
++    if (!entry.priority.isEmpty())
++        headers_text += QStringLiteral("Priority: %1\n").arg(entry.priority);
++
++    headers_text += QStringLiteral("\n=== Response Headers (%1) ===\n").arg(entry.response_headers.size());
++    for (auto const& [k, v] : entry.response_headers)
++        headers_text += QStringLiteral("%1: %2\n").arg(k, v);
++
++    headers_text += QStringLiteral("\n=== Request Headers (%1) ===\n").arg(entry.request_headers.size());
++    for (auto const& [k, v] : entry.request_headers)
++        headers_text += QStringLiteral("%1: %2\n").arg(k, v);
++
++    m_network_headers_view->setPlainText(headers_text);
++
++    // Timing view
++    if (entry.timing.has_value()) {
++        auto const& t = *entry.timing;
++        auto us_ms = [&](StringView start_k, StringView end_k) -> QString {
++            auto s = t.get_double_with_precision_loss(start_k).value_or(0.0);
++            auto e = t.get_double_with_precision_loss(end_k).value_or(0.0);
++            if (e <= s)
++                return QStringLiteral("0 ms");
++            return format_duration_ms((e - s) / 1000.0);
++        };
++        QString timing_text;
++        timing_text += QStringLiteral("DNS Lookup:        %1\n").arg(us_ms("dnsStart"sv, "dnsEnd"sv));
++        timing_text += QStringLiteral("TCP Connect:       %1\n").arg(us_ms("connectStart"sv, "connectEnd"sv));
++        timing_text += QStringLiteral("TLS Handshake:     %1\n").arg(us_ms("tlsStart"sv, "connectEnd"sv));
++        timing_text += QStringLiteral("Waiting (TTFB):    %1\n").arg(us_ms("requestStart"sv, "responseStart"sv));
++        timing_text += QStringLiteral("Content Download:  %1\n").arg(us_ms("responseStart"sv, "responseEnd"sv));
++        timing_text += QStringLiteral("Total:             %1\n").arg(format_duration_ms(entry.duration_ms));
++        if (auto enc = t.get_u64("encodedSize"sv); enc.has_value())
++            timing_text += QStringLiteral("Encoded Size:      %1\n").arg(format_bytes_human(*enc));
++        if (auto proto = t.get_string("protocol"sv); proto.has_value() && !proto->is_empty())
++            timing_text += QStringLiteral("Protocol:          %1\n").arg(qstring_from_ak_string(*proto));
++        m_network_timing_view->setPlainText(timing_text);
++    } else {
++        m_network_timing_view->setPlainText(tr_ui("No timing information available yet."));
++    }
++
++    m_network_detail_container->show();
++    if (m_network_detail_tabs->currentIndex() == 1)
++        fetch_network_response_body(id);
++}
++
++void DevToolsPanel::fetch_network_response_body(u64 request_id)
++{
++    if (!m_view.devtools_is_attached())
++        return;
++
++    m_network_response_view->setPlainText(tr_ui("Loading response body\u2026"));
++    auto gen = ++m_network_body_generation;
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_get_response_body(request_id, [weak_this, gen](ErrorOr<JsonValue, String> res) {
++        if (!weak_this || weak_this->m_network_body_generation != gen)
++            return;
++        if (res.is_error()) {
++            if (res.error() == "gone"sv)
++                weak_this->m_network_response_view->setPlainText(tr_ui("Response body is no longer cached in memory."));
++            else
++                weak_this->m_network_response_view->setPlainText(tr_ui("No response body available."));
++            return;
++        }
++        if (!res.value().is_object())
++            return;
++        auto const& obj = res.value().as_object();
++        bool truncated = obj.get_bool("truncated"sv).value_or(false);
++        if (auto text = obj.get_string("text"sv); text.has_value()) {
++            auto qtext = qstring_from_ak_string(*text);
++            if (truncated)
++                qtext += QStringLiteral("\n\n[") + tr_ui("Truncated") + QStringLiteral("]");
++            weak_this->m_network_response_view->setPlainText(qtext);
++        } else if (auto b64 = obj.get_string("base64"sv); b64.has_value()) {
++            weak_this->m_network_response_view->setPlainText(
++                tr_ui("Binary response body (%1 bytes base64)").arg(b64->bytes().size()));
++        } else {
++            weak_this->m_network_response_view->setPlainText(tr_ui("(empty response body)"));
++        }
++    });
++}
++
++// ============================================================================
++// Sources Tab
++// ============================================================================
++
++void DevToolsPanel::refresh_sources()
++{
++    if (!m_view.devtools_is_attached())
++        return;
++
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_list_sources([weak_this](ErrorOr<JsonValue, String> res) {
++        if (!weak_this || res.is_error() || !res.value().is_array())
++            return;
++        weak_this->m_sources_tree->clear();
++        weak_this->m_source_items_by_key.clear();
++        weak_this->m_scripts_group_item = nullptr;
++        weak_this->m_stylesheets_group_item = nullptr;
++        res.value().as_array().for_each([&](JsonValue const& item) {
++            if (item.is_object())
++                weak_this->add_source_entry(item.as_object());
++        });
++        if (!weak_this->m_sources_filter_edit->text().isEmpty())
++            weak_this->filter_sources_tree(weak_this->m_sources_filter_edit->text());
++    });
++}
++
++void DevToolsPanel::add_source_entry(JsonObject const& entry)
++{
++    auto key = entry.get_string("key"sv);
++    if (!key.has_value() || m_source_items_by_key.contains(*key))
++        return;
++
++    auto kind = entry.get_string("kind"sv).value_or("script"_string);
++    auto display_name = qstring_from_ak_string(entry.get_string("displayName"sv).value_or(*key));
++    auto url = qstring_from_ak_string(entry.get_string("url"sv).value_or(String {}));
++    auto content_type = qstring_from_ak_string(entry.get_string("contentType"sv).value_or(String {}));
++
++    QTreeWidgetItem* group = nullptr;
++    if (kind == "stylesheet"sv) {
++        if (!m_stylesheets_group_item) {
++            m_stylesheets_group_item = new QTreeWidgetItem(m_sources_tree);
++            m_stylesheets_group_item->setText(0, tr_ui("Stylesheets"));
++            m_stylesheets_group_item->setExpanded(true);
++        }
++        group = m_stylesheets_group_item;
++    } else {
++        if (!m_scripts_group_item) {
++            m_scripts_group_item = new QTreeWidgetItem(m_sources_tree);
++            m_scripts_group_item->setText(0, tr_ui("Scripts"));
++            m_scripts_group_item->setExpanded(true);
++        }
++        group = m_scripts_group_item;
++    }
++
++    auto* item = new QTreeWidgetItem(group);
++    item->setText(0, display_name);
++    if (!url.isEmpty())
++        item->setToolTip(0, url);
++    item->setData(0, SourceKeyRole, qstring_from_ak_string(*key));
++    item->setData(0, SourceUrlRole, url);
++    item->setData(0, SourceContentTypeRole, content_type);
++    m_source_items_by_key.set(*key, item);
++}
++
++void DevToolsPanel::on_source_selected()
++{
++    auto items = m_sources_tree->selectedItems();
++    if (items.isEmpty())
++        return;
++    auto* item = items.first();
++    auto key = item->data(0, SourceKeyRole).toString();
++    if (key.isEmpty() || !m_view.devtools_is_attached())
++        return;
++
++    auto url = item->data(0, SourceUrlRole).toString();
++    m_source_header_label->setText(url.isEmpty() ? item->text(0) : url);
++    m_source_editor->setPlainText(tr_ui("Loading source\u2026"));
++
++    auto gen = ++m_source_request_generation;
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_get_source(ak_string_from_qstring(key), [weak_this, gen](ErrorOr<JsonValue, String> res) {
++        if (!weak_this || weak_this->m_source_request_generation != gen)
++            return;
++        if (res.is_error() || !res.value().is_object()) {
++            weak_this->m_source_editor->setPlainText(tr_ui("Unable to load source."));
++            return;
++        }
++        auto text = res.value().as_object().get_string("text"sv).value_or(String {});
++        weak_this->m_source_editor->setPlainText(qstring_from_ak_string(text));
++    });
++}
++
++void DevToolsPanel::filter_sources_tree(QString const& query)
++{
++    auto needle = query.trimmed().toLower();
++    for (int i = 0; i < m_sources_tree->topLevelItemCount(); ++i) {
++        auto* group = m_sources_tree->topLevelItem(i);
++        bool any = false;
++        for (int j = 0; j < group->childCount(); ++j) {
++            auto* child = group->child(j);
++            bool match = needle.isEmpty()
++                || child->text(0).toLower().contains(needle)
++                || child->data(0, SourceUrlRole).toString().toLower().contains(needle);
++            child->setHidden(!match);
++            if (match)
++                any = true;
++        }
++        group->setHidden(!any && !needle.isEmpty());
++    }
++}
++
++// ============================================================================
++// Storage Tab
++// ============================================================================
++
++void DevToolsPanel::refresh_storage()
++{
++    if (!m_view.devtools_is_attached())
++        return;
++
++    auto kind = static_cast<StorageKind>(m_storage_kind_combo->currentData().toInt());
++    bool is_kv = kind != StorageKind::Cookies;
++    m_storage_add_button->setVisible(is_kv);
++    m_storage_clear_button->setVisible(is_kv);
++
++    m_storage_tree->clear();
++    m_loaded_cookies.clear();
++
++    QPointer<DevToolsPanel> weak_this { this };
++    if (kind == StorageKind::Cookies) {
++        m_storage_tree->setColumnCount(6);
++        m_storage_tree->setHeaderLabels({
++            tr_ui("Name"),
++            tr_ui("Value"),
++            tr_ui("Domain"),
++            tr_ui("Path"),
++            tr_ui("Expires"),
++            tr_ui("Flags"),
++        });
++        m_view.devtools_get_cookies([weak_this](ErrorOr<JsonValue, String> res) {
++            if (!weak_this || res.is_error() || !res.value().is_array())
++                return;
++            if (static_cast<StorageKind>(weak_this->m_storage_kind_combo->currentData().toInt()) != StorageKind::Cookies)
++                return;
++            weak_this->m_storage_tree->clear();
++            weak_this->m_loaded_cookies.clear();
++            res.value().as_array().for_each([&](JsonValue const& cval) {
++                if (!cval.is_object())
++                    return;
++                auto const& c = cval.as_object();
++                auto idx = weak_this->m_loaded_cookies.size();
++                weak_this->m_loaded_cookies.append(c);
++
++                auto* row = new QTreeWidgetItem(weak_this->m_storage_tree);
++                row->setData(0, StorageCookieIndexRole, static_cast<qint64>(idx));
++                row->setText(0, qstring_from_ak_string(c.get_string("name"sv).value_or(String {})));
++                row->setText(1, qstring_from_ak_string(c.get_string("value"sv).value_or(String {})));
++                row->setText(2, qstring_from_ak_string(c.get_string("domain"sv).value_or(String {})));
++                row->setText(3, qstring_from_ak_string(c.get_string("path"sv).value_or("/"_string)));
++                if (auto exp = c.get_i64("expires"sv); exp.has_value())
++                    row->setText(4, QDateTime::fromMSecsSinceEpoch(*exp).toString(Qt::ISODate));
++                else
++                    row->setText(4, tr_ui("Session"));
++                QStringList flags;
++                if (c.get_bool("secure"sv).value_or(false))
++                    flags.append(QStringLiteral("Secure"));
++                if (c.get_bool("httpOnly"sv).value_or(false))
++                    flags.append(QStringLiteral("HttpOnly"));
++                if (auto ss = c.get_string("sameSite"sv); ss.has_value() && !ss->is_empty())
++                    flags.append(QStringLiteral("SameSite=") + qstring_from_ak_string(*ss));
++                row->setText(5, flags.join(QStringLiteral(", ")));
++            });
++        });
++        return;
++    }
++
++    m_storage_tree->setColumnCount(2);
++    m_storage_tree->setHeaderLabels({ tr_ui("Key"), tr_ui("Value") });
++    m_storage_tree->setColumnWidth(0, 180);
++    auto store = kind == StorageKind::LocalStorage ? RemoteView::DevToolsStorage::Local : RemoteView::DevToolsStorage::Session;
++    m_view.devtools_get_storage(store, [weak_this, kind](ErrorOr<JsonValue, String> res) {
++        if (!weak_this || res.is_error() || !res.value().is_array())
++            return;
++        if (static_cast<StorageKind>(weak_this->m_storage_kind_combo->currentData().toInt()) != kind)
++            return;
++        weak_this->m_storage_tree->clear();
++        res.value().as_array().for_each([&](JsonValue const& item_val) {
++            if (!item_val.is_object())
++                return;
++            auto const& item = item_val.as_object();
++            auto k = qstring_from_ak_string(item.get_string("name"sv).value_or(String {}));
++            auto v = qstring_from_ak_string(item.get_string("value"sv).value_or(String {}));
++            auto* row = new QTreeWidgetItem(weak_this->m_storage_tree);
++            row->setData(0, StorageKeyNameRole, k);
++            row->setText(0, k);
++            row->setText(1, v);
++        });
++    });
++}
++
++void DevToolsPanel::add_storage_item_dialog()
++{
++    auto kind = static_cast<StorageKind>(m_storage_kind_combo->currentData().toInt());
++    if (kind == StorageKind::Cookies || !m_view.devtools_is_attached())
++        return;
++
++    QDialog dialog(this);
++    dialog.setWindowTitle(tr_ui("Add storage item"));
++    auto* form = new QFormLayout(&dialog);
++    auto* key_edit = new QLineEdit(&dialog);
++    auto* value_edit = new QLineEdit(&dialog);
++    form->addRow(tr_ui("Key"), key_edit);
++    form->addRow(tr_ui("Value"), value_edit);
++    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
++    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
++    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
++    form->addRow(buttons);
++
++    if (dialog.exec() != QDialog::Accepted)
++        return;
++    auto key = key_edit->text();
++    if (key.isEmpty())
++        return;
++
++    auto store = kind == StorageKind::LocalStorage ? RemoteView::DevToolsStorage::Local : RemoteView::DevToolsStorage::Session;
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_set_storage_item(store, ak_string_from_qstring(key), ak_string_from_qstring(value_edit->text()),
++        [weak_this](ErrorOr<JsonValue, String>) {
++            if (weak_this)
++                weak_this->refresh_storage();
++        });
++}
++
++void DevToolsPanel::delete_selected_storage_item()
++{
++    auto items = m_storage_tree->selectedItems();
++    if (items.isEmpty() || !m_view.devtools_is_attached())
++        return;
++
++    auto kind = static_cast<StorageKind>(m_storage_kind_combo->currentData().toInt());
++    QPointer<DevToolsPanel> weak_this { this };
++    if (kind == StorageKind::Cookies) {
++        auto idx = static_cast<size_t>(items.first()->data(0, StorageCookieIndexRole).toLongLong());
++        if (idx >= m_loaded_cookies.size())
++            return;
++        m_view.devtools_delete_cookie(m_loaded_cookies[idx], [weak_this](ErrorOr<JsonValue, String>) {
++            if (weak_this)
++                weak_this->refresh_storage();
++        });
++        return;
++    }
++
++    auto key = items.first()->data(0, StorageKeyNameRole).toString();
++    auto store = kind == StorageKind::LocalStorage ? RemoteView::DevToolsStorage::Local : RemoteView::DevToolsStorage::Session;
++    m_view.devtools_remove_storage_item(store, ak_string_from_qstring(key), [weak_this](ErrorOr<JsonValue, String>) {
++        if (weak_this)
++            weak_this->refresh_storage();
++    });
++}
++
++void DevToolsPanel::clear_current_storage()
++{
++    auto kind = static_cast<StorageKind>(m_storage_kind_combo->currentData().toInt());
++    if (kind == StorageKind::Cookies || !m_view.devtools_is_attached())
++        return;
++
++    auto store = kind == StorageKind::LocalStorage ? RemoteView::DevToolsStorage::Local : RemoteView::DevToolsStorage::Session;
++    QPointer<DevToolsPanel> weak_this { this };
++    m_view.devtools_clear_storage(store, [weak_this](ErrorOr<JsonValue, String>) {
++        if (weak_this)
++            weak_this->refresh_storage();
++    });
++}
++
++}
++
++#include "DevToolsPanel.moc"
+diff --git a/UI/Qt/DevToolsPanel.h b/UI/Qt/DevToolsPanel.h
+new file mode 100644
+index 0000000000..7122289c32
+--- /dev/null
++++ b/UI/Qt/DevToolsPanel.h
+@@ -0,0 +1,322 @@
++/*
++ * Copyright (c) 2026, the Hellbird contributors.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/HashMap.h>
++#include <AK/JsonObject.h>
++#include <AK/JsonValue.h>
++#include <AK/Optional.h>
++#include <AK/OwnPtr.h>
++#include <AK/String.h>
++#include <AK/Vector.h>
++#include <AK/kmalloc.h>
++#include <UI/Qt/RemoteView.h>
++
++#include <QColor>
++#include <QHash>
++#include <QList>
++#include <QPointer>
++#include <QString>
++#include <QStringList>
++#include <QWidget>
++
++class QCheckBox;
++class QComboBox;
++class QHBoxLayout;
++class QLabel;
++class QLineEdit;
++class QListWidget;
++class QPlainTextEdit;
++class QPushButton;
++class QSplitter;
++class QStackedWidget;
++class QTabWidget;
++class QToolButton;
++class QTreeWidget;
++class QTreeWidgetItem;
++
++namespace Ladybird {
++
++class BoxModelWidget;
++class ConsolePromptEdit;
++class DomTreeDelegate;
++class WebContentView;
++
++class DevToolsPanel final : public QWidget {
++    Q_OBJECT
++
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    enum class PanelTab : u8 {
++        Elements,
++        Console,
++        Network,
++        Sources,
++        Storage,
++    };
++
++    enum class DockSide : u8 {
++        Right,
++        Bottom,
++    };
++
++    explicit DevToolsPanel(WebContentView& view, QWidget* parent = nullptr);
++    virtual ~DevToolsPanel() override;
++
++    void open(PanelTab = PanelTab::Elements);
++    void open_and_inspect(i64 node_id);
++    void close_panel();
++    void toggle(PanelTab = PanelTab::Elements);
++
++    bool is_open() const { return m_is_open; }
++    PanelTab active_tab() const { return m_active_tab; }
++    DockSide dock_side() const { return m_dock_side; }
++    void set_dock_side(DockSide);
++
++    void set_corner_radius(int radius);
++    void set_temporarily_hidden_for_fullscreen(bool hidden);
++    void update_chrome_style();
++
++    void handle_devtools_event(RemoteView::DevToolsEvent, JsonObject const&);
++    void stop_picker_if_active();
++
++signals:
++    void visibility_changed(bool visible);
++    void dock_side_changed(DockSide side);
++    void picker_starting();
++
++private:
++    virtual void paintEvent(QPaintEvent*) override;
++    virtual void resizeEvent(QResizeEvent*) override;
++    virtual bool eventFilter(QObject*, QEvent*) override;
++
++    void build_header();
++    void build_elements_tab();
++    void build_console_tab();
++    void build_network_tab();
++    void build_sources_tab();
++    void build_storage_tab();
++
++    void set_active_tab(PanelTab);
++    void sync_dom_mutation_subscription();
++    void update_effective_visibility();
++    void update_corner_mask();
++    void update_picker_button_state();
++    void update_tab_buttons_style();
++    void update_console_badges();
++    void show_status_banner(QString const& message, bool show_reattach_button);
++    void hide_status_banner();
++
++    // Elements
++    void refresh_dom_tree();
++    void populate_dom_tree(JsonObject const& root);
++    void populate_dom_node(QTreeWidgetItem* parent, JsonObject const& node, QHash<qint64, bool> const& previously_expanded);
++    void select_dom_node_by_id(i64 node_id, bool scroll_to = true);
++    void on_dom_selection_changed();
++    void update_dom_breadcrumbs(QTreeWidgetItem* item);
++    void filter_dom_tree(QString const& query);
++    bool filter_dom_item_recursive(QTreeWidgetItem* item, QString const& needle);
++    void show_dom_context_menu(QPoint const& pos);
++    void open_edit_html_dialog(i64 node_id);
++    QString build_css_selector(QTreeWidgetItem* item) const;
++    void fetch_selected_node_properties();
++    void populate_applied_rules(JsonArray const& rules);
++    void populate_computed_styles(JsonObject const& computed);
++    void filter_styles_tree(QString const& query);
++    void filter_computed_tree(QString const& query);
++
++    // Console
++    enum class ConsoleFilter : u8 {
++        All,
++        Errors,
++        Warnings,
++        Info,
++        Log,
++    };
++    struct ConsoleEntry {
++        ConsoleFilter category { ConsoleFilter::Log };
++        QString search_text;
++        QTreeWidgetItem* item { nullptr };
++    };
++    void clear_console();
++    void handle_console_event(JsonObject const& payload);
++    void handle_eval_result_event(JsonObject const& payload);
++    void append_console_item(QString const& prefix, QString const& text, QString const& location, ConsoleFilter category, Optional<u64> object_id = {}, Vector<QString> const& stack_lines = {});
++    void expand_console_object(QTreeWidgetItem* item);
++    void apply_console_filter();
++    void submit_console_expression();
++    void request_console_completion();
++    static QString format_grip(JsonValue const& value, int depth = 0);
++
++    // Network
++    struct HeaderPair {
++        QString name;
++        QString value;
++    };
++    struct NetworkEntry {
++        AK_ALLOC_WITH_KMALLOC;
++
++        u64 id { 0 };
++        QString url;
++        QString name;
++        QString method;
++        QString type;
++        QString mime_type;
++        QString initiator;
++        QString referrer_policy;
++        QString priority;
++        QString cache_state;
++        QString error;
++        i64 start_time_ms { 0 };
++        u32 status { 0 };
++        QString reason;
++        u64 size { 0 };
++        double duration_ms { -1.0 };
++        bool finished { false };
++        bool is_navigation { false };
++        Vector<HeaderPair> request_headers;
++        Vector<HeaderPair> response_headers;
++        Optional<JsonObject> timing;
++        QTreeWidgetItem* item { nullptr };
++    };
++    void clear_network();
++    void clear_network_before_latest_navigation();
++    void handle_network_started(JsonObject const& payload);
++    void handle_network_headers(JsonObject const& payload);
++    void handle_network_finished(JsonObject const& payload);
++    void update_network_row(NetworkEntry& entry);
++    void apply_network_filter();
++    void update_network_summary();
++    void on_network_selection_changed();
++    void fetch_network_response_body(u64 request_id);
++    static QString classify_network_type(QString const& mime_type, QString const& initiator, bool is_navigation, QString const& url);
++
++    // Sources
++    void refresh_sources();
++    void add_source_entry(JsonObject const& entry);
++    void on_source_selected();
++    void filter_sources_tree(QString const& query);
++
++    // Storage
++    enum class StorageKind : u8 {
++        Cookies,
++        LocalStorage,
++        SessionStorage,
++    };
++    void refresh_storage();
++    void add_storage_item_dialog();
++    void delete_selected_storage_item();
++    void clear_current_storage();
++
++    WebContentView& m_view;
++    bool m_is_open { false };
++    bool m_hidden_for_fullscreen { false };
++    bool m_picker_active { false };
++    bool m_external_detached { false };
++    bool m_crash_detached { false };
++    bool m_is_updating_style { false };
++    int m_corner_radius { 0 };
++    PanelTab m_active_tab { PanelTab::Elements };
++    DockSide m_dock_side { DockSide::Right };
++
++    Optional<i64> m_pending_inspect_node_id;
++    Optional<i64> m_selected_node_id;
++    Optional<u32> m_selected_pseudo;
++    Optional<i64> m_hovered_node_id;
++    u64 m_dom_request_generation { 0 };
++    u64 m_props_request_generation { 0 };
++    u64 m_console_generation { 0 };
++    u64 m_network_body_generation { 0 };
++    u64 m_source_request_generation { 0 };
++
++    // Header
++    QWidget* m_header { nullptr };
++    QToolButton* m_picker_button { nullptr };
++    QToolButton* m_tab_elements_button { nullptr };
++    QToolButton* m_tab_console_button { nullptr };
++    QToolButton* m_tab_network_button { nullptr };
++    QToolButton* m_tab_sources_button { nullptr };
++    QToolButton* m_tab_storage_button { nullptr };
++    QToolButton* m_error_badge_button { nullptr };
++    QToolButton* m_warn_badge_button { nullptr };
++    QToolButton* m_dock_button { nullptr };
++    QToolButton* m_close_button { nullptr };
++
++    // Status banner
++    QWidget* m_banner { nullptr };
++    QLabel* m_banner_label { nullptr };
++    QPushButton* m_banner_reattach_button { nullptr };
++
++    QStackedWidget* m_stack { nullptr };
++
++    // Elements widgets
++    QSplitter* m_elements_splitter { nullptr };
++    QLineEdit* m_dom_filter_edit { nullptr };
++    QTreeWidget* m_dom_tree { nullptr };
++    DomTreeDelegate* m_dom_delegate { nullptr };
++    QLabel* m_dom_status_label { nullptr };
++    QWidget* m_breadcrumb_bar { nullptr };
++    QHBoxLayout* m_breadcrumb_layout { nullptr };
++    QTabWidget* m_inspector_tabs { nullptr };
++    QLineEdit* m_styles_filter_edit { nullptr };
++    QTreeWidget* m_styles_tree { nullptr };
++    QLineEdit* m_computed_filter_edit { nullptr };
++    QTreeWidget* m_computed_tree { nullptr };
++    BoxModelWidget* m_box_model_widget { nullptr };
++    QTreeWidget* m_layout_props_tree { nullptr };
++    HashMap<i64, QTreeWidgetItem*> m_dom_items_by_id;
++
++    // Console widgets
++    QLineEdit* m_console_filter_edit { nullptr };
++    QComboBox* m_console_level_combo { nullptr };
++    QTreeWidget* m_console_tree { nullptr };
++    ConsolePromptEdit* m_console_input { nullptr };
++    Vector<ConsoleEntry> m_console_entries;
++    QStringList m_console_history;
++    int m_console_history_index { -1 };
++    QString m_console_draft;
++    int m_console_error_count { 0 };
++    int m_console_warning_count { 0 };
++
++    // Network widgets
++    QSplitter* m_network_splitter { nullptr };
++    QCheckBox* m_network_preserve_checkbox { nullptr };
++    QLineEdit* m_network_filter_edit { nullptr };
++    QComboBox* m_network_type_combo { nullptr };
++    QLabel* m_network_summary_label { nullptr };
++    QLabel* m_network_empty_label { nullptr };
++    QTreeWidget* m_network_tree { nullptr };
++    QWidget* m_network_detail_container { nullptr };
++    QTabWidget* m_network_detail_tabs { nullptr };
++    QPlainTextEdit* m_network_headers_view { nullptr };
++    QPlainTextEdit* m_network_response_view { nullptr };
++    QPlainTextEdit* m_network_timing_view { nullptr };
++    HashMap<u64, OwnPtr<NetworkEntry>> m_network_entries;
++    Vector<u64> m_network_order;
++    Optional<u64> m_selected_network_id;
++
++    // Sources widgets
++    QSplitter* m_sources_splitter { nullptr };
++    QLineEdit* m_sources_filter_edit { nullptr };
++    QTreeWidget* m_sources_tree { nullptr };
++    QTreeWidgetItem* m_scripts_group_item { nullptr };
++    QTreeWidgetItem* m_stylesheets_group_item { nullptr };
++    QLabel* m_source_header_label { nullptr };
++    QPlainTextEdit* m_source_editor { nullptr };
++    HashMap<String, QTreeWidgetItem*> m_source_items_by_key;
++
++    // Storage widgets
++    QComboBox* m_storage_kind_combo { nullptr };
++    QPushButton* m_storage_add_button { nullptr };
++    QPushButton* m_storage_delete_button { nullptr };
++    QPushButton* m_storage_clear_button { nullptr };
++    QTreeWidget* m_storage_tree { nullptr };
++    Vector<JsonObject> m_loaded_cookies;
++};
++
++}
+diff --git a/UI/Qt/Localization.cpp b/UI/Qt/Localization.cpp
+index 68b5906769..b342cad688 100644
+--- a/UI/Qt/Localization.cpp
++++ b/UI/Qt/Localization.cpp
+@@ -151,6 +151,10 @@ QHash<QString, QString> const& polish_table()
+         { QStringLiteral("View History"), QStringLiteral("Pokaż historię") },
+         { QStringLiteral("Clear Browsing Data"), QStringLiteral("Wyczyść dane przeglądania") },
+         { QStringLiteral("View Page Source"), QStringLiteral("Pokaż źródło strony") },
++        { QStringLiteral("Developer Tools"), QStringLiteral("Narzędzia deweloperskie") },
++        { QStringLiteral("JavaScript Console"), QStringLiteral("Konsola JavaScript") },
++        { QStringLiteral("Enable Remote Debugging (Firefox)"), QStringLiteral("Włącz zdalne debugowanie (Firefox)") },
++        { QStringLiteral("Disable Remote Debugging (Firefox)"), QStringLiteral("Wyłącz zdalne debugowanie (Firefox)") },
+         { QStringLiteral("Enable DevTools"), QStringLiteral("Włącz narzędzia deweloperskie") },
+         { QStringLiteral("Disable DevTools"), QStringLiteral("Wyłącz narzędzia deweloperskie") },
+         { QStringLiteral("Task Manager"), QStringLiteral("Menedżer zadań") },
+@@ -312,6 +316,101 @@ QHash<QString, QString> const& polish_table()
+         { QStringLiteral("Custom filters are full"), QStringLiteral("Limit własnych filtrów został osiągnięty") },
+         { QStringLiteral("Rule added"), QStringLiteral("Dodano regułę") },
+         { QStringLiteral("Hellbird Shield \u2014 Disabled"), QStringLiteral("Hellbird Shield \u2014 Wyłączona") },
++
++        // Built-in DevTools
++        { QStringLiteral("Elements"), QStringLiteral("Elementy") },
++        { QStringLiteral("Console"), QStringLiteral("Konsola") },
++        { QStringLiteral("Network"), QStringLiteral("Sieć") },
++        { QStringLiteral("Sources"), QStringLiteral("Źródła") },
++        { QStringLiteral("Storage"), QStringLiteral("Pamięć") },
++        { QStringLiteral("Select an element on the page to inspect"), QStringLiteral("Wybierz element na stronie do zbadania") },
++        { QStringLiteral("Dock to bottom"), QStringLiteral("Dokuj na dole") },
++        { QStringLiteral("Dock to right"), QStringLiteral("Dokuj po prawej") },
++        { QStringLiteral("Close DevTools"), QStringLiteral("Zamknij narzędzia deweloperskie") },
++        { QStringLiteral("Filter DOM (tag, #id, .class, text)"), QStringLiteral("Filtruj DOM (tag, #id, .klasa, tekst)") },
++        { QStringLiteral("Styles"), QStringLiteral("Style") },
++        { QStringLiteral("Computed"), QStringLiteral("Obliczone") },
++        { QStringLiteral("Box Model"), QStringLiteral("Model pudełkowy") },
++        { QStringLiteral("No node selected"), QStringLiteral("Nie wybrano węzła") },
++        { QStringLiteral("Filter styles"), QStringLiteral("Filtruj style") },
++        { QStringLiteral("Filter computed styles"), QStringLiteral("Filtruj obliczone style") },
++        { QStringLiteral("Filter console"), QStringLiteral("Filtruj konsolę") },
++        { QStringLiteral("All"), QStringLiteral("Wszystkie") },
++        { QStringLiteral("Errors"), QStringLiteral("Błędy") },
++        { QStringLiteral("Warnings"), QStringLiteral("Ostrzeżenia") },
++        { QStringLiteral("Info"), QStringLiteral("Informacje") },
++        { QStringLiteral("Clear console"), QStringLiteral("Wyczyść konsolę") },
++        { QStringLiteral("Evaluate JavaScript\u2026"), QStringLiteral("Wykonaj JavaScript\u2026") },
++        { QStringLiteral("Filter requests"), QStringLiteral("Filtruj żądania") },
++        { QStringLiteral("Clear"), QStringLiteral("Wyczyść") },
++        { QStringLiteral("Headers"), QStringLiteral("Nagłówki") },
++        { QStringLiteral("Response"), QStringLiteral("Odpowiedź") },
++        { QStringLiteral("Timing"), QStringLiteral("Czasy") },
++        { QStringLiteral("General"), QStringLiteral("Ogólne") },
++        { QStringLiteral("Request Headers"), QStringLiteral("Nagłówki żądania") },
++        { QStringLiteral("Response Headers"), QStringLiteral("Nagłówki odpowiedzi") },
++        { QStringLiteral("No response body"), QStringLiteral("Brak treści odpowiedzi") },
++        { QStringLiteral("Refresh"), QStringLiteral("Odśwież") },
++        { QStringLiteral("Select a stylesheet or script to view its source"), QStringLiteral("Wybierz arkusz stylów lub skrypt, aby wyświetlić jego kod") },
++        { QStringLiteral("Cookies"), QStringLiteral("Ciasteczka") },
++        { QStringLiteral("Local Storage"), QStringLiteral("Local Storage") },
++        { QStringLiteral("Session Storage"), QStringLiteral("Session Storage") },
++        { QStringLiteral("Edit"), QStringLiteral("Edytuj") },
++        { QStringLiteral("Name"), QStringLiteral("Nazwa") },
++        { QStringLiteral("Status"), QStringLiteral("Status") },
++        { QStringLiteral("Method"), QStringLiteral("Metoda") },
++        { QStringLiteral("Type"), QStringLiteral("Typ") },
++        { QStringLiteral("Size"), QStringLiteral("Rozmiar") },
++        { QStringLiteral("Time"), QStringLiteral("Czas") },
++        { QStringLiteral("Key"), QStringLiteral("Klucz") },
++        { QStringLiteral("Value"), QStringLiteral("Wartość") },
++        { QStringLiteral("Domain"), QStringLiteral("Domena") },
++        { QStringLiteral("Path"), QStringLiteral("Ścieżka") },
++        { QStringLiteral("Flags"), QStringLiteral("Flagi") },
++        { QStringLiteral("Edit as HTML"), QStringLiteral("Edytuj jako HTML") },
++        { QStringLiteral("Copy outerHTML"), QStringLiteral("Kopiuj outerHTML") },
++        { QStringLiteral("Copy innerHTML"), QStringLiteral("Kopiuj innerHTML") },
++        { QStringLiteral("Copy CSS selector"), QStringLiteral("Kopiuj selektor CSS") },
++        { QStringLiteral("Duplicate node"), QStringLiteral("Duplikuj węzeł") },
++        { QStringLiteral("Delete node"), QStringLiteral("Usuń węzeł") },
++        { QStringLiteral("Remote Debugging (Firefox) is attached \u2014 disconnect it to use built-in DevTools."), QStringLiteral("Zdalne debugowanie (Firefox) jest podłączone \u2014 odłącz je, aby użyć wbudowanych narzędzi.") },
++        { QStringLiteral("Binary response body (%1 bytes base64)"), QStringLiteral("Binarna odpowiedź (%1 bajtów base64)") },
++        { QStringLiteral("Save"), QStringLiteral("Zapisz") },
++        { QStringLiteral("Cancel"), QStringLiteral("Anuluj") },
++        { QStringLiteral("Edit HTML"), QStringLiteral("Edytuj HTML") },
++        { QStringLiteral("Add Entry"), QStringLiteral("Dodaj wpis") },
++        { QStringLiteral("Edit Entry"), QStringLiteral("Edytuj wpis") },
++        { QStringLiteral("Add Cookie"), QStringLiteral("Dodaj ciasteczko") },
++        { QStringLiteral("No stylesheets or scripts loaded"), QStringLiteral("Nie wczytano arkuszy stylów ani skryptów") },
++        { QStringLiteral("Status Code"), QStringLiteral("Kod statusu") },
++        { QStringLiteral("Timing breakdown"), QStringLiteral("Podział czasu") },
++        { QStringLiteral("External Firefox DevTools connected to this tab."), QStringLiteral("Zewnętrzne DevTools (Firefox) są połączone z tą kartą.") },
++        { QStringLiteral("Page crashed. Reload the page to continue inspecting."), QStringLiteral("Strona uległa awarii. Odśwież stronę, aby kontynuować inspekcję.") },
++        { QStringLiteral("External DevTools disconnected. Click Reattach to resume."), QStringLiteral("Zewnętrzne DevTools zostały odłączone. Kliknij Ponów połączenie, aby wznowić.") },
++        { QStringLiteral("Reattach"), QStringLiteral("Ponów połączenie") },
++        { QStringLiteral("DOM tree is too deeply nested to inspect (>255 levels)."), QStringLiteral("Drzewo DOM jest zbyt głęboko zagnieżdżone (>255 poziomów).") },
++        { QStringLiteral("Unable to load DOM tree."), QStringLiteral("Nie można wczytać drzewa DOM.") },
++        { QStringLiteral("Inherited from"), QStringLiteral("Dziedziczone z") },
++        { QStringLiteral("Loading\u2026"), QStringLiteral("Ładowanie\u2026") },
++        { QStringLiteral("(unavailable)"), QStringLiteral("(niedostępne)") },
++        { QStringLiteral("Failed"), QStringLiteral("Błąd") },
++        { QStringLiteral("Pending"), QStringLiteral("Oczekuje") },
++        { QStringLiteral("requests"), QStringLiteral("żądań") },
++        { QStringLiteral("No timing information available yet."), QStringLiteral("Brak informacji o czasach.") },
++        { QStringLiteral("Loading response body\u2026"), QStringLiteral("Ładowanie treści odpowiedzi\u2026") },
++        { QStringLiteral("Response body is no longer cached in memory."), QStringLiteral("Treść odpowiedzi nie znajduje się już w pamięci.") },
++        { QStringLiteral("No response body available."), QStringLiteral("Brak treści odpowiedzi.") },
++        { QStringLiteral("Truncated"), QStringLiteral("Obcięto") },
++        { QStringLiteral("(empty response body)"), QStringLiteral("(pusta odpowiedź)") },
++        { QStringLiteral("Stylesheets"), QStringLiteral("Arkusze stylów") },
++        { QStringLiteral("Scripts"), QStringLiteral("Skrypty") },
++        { QStringLiteral("Loading source\u2026"), QStringLiteral("Ładowanie źródła\u2026") },
++        { QStringLiteral("Unable to load source."), QStringLiteral("Nie można wczytać źródła.") },
++        { QStringLiteral("Expires"), QStringLiteral("Wygasa") },
++        { QStringLiteral("Session"), QStringLiteral("Sesja") },
++        { QStringLiteral("Add storage item"), QStringLiteral("Dodaj wpis pamięci") },
++        { QStringLiteral("Preserve log"), QStringLiteral("Zachowaj dziennik") },
++        { QStringLiteral("Clear network log"), QStringLiteral("Wyczyść dziennik sieci") },
+     };
+     return table;
+ }
+@@ -398,6 +497,10 @@ QHash<QString, QString> const& german_table()
+         { QStringLiteral("View History"), QStringLiteral("Verlauf anzeigen") },
+         { QStringLiteral("Clear Browsing Data"), QStringLiteral("Browserdaten löschen") },
+         { QStringLiteral("View Page Source"), QStringLiteral("Seitenquelltext anzeigen") },
++        { QStringLiteral("Developer Tools"), QStringLiteral("Entwicklertools") },
++        { QStringLiteral("JavaScript Console"), QStringLiteral("JavaScript-Konsole") },
++        { QStringLiteral("Enable Remote Debugging (Firefox)"), QStringLiteral("Remote-Debugging aktivieren (Firefox)") },
++        { QStringLiteral("Disable Remote Debugging (Firefox)"), QStringLiteral("Remote-Debugging deaktivieren (Firefox)") },
+         { QStringLiteral("Enable DevTools"), QStringLiteral("Entwicklertools aktivieren") },
+         { QStringLiteral("Disable DevTools"), QStringLiteral("Entwicklertools deaktivieren") },
+         { QStringLiteral("Task Manager"), QStringLiteral("Task-Manager") },
+@@ -559,6 +662,101 @@ QHash<QString, QString> const& german_table()
+         { QStringLiteral("Custom filters are full"), QStringLiteral("Limit für eigene Filter erreicht") },
+         { QStringLiteral("Rule added"), QStringLiteral("Regel hinzugefügt") },
+         { QStringLiteral("Hellbird Shield \u2014 Disabled"), QStringLiteral("Hellbird Shield \u2014 Deaktiviert") },
++
++        // Built-in DevTools
++        { QStringLiteral("Elements"), QStringLiteral("Elemente") },
++        { QStringLiteral("Console"), QStringLiteral("Konsole") },
++        { QStringLiteral("Network"), QStringLiteral("Netzwerk") },
++        { QStringLiteral("Sources"), QStringLiteral("Quellen") },
++        { QStringLiteral("Storage"), QStringLiteral("Speicher") },
++        { QStringLiteral("Select an element on the page to inspect"), QStringLiteral("Element auf der Seite zum Untersuchen auswählen") },
++        { QStringLiteral("Dock to bottom"), QStringLiteral("Unten andocken") },
++        { QStringLiteral("Dock to right"), QStringLiteral("Rechts andocken") },
++        { QStringLiteral("Close DevTools"), QStringLiteral("Entwicklertools schließen") },
++        { QStringLiteral("Filter DOM (tag, #id, .class, text)"), QStringLiteral("DOM filtern (Tag, #id, .Klasse, Text)") },
++        { QStringLiteral("Styles"), QStringLiteral("Stile") },
++        { QStringLiteral("Computed"), QStringLiteral("Berechnet") },
++        { QStringLiteral("Box Model"), QStringLiteral("Box-Modell") },
++        { QStringLiteral("No node selected"), QStringLiteral("Kein Knoten ausgewählt") },
++        { QStringLiteral("Filter styles"), QStringLiteral("Stile filtern") },
++        { QStringLiteral("Filter computed styles"), QStringLiteral("Berechnete Stile filtern") },
++        { QStringLiteral("Filter console"), QStringLiteral("Konsole filtern") },
++        { QStringLiteral("All"), QStringLiteral("Alle") },
++        { QStringLiteral("Errors"), QStringLiteral("Fehler") },
++        { QStringLiteral("Warnings"), QStringLiteral("Warnungen") },
++        { QStringLiteral("Info"), QStringLiteral("Info") },
++        { QStringLiteral("Clear console"), QStringLiteral("Konsole leeren") },
++        { QStringLiteral("Evaluate JavaScript\u2026"), QStringLiteral("JavaScript ausführen\u2026") },
++        { QStringLiteral("Filter requests"), QStringLiteral("Anfragen filtern") },
++        { QStringLiteral("Clear"), QStringLiteral("Leeren") },
++        { QStringLiteral("Headers"), QStringLiteral("Header") },
++        { QStringLiteral("Response"), QStringLiteral("Antwort") },
++        { QStringLiteral("Timing"), QStringLiteral("Zeitverlauf") },
++        { QStringLiteral("General"), QStringLiteral("Allgemein") },
++        { QStringLiteral("Request Headers"), QStringLiteral("Anfrage-Header") },
++        { QStringLiteral("Response Headers"), QStringLiteral("Antwort-Header") },
++        { QStringLiteral("No response body"), QStringLiteral("Kein Antwortinhalt") },
++        { QStringLiteral("Refresh"), QStringLiteral("Aktualisieren") },
++        { QStringLiteral("Select a stylesheet or script to view its source"), QStringLiteral("Stylesheet oder Skript auswählen, um den Quelltext anzuzeigen") },
++        { QStringLiteral("Cookies"), QStringLiteral("Cookies") },
++        { QStringLiteral("Local Storage"), QStringLiteral("Local Storage") },
++        { QStringLiteral("Session Storage"), QStringLiteral("Session Storage") },
++        { QStringLiteral("Edit"), QStringLiteral("Bearbeiten") },
++        { QStringLiteral("Name"), QStringLiteral("Name") },
++        { QStringLiteral("Status"), QStringLiteral("Status") },
++        { QStringLiteral("Method"), QStringLiteral("Methode") },
++        { QStringLiteral("Type"), QStringLiteral("Typ") },
++        { QStringLiteral("Size"), QStringLiteral("Größe") },
++        { QStringLiteral("Time"), QStringLiteral("Zeit") },
++        { QStringLiteral("Key"), QStringLiteral("Schlüssel") },
++        { QStringLiteral("Value"), QStringLiteral("Wert") },
++        { QStringLiteral("Domain"), QStringLiteral("Domain") },
++        { QStringLiteral("Path"), QStringLiteral("Pfad") },
++        { QStringLiteral("Flags"), QStringLiteral("Flags") },
++        { QStringLiteral("Edit as HTML"), QStringLiteral("Als HTML bearbeiten") },
++        { QStringLiteral("Copy outerHTML"), QStringLiteral("outerHTML kopieren") },
++        { QStringLiteral("Copy innerHTML"), QStringLiteral("innerHTML kopieren") },
++        { QStringLiteral("Copy CSS selector"), QStringLiteral("CSS-Selektor kopieren") },
++        { QStringLiteral("Duplicate node"), QStringLiteral("Knoten duplizieren") },
++        { QStringLiteral("Delete node"), QStringLiteral("Knoten löschen") },
++        { QStringLiteral("Remote Debugging (Firefox) is attached \u2014 disconnect it to use built-in DevTools."), QStringLiteral("Remote-Debugging (Firefox) ist verbunden \u2014 trennen, um integrierte Entwicklertools zu nutzen.") },
++        { QStringLiteral("Binary response body (%1 bytes base64)"), QStringLiteral("Binärer Antwortinhalt (%1 Bytes Base64)") },
++        { QStringLiteral("Save"), QStringLiteral("Speichern") },
++        { QStringLiteral("Cancel"), QStringLiteral("Abbrechen") },
++        { QStringLiteral("Edit HTML"), QStringLiteral("HTML bearbeiten") },
++        { QStringLiteral("Add Entry"), QStringLiteral("Eintrag hinzufügen") },
++        { QStringLiteral("Edit Entry"), QStringLiteral("Eintrag bearbeiten") },
++        { QStringLiteral("Add Cookie"), QStringLiteral("Cookie hinzufügen") },
++        { QStringLiteral("No stylesheets or scripts loaded"), QStringLiteral("Keine Stylesheets oder Skripte geladen") },
++        { QStringLiteral("Status Code"), QStringLiteral("Statuscode") },
++        { QStringLiteral("Timing breakdown"), QStringLiteral("Zeitaufschlüsselung") },
++        { QStringLiteral("External Firefox DevTools connected to this tab."), QStringLiteral("Externe Firefox-Entwicklertools sind mit diesem Tab verbunden.") },
++        { QStringLiteral("Page crashed. Reload the page to continue inspecting."), QStringLiteral("Die Seite ist abgestürzt. Seite neu laden, um weiter zu untersuchen.") },
++        { QStringLiteral("External DevTools disconnected. Click Reattach to resume."), QStringLiteral("Externe Entwicklertools getrennt. Auf Neu verbinden klicken, um fortzufahren.") },
++        { QStringLiteral("Reattach"), QStringLiteral("Neu verbinden") },
++        { QStringLiteral("DOM tree is too deeply nested to inspect (>255 levels)."), QStringLiteral("DOM-Baum ist zu tief verschachtelt (>255 Ebenen).") },
++        { QStringLiteral("Unable to load DOM tree."), QStringLiteral("DOM-Baum konnte nicht geladen werden.") },
++        { QStringLiteral("Inherited from"), QStringLiteral("Geerbt von") },
++        { QStringLiteral("Loading\u2026"), QStringLiteral("Wird geladen\u2026") },
++        { QStringLiteral("(unavailable)"), QStringLiteral("(nicht verfügbar)") },
++        { QStringLiteral("Failed"), QStringLiteral("Fehlgeschlagen") },
++        { QStringLiteral("Pending"), QStringLiteral("Ausstehend") },
++        { QStringLiteral("requests"), QStringLiteral("Anfragen") },
++        { QStringLiteral("No timing information available yet."), QStringLiteral("Noch keine Zeitinformationen verfügbar.") },
++        { QStringLiteral("Loading response body\u2026"), QStringLiteral("Antwortinhalt wird geladen\u2026") },
++        { QStringLiteral("Response body is no longer cached in memory."), QStringLiteral("Antwortinhalt ist nicht mehr im Speicher.") },
++        { QStringLiteral("No response body available."), QStringLiteral("Kein Antwortinhalt verfügbar.") },
++        { QStringLiteral("Truncated"), QStringLiteral("Gekürzt") },
++        { QStringLiteral("(empty response body)"), QStringLiteral("(leerer Antwortinhalt)") },
++        { QStringLiteral("Stylesheets"), QStringLiteral("Stylesheets") },
++        { QStringLiteral("Scripts"), QStringLiteral("Skripte") },
++        { QStringLiteral("Loading source\u2026"), QStringLiteral("Quelltext wird geladen\u2026") },
++        { QStringLiteral("Unable to load source."), QStringLiteral("Quelltext konnte nicht geladen werden.") },
++        { QStringLiteral("Expires"), QStringLiteral("Läuft ab") },
++        { QStringLiteral("Session"), QStringLiteral("Sitzung") },
++        { QStringLiteral("Add storage item"), QStringLiteral("Speichereintrag hinzufügen") },
++        { QStringLiteral("Preserve log"), QStringLiteral("Protokoll behalten") },
++        { QStringLiteral("Clear network log"), QStringLiteral("Netzwerkprotokoll leeren") },
+     };
+     return table;
+ }
+diff --git a/UI/Qt/Menu.cpp b/UI/Qt/Menu.cpp
+index d76808f6a0..45d2064587 100644
+--- a/UI/Qt/Menu.cpp
++++ b/UI/Qt/Menu.cpp
+@@ -314,11 +314,27 @@ static void set_action_shortcuts(QAction& qaction, ActionID id)
+         qaction.setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Comma));
+ #endif
+         break;
+-    case ActionID::ToggleDevTools:
++    case ActionID::OpenDevTools:
++#if defined(AK_OS_MACOS)
++        qaction.setShortcuts({
++            QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_I),
++            QKeySequence(Qt::Key_F12),
++        });
++#else
+         qaction.setShortcuts({
+             QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I),
+             QKeySequence(Qt::Key_F12),
+         });
++#endif
++        break;
++    case ActionID::OpenDevToolsConsole:
++#if defined(AK_OS_MACOS)
++        qaction.setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_J));
++#else
++        qaction.setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_J));
++#endif
++        break;
++    case ActionID::ToggleDevTools:
+         break;
+     case ActionID::ViewSource:
+ #if defined(AK_OS_MACOS)
+diff --git a/UI/Qt/Tab.cpp b/UI/Qt/Tab.cpp
+index 01ad05f063..79a4d3508c 100644
+--- a/UI/Qt/Tab.cpp
++++ b/UI/Qt/Tab.cpp
+@@ -6,6 +6,7 @@
+  * SPDX-License-Identifier: BSD-2-Clause
+  */
+ 
++#include <AK/JsonObject.h>
+ #include <AK/kmalloc.h>
+ #include <LibCore/EventLoop.h>
+ #include <LibCore/Promise.h>
+@@ -66,6 +67,7 @@
+ #include <QPixmap>
+ #include <QPushButton>
+ #include <QResizeEvent>
++#include <QSplitter>
+ #include <QTimeEdit>
+ #include <QTimer>
+ #include <QToolButton>
+@@ -214,7 +216,18 @@ void Tab::initialize(Optional<u64> hub_view_id)
+         .is_tab = true,
+     };
+ 
+-    m_view = new WebContentView(this, hub_view_id, AK::move(view_initial_state));
++    m_splitter = new QSplitter(Qt::Horizontal, this);
++    m_splitter->setObjectName(QStringLiteral("HellbirdTabSplitter"));
++    m_splitter->setChildrenCollapsible(false);
++    m_splitter->setOpaqueResize(true);
++    m_splitter->setHandleWidth(m_corner_radius > 0 ? 6 : 1);
++    QObject::connect(m_splitter, &QSplitter::splitterMoved, this, [this](int, int) {
++        if (m_corner_radius > 0)
++            update();
++    });
++
++    m_view = new WebContentView(m_splitter, hub_view_id, AK::move(view_initial_state));
++    m_view->setMinimumSize(200, 150);
+     m_view->set_corner_radius(m_corner_radius);
+     // The window reports its geometry to its tabs as it is moved and resized, so a tab opened later has to be told
+     // where the window stands now.
+@@ -228,9 +241,26 @@ void Tab::initialize(Optional<u64> hub_view_id)
+     m_element_picker = new ElementPickerWidget(this, m_view);
+     m_view->add_floating_surface(*m_element_picker);
+     view().on_request_element_picker = [this](auto target) {
++        if (m_devtools_panel)
++            m_devtools_panel->stop_picker_if_active();
+         if (view().can_block_elements())
+             m_element_picker->start(target);
+     };
++    view().on_devtools_event = [this](RemoteView::DevToolsEvent event, JsonObject const& payload) {
++        if (event == RemoteView::DevToolsEvent::InspectElement) {
++            auto node_id = payload.get_integer<i64>("nodeId"sv);
++            auto& panel = ensure_devtools_panel();
++            if (node_id.has_value())
++                panel.open_and_inspect(*node_id);
++            else
++                panel.open(DevToolsPanel::PanelTab::Elements);
++            update_devtools_splitter_layout();
++            update();
++            return;
++        }
++        if (m_devtools_panel)
++            m_devtools_panel->handle_devtools_event(event, payload);
++    };
+ 
+     // The window's toolbar holds the address field while it shows this tab.
+     m_location_edit = new LocationEdit(this, Application::settings(), make<SuggestionProvider>(m_window->is_private()));
+@@ -244,7 +274,8 @@ void Tab::initialize(Optional<u64> hub_view_id)
+     m_hover_label->setContentsMargins(4, 2, 4, 2);
+     m_hover_label->setAutoFillBackground(true);
+ 
+-    tab_layout->addWidget(m_view);
++    m_splitter->addWidget(m_view);
++    tab_layout->addWidget(m_splitter);
+ 
+     // NB: A page can block many requests in a burst while it loads, so the toolbar and the open popover catch up
+     //     with them at most ten times a second rather than for each one.
+@@ -1453,6 +1484,12 @@ void Tab::set_corner_radius(int radius)
+     m_corner_radius = radius;
+     if (m_view)
+         m_view->set_corner_radius(m_corner_radius);
++    if (m_devtools_panel)
++        m_devtools_panel->set_corner_radius(m_corner_radius);
++    if (m_splitter)
++        m_splitter->setHandleWidth(m_corner_radius > 0 ? 6 : 1);
++    if (is_loaded())
++        update_chrome_style();
+     update();
+ }
+ 
+@@ -1464,7 +1501,14 @@ void Tab::paintEvent(QPaintEvent*)
+         painter.setRenderHint(QPainter::Antialiasing, true);
+         painter.setPen(Qt::NoPen);
+         painter.setBrush(Theme::panel().page);
+-        painter.drawRoundedRect(QRectF(rect()), m_corner_radius, m_corner_radius);
++        if (m_devtools_panel && m_devtools_panel->isVisible() && m_view && m_splitter) {
++            auto view_rect = QRectF(m_view->mapTo(this, QPoint {}), m_view->size());
++            auto panel_rect = QRectF(m_devtools_panel->mapTo(this, QPoint {}), m_devtools_panel->size());
++            painter.drawRoundedRect(view_rect, m_corner_radius, m_corner_radius);
++            painter.drawRoundedRect(panel_rect, m_corner_radius, m_corner_radius);
++        } else {
++            painter.drawRoundedRect(QRectF(rect()), m_corner_radius, m_corner_radius);
++        }
+         return;
+     }
+     painter.fillRect(rect(), Theme::panel().page);
+@@ -1520,6 +1564,16 @@ void Tab::update_chrome_style()
+         hover_surface, hover_text, hover_border, m_hover_text_is_on_right ? "left" : "right", HOVER_TEXT_CORNER_RADIUS);
+     if (m_hover_label->styleSheet() != hover_label_style)
+         m_hover_label->setStyleSheet(hover_label_style);
++    if (m_splitter) {
++        auto handle_color = m_corner_radius > 0
++            ? ChromeStyle::style_sheet_color(ChromeStyle::chrome_background(Theme::chrome_palette(*this)))
++            : ChromeStyle::style_sheet_color(ChromeStyle::chrome_border(Theme::chrome_palette(*this)));
++        auto splitter_style = qformatted("QSplitter#HellbirdTabSplitter::handle {{ background: {}; }}", handle_color);
++        if (m_splitter->styleSheet() != splitter_style)
++            m_splitter->setStyleSheet(splitter_style);
++    }
++    if (m_devtools_panel)
++        m_devtools_panel->update_chrome_style();
+     m_is_updating_chrome_style = false;
+ }
+ 
+@@ -1751,6 +1805,97 @@ void Tab::start_element_picker()
+         view().on_request_element_picker(RemoteView::ElementPickerTarget::None);
+ }
+ 
++DevToolsPanel& Tab::ensure_devtools_panel()
++{
++    VERIFY(is_loaded() && m_splitter);
++    if (m_devtools_panel)
++        return *m_devtools_panel;
++
++    m_devtools_panel = new DevToolsPanel(*m_view, m_splitter);
++    m_devtools_panel->set_corner_radius(m_corner_radius);
++    m_devtools_panel->hide();
++    m_splitter->addWidget(m_devtools_panel);
++    m_splitter->setStretchFactor(0, 3);
++    m_splitter->setStretchFactor(1, 2);
++
++    QObject::connect(m_devtools_panel, &DevToolsPanel::dock_side_changed, this, [this](DevToolsPanel::DockSide) {
++        update_devtools_splitter_layout();
++        update();
++    });
++    QObject::connect(m_devtools_panel, &DevToolsPanel::visibility_changed, this, [this](bool visible) {
++        if (visible)
++            update_devtools_splitter_layout();
++        update();
++    });
++    QObject::connect(m_devtools_panel, &DevToolsPanel::picker_starting, this, [this] {
++        if (m_element_picker)
++            m_element_picker->quit();
++    });
++
++    return *m_devtools_panel;
++}
++
++void Tab::update_devtools_splitter_layout()
++{
++    if (!m_splitter || !m_devtools_panel)
++        return;
++    auto orientation = m_devtools_panel->dock_side() == DevToolsPanel::DockSide::Right ? Qt::Horizontal : Qt::Vertical;
++    bool orientation_changed = m_splitter->orientation() != orientation;
++    if (orientation_changed)
++        m_splitter->setOrientation(orientation);
++
++    auto total = orientation == Qt::Horizontal ? width() : height();
++    if (total <= 0)
++        return;
++    auto sizes = m_splitter->sizes();
++    if (orientation_changed || sizes.size() < 2 || sizes[1] <= 0) {
++        int panel_size = clamp(total * 38 / 100, 240, max(240, total - 240));
++        m_splitter->setSizes({ max(200, total - panel_size), panel_size });
++    }
++}
++
++void Tab::open_devtools(DevToolsPanel::PanelTab tab)
++{
++    ensure_loaded();
++    auto& panel = ensure_devtools_panel();
++    panel.open(tab);
++    update_devtools_splitter_layout();
++    update();
++}
++
++void Tab::toggle_devtools(DevToolsPanel::PanelTab tab)
++{
++    ensure_loaded();
++    auto& panel = ensure_devtools_panel();
++    panel.toggle(tab);
++    if (panel.isVisible())
++        update_devtools_splitter_layout();
++    update();
++}
++
++void Tab::close_devtools()
++{
++    if (m_devtools_panel && m_devtools_panel->is_open()) {
++        m_devtools_panel->close_panel();
++        update();
++    }
++}
++
++bool Tab::is_devtools_open() const
++{
++    return m_devtools_panel && m_devtools_panel->is_open();
++}
++
++void Tab::set_devtools_hidden_for_fullscreen(bool hidden)
++{
++    if (!m_devtools_panel)
++        return;
++    m_devtools_panel->set_temporarily_hidden_for_fullscreen(hidden);
++    if (!hidden && m_devtools_panel->isVisible())
++        update_devtools_splitter_layout();
++    update();
++}
++
+ void Tab::request_close()
+ {
+     m_window->cancel_window_close_preflight();
+diff --git a/UI/Qt/Tab.h b/UI/Qt/Tab.h
+index b4b09d95d6..3030060f19 100644
+--- a/UI/Qt/Tab.h
++++ b/UI/Qt/Tab.h
+@@ -19,6 +19,7 @@
+ #include <LibWebView/FileDownloader.h>
+ #include <LibWebView/Settings.h>
+ #include <LibWebView/TabPerformanceStats.h>
++#include <UI/Qt/DevToolsPanel.h>
+ #include <UI/Qt/FindInPageWidget.h>
+ #include <UI/Qt/LocationEdit.h>
+ #include <UI/Qt/PermissionPromptPopover.h>
+@@ -39,6 +40,7 @@ class QColorDialog;
+ class QDialog;
+ class QFileDialog;
+ class QMessageBox;
++class QSplitter;
+ class QTimer;
+ class QVariantAnimation;
+ 
+@@ -123,6 +125,12 @@ public:
+     // Has the user pick an element on the page to block, if the page is a website's.
+     void start_element_picker();
+ 
++    void toggle_devtools(DevToolsPanel::PanelTab = DevToolsPanel::PanelTab::Elements);
++    void open_devtools(DevToolsPanel::PanelTab = DevToolsPanel::PanelTab::Elements);
++    void close_devtools();
++    bool is_devtools_open() const;
++    void set_devtools_hidden_for_fullscreen(bool);
++
+     void request_close();
+     void request_window_close_preflight(Function<void(bool)> on_complete);
+     void cancel_window_close_preflight();
+@@ -221,6 +229,8 @@ private:
+     void update_tab_icon();
+     int tab_index();
+     void set_screen_wake_lock_state(Web::ScreenWakeLockState);
++    DevToolsPanel& ensure_devtools_panel();
++    void update_devtools_splitter_layout();
+ 
+     QPointer<MessagePopover> m_private_session_popover;
+     QPointer<SiteSettingsPopover> m_site_settings_popover;
+@@ -233,7 +243,9 @@ private:
+     QPointer<BookmarkPopover> m_bookmark_popover;
+     QPointer<Tab> m_tab_to_activate_on_close;
+     QPointer<LocationEdit> m_location_edit;
++    QSplitter* m_splitter { nullptr };
+     WebContentView* m_view { nullptr };
++    DevToolsPanel* m_devtools_panel { nullptr };
+     FindInPageWidget* m_find_in_page { nullptr };
+     ElementPickerWidget* m_element_picker { nullptr };
+     Optional<WakeLock::DisplaySleepInhibitor> m_screen_display_sleep_inhibitor;
+diff --git a/UI/Qt/WebContentView.cpp b/UI/Qt/WebContentView.cpp
+index 7c22c8df50..9c950fdfcc 100644
+--- a/UI/Qt/WebContentView.cpp
++++ b/UI/Qt/WebContentView.cpp
+@@ -822,10 +822,16 @@ static bool is_browser_reserved_shortcut(QKeyEvent const& event)
+ #if defined(AK_OS_MACOS)
+     if (modifiers == (Qt::ControlModifier | Qt::AltModifier) && key == Qt::Key_S)
+         return true;
++    if (modifiers == (Qt::ControlModifier | Qt::AltModifier) && (key == Qt::Key_I || key == Qt::Key_J))
++        return true;
+ #else
+     if (modifiers == (Qt::ControlModifier | Qt::ShiftModifier) && key == Qt::Key_S)
+         return true;
++    if (modifiers == (Qt::ControlModifier | Qt::ShiftModifier) && (key == Qt::Key_I || key == Qt::Key_J))
++        return true;
+ #endif
++    if (modifiers == Qt::NoModifier && key == Qt::Key_F12)
++        return true;
+ 
+     return false;
+ }

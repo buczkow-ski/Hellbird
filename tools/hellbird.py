@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hellbird build, patch, verification, and packaging CLI (Windows & Linux)."""
+"""Hellbird build, patch, verification, and packaging CLI (Windows, Linux & macOS)."""
 
 from __future__ import annotations
 
@@ -493,6 +493,161 @@ def _package_linux(build_dir: Path, dist_dir: Path, fmt: str) -> None:
         )
 
 
+def _write_combined_third_party_licenses(generated_licenses: Path, destination: Path) -> None:
+    if not generated_licenses.is_file():
+        return
+    combined_licenses = generated_licenses.read_text(encoding="utf-8")
+    inter_ofl = REPO_ROOT / "resources" / "fonts" / "OFL.txt"
+    if inter_ofl.is_file():
+        combined_licenses = (
+            combined_licenses.rstrip("\n")
+            + "\n\n---\n\nInter Font Family (SIL Open Font License 1.1)\n\n"
+            + inter_ofl.read_text(encoding="utf-8")
+        )
+    destination.write_text(combined_licenses, encoding="utf-8")
+
+
+def _is_mach_o_file(path: Path) -> bool:
+    if path.is_symlink() or not path.is_file():
+        return False
+    try:
+        magic = path.read_bytes()[:4]
+    except OSError:
+        return False
+    return magic in (
+        b"\xfe\xed\xfa\xce",
+        b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf",
+        b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe",
+        b"\xbe\xba\xfe\xca",
+    )
+
+
+def _resign_macos_bundle(app_bundle: Path, build_dir: Path, app_entitlements: Path | None) -> None:
+    """Ad-hoc re-sign all Mach-O binaries inside Hellbird.app after strip invalidates build signatures."""
+    macos_dir = app_bundle / "Contents" / "MacOS"
+    main_exe = macos_dir / "Hellbird"
+
+    # 1. Re-sign bundled dylibs and Qt plugins first.
+    for subdir_name in ("lib", "PlugIns", "Frameworks"):
+        subdir = app_bundle / "Contents" / subdir_name
+        if not subdir.is_dir():
+            continue
+        for candidate in sorted(subdir.rglob("*")):
+            if _is_mach_o_file(candidate):
+                run_cmd(["codesign", "--sign", "-", "--force", str(candidate)])
+
+    # 2. Re-sign helper executables (preserving per-helper entitlements when present).
+    if macos_dir.is_dir():
+        for exe in sorted(macos_dir.iterdir()):
+            if exe == main_exe or not _is_mach_o_file(exe):
+                continue
+            cmd = ["codesign", "--sign", "-", "--force"]
+            helper_ent = build_dir / "Services" / exe.name / f"{exe.name}.entitlements"
+            if helper_ent.is_file():
+                cmd.extend(["--options", "runtime", "--entitlements", str(helper_ent)])
+            cmd.append(str(exe))
+            run_cmd(cmd)
+
+    # 3. Re-sign the main app bundle last and verify the bundle seal.
+    app_cmd = ["codesign", "--sign", "-", "--force"]
+    if app_entitlements and app_entitlements.is_file():
+        app_cmd.extend(["--entitlements", str(app_entitlements)])
+    app_cmd.append(str(app_bundle))
+    run_cmd(app_cmd)
+    run_cmd(["codesign", "--verify", "--deep", "--strict", str(app_bundle)])
+
+
+def _package_macos(build_dir: Path, dist_dir: Path, version: str, fmt: str) -> list[Path]:
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    arch = platform.machine().lower()
+    if arch in ("aarch64", "arm64"):
+        arch = "arm64"
+    elif arch in ("amd64", "x86_64"):
+        arch = "x86_64"
+
+    base_name = f"hellbird-{version}-macOS-{arch}"
+    outputs: list[Path] = []
+
+    with tempfile.TemporaryDirectory(prefix="hellbird-macos-pkg-") as tmp:
+        tmp_path = Path(tmp)
+        install_dir = tmp_path / "install"
+        run_cmd(
+            [
+                "cmake",
+                "--install",
+                str(build_dir),
+                "--strip",
+                "--component",
+                "ladybird_Runtime",
+                "--prefix",
+                str(install_dir),
+            ]
+        )
+
+        app_bundle = install_dir / "bundle" / "Hellbird.app"
+        if not (app_bundle / "Contents" / "MacOS" / "Hellbird").is_file():
+            raise RuntimeError(f"Expected installed macOS app bundle at {app_bundle}")
+
+        app_entitlements = install_dir / "entitlements" / "Hellbird.release.entitlements"
+        _resign_macos_bundle(app_bundle, build_dir, app_entitlements if app_entitlements.is_file() else None)
+
+        stage_dir = tmp_path / base_name
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(app_bundle, stage_dir / "Hellbird.app", symlinks=True)
+
+        for meta_file in ("LICENSE", "README.md", "version.txt", "ladybird_version.txt"):
+            src = REPO_ROOT / meta_file
+            if src.is_file():
+                shutil.copy2(src, stage_dir / meta_file)
+
+        _write_combined_third_party_licenses(
+            app_bundle / "Contents" / "Resources" / "ladybird" / "LICENSES.txt",
+            stage_dir / "THIRD_PARTY_LICENSES.txt",
+        )
+
+        if fmt in ("txz", "all"):
+            txz_path = dist_dir / f"{base_name}.tar.xz"
+            if txz_path.exists():
+                txz_path.unlink()
+            run_cmd(["tar", "-cJf", str(txz_path), "-C", str(tmp_path), base_name])
+            print(f"Created macOS archive: {txz_path}")
+            outputs.append(txz_path)
+
+        if fmt in ("dmg", "all"):
+            dmg_stage = tmp_path / "dmg-root"
+            dmg_stage.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(stage_dir / "Hellbird.app", dmg_stage / "Hellbird.app", symlinks=True)
+            (dmg_stage / "Applications").symlink_to("/Applications")
+            for extra in ("LICENSE", "THIRD_PARTY_LICENSES.txt"):
+                src = stage_dir / extra
+                if src.is_file():
+                    shutil.copy2(src, dmg_stage / extra)
+
+            dmg_path = dist_dir / f"{base_name}.dmg"
+            if dmg_path.exists():
+                dmg_path.unlink()
+            run_cmd(
+                [
+                    "hdiutil",
+                    "create",
+                    "-volname",
+                    "Hellbird",
+                    "-srcfolder",
+                    str(dmg_stage),
+                    "-ov",
+                    "-format",
+                    "UDZO",
+                    str(dmg_path),
+                ]
+            )
+            print(f"Created macOS disk image: {dmg_path}")
+            outputs.append(dmg_path)
+
+    return outputs
+
+
 def cmd_package(args: argparse.Namespace) -> int:
     upstream_dir = Path(args.upstream).resolve()
     preset = args.preset or _default_preset_for_host()
@@ -501,8 +656,11 @@ def cmd_package(args: argparse.Namespace) -> int:
     dist_dir.mkdir(parents=True, exist_ok=True)
     version = read_text_pin("version.txt")
 
-    if platform.system() == "Windows":
+    system = platform.system()
+    if system == "Windows":
         _package_windows(build_dir, dist_dir, version)
+    elif system == "Darwin":
+        _package_macos(build_dir, dist_dir, version, args.format)
     else:
         _package_linux(build_dir, dist_dir, args.format)
     return 0
@@ -552,12 +710,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_build.add_argument("--extra-cmake-arg", action="append", default=[], help="Extra -D... argument passed to CMake.")
     p_build.set_defaults(func=cmd_build)
 
-    p_pkg = sub.add_parser("package", help="Package Hellbird for Windows (.zip) or Linux (.tar.xz / .deb).")
+    p_pkg = sub.add_parser("package", help="Package Hellbird for Windows (.zip), Linux (.tar.xz / .deb), or macOS (.dmg / .tar.xz).")
     p_pkg.add_argument("--upstream", default=str(REPO_ROOT / "upstream" / "ladybird"))
     p_pkg.add_argument("--preset", default=None, help="CMake preset (default: Distribution).")
     p_pkg.add_argument("--build-dir", default=None)
     p_pkg.add_argument("--out", default=str(REPO_ROOT / "dist"))
-    p_pkg.add_argument("--format", choices=("txz", "deb", "all"), default="all", help="Linux package format.")
+    p_pkg.add_argument("--format", choices=("txz", "deb", "dmg", "all"), default="all", help="Package format (Linux: txz/deb/all, macOS: dmg/txz/all).")
     p_pkg.set_defaults(func=cmd_package)
 
     return parser

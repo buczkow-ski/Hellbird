@@ -1,6 +1,6 @@
 # Hellbird UX design
 
-How Helium's ideas map onto Ladybird `2026.47.7` (`4e9acf4c02ca23239fe32224a303dcea4614562b`). Patches live in
+How Helium's ideas map onto Ladybird `2026.47.8` (`0be55a57cc07ed258362c631a13a10bb4f6d707a`). Patches live in
 `patches/privacy`, `patches/features` and `patches/ui`, and apply in that order after `patches/build`.
 
 ## Privacy defaults
@@ -38,6 +38,7 @@ Helium downloads its list; Hellbird's is built in, so resolving a bang needs no 
 - Only text that would be searched for can be a bang, so no address changes meaning. With Ctrl+Return, text is an address.
 - The query is percent-encoded with the URL component set.
 - The omnibox row says where it goes ("Search GitHub"), and bang text is never sent for remote suggestions.
+- Typing `!` (or a partial prefix like `!g`, `!yo`, `!trans`) lists matching `!bang` commands in the address bar autocomplete popup; selecting a suggested command fills `!<trigger> ` into the address bar ready to type a query (or press Enter to open the site).
 - Settings > Search > Use !bangs turns them off (`searchEngine.bangs`). They work without a search engine.
 
 | Site | Bangs |
@@ -164,7 +165,7 @@ with 5 px rows, and cards on pages 10 px.
 
 What the user reads says Hellbird, and Linux desktop integration uses `org.hellbird.Hellbird` (`.desktop`, D-Bus
 service, icon, notifications, and Wayland app ID) so Hellbird installs cleanly alongside Ladybird. These keep the
-engine's name on purpose: the user agent (`LADYBIRD_VERSION=2026.47.7`), profile paths, internal IPC and object names,
+engine's name on purpose: the user agent (`LADYBIRD_VERSION=2026.47.8`), profile paths, internal IPC and object names,
 environment variables, and log output.
 
 ## Upstream tests that expect Ladybird's defaults

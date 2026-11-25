@@ -129,10 +129,12 @@ class ResourceOverlayTests(unittest.TestCase):
 
 class BuildAndPackagingLogicTests(unittest.TestCase):
     def test_vcpkg_and_build_dir_preset_mappings(self) -> None:
-        # C1 regression guard: Windows Distribution uses release vcpkg, Linux uses distribution
+        # C1 regression guard: Windows Distribution uses release vcpkg, Linux/macOS use distribution
         self.assertEqual(hellbird.resolve_vcpkg_config("Distribution", "Windows"), ("release", "Release"))
         self.assertEqual(hellbird.resolve_vcpkg_config("Distribution", "Linux"), ("distribution", "Distribution"))
+        self.assertEqual(hellbird.resolve_vcpkg_config("Distribution", "Darwin"), ("distribution", "Distribution"))
         self.assertEqual(hellbird.resolve_vcpkg_config("Release", "Windows"), ("release", "Release"))
+        self.assertEqual(hellbird.resolve_vcpkg_config("Release", "Darwin"), ("release", "Release"))
         self.assertEqual(hellbird.resolve_vcpkg_config("Debug", "Windows"), ("debug", "Debug"))
 
         root = Path("/tmp/lb")
@@ -208,6 +210,7 @@ class RepoIntegrityTests(unittest.TestCase):
         png_sig = b"\x89PNG\r\n\x1a\n"
         self.assertTrue((REPO_ROOT / "resources/branding/hellbird-48.png").read_bytes().startswith(png_sig))
         self.assertTrue((REPO_ROOT / "resources/branding/hellbird-256.png").read_bytes().startswith(png_sig))
+        self.assertTrue((REPO_ROOT / "resources/branding/macos/app_icon.iconset/icon_512x512@2x.png").read_bytes().startswith(png_sig))
         self.assertTrue((REPO_ROOT / "resources/branding/hellbird.ico").read_bytes().startswith(b"\x00\x00\x01\x00"))
         self.assertIn("VERSIONINFO", (REPO_ROOT / "resources/branding/hellbird.rc").read_text(encoding="utf-8"))
 

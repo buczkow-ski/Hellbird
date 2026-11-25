@@ -4,3 +4,5 @@
 0003-copy-page-url.patch
 0004-close-tabs-to-the-left.patch
 0005-bang-privacy-and-header-hardening.patch
+0006-bang-autocomplete-suggestions.patch
+0007-builtin-devtools-hub-bridge.patch

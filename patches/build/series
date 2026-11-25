@@ -2,3 +2,4 @@
 01-hellbird-build-and-packaging.patch
 02-windows-gui-subsystem-and-presets.patch
 03-fix-cmake-job-pools.patch
+04-macos-branding-and-bundle.patch

@@ -1,0 +1,146 @@
+name: Build macOS (arm64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: 'CMake build preset'
+        type: choice
+        default: 'Distribution'
+        options:
+          - Distribution
+          - Release
+      package_format:
+        description: 'macOS package format'
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - dmg
+          - txz
+  workflow_call:
+    inputs:
+      preset:
+        type: string
+        default: 'Distribution'
+      package_format:
+        type: string
+        default: 'all'
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: macOS arm64 (${{ inputs.preset || 'Distribution' }})
+    runs-on: macos-26
+    timeout-minutes: 300
+
+    env:
+      PRESET: ${{ inputs.preset || 'Distribution' }}
+      PKG_FORMAT: ${{ inputs.package_format || 'all' }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_COMPILERCHECK: "%compiler% -v"
+
+    steps:
+      - name: Checkout Hellbird
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install macOS build dependencies
+        run: |
+          xcodebuild -version
+          brew unlink openssl@3 || true
+          brew install \
+            autoconf \
+            autoconf-archive \
+            automake \
+            ccache \
+            cmake \
+            libtool \
+            nasm \
+            ninja \
+            pkg-config
+          HOST_CC="$(xcrun --find clang)"
+          HOST_CXX="$(xcrun --find clang++)"
+          echo "CC=${HOST_CC}" >> "$GITHUB_ENV"
+          echo "CXX=${HOST_CXX}" >> "$GITHUB_ENV"
+          "${HOST_CXX}" --version
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prepare patched Ladybird source tree
+        run: |
+          python3 tools/hellbird.py prepare --upstream upstream/ladybird
+          mkdir -p "${GITHUB_WORKSPACE}/.ccache"
+          mkdir -p "${GITHUB_WORKSPACE}/upstream/ladybird/Build/caches/vcpkg-binary-cache"
+
+      - name: Restore ccache, vcpkg, and cargo caches
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .ccache
+            upstream/ladybird/Build/caches/vcpkg-binary-cache
+            ~/.cargo/registry
+          key: hellbird-macos-arm64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**', 'resources/**', 'tools/**') }}-${{ github.run_id }}
+          restore-keys: |
+            hellbird-macos-arm64-${{ env.PRESET }}-${{ hashFiles('ladybird_revision.txt', 'patches/**', 'resources/**', 'tools/**') }}-
+            hellbird-macos-arm64-${{ env.PRESET }}-
+            hellbird-macos-arm64-
+
+      - name: Warm up Rust toolchain, cargo dependencies & vcpkg
+        working-directory: ${{ github.workspace }}/upstream/ladybird
+        run: |
+          rustup toolchain install
+          cargo --version
+          rustc --version
+          for manifest in Cargo.toml Libraries/LibJS/Flap/Cargo.toml; do
+            if [ -f "${manifest}" ]; then
+              cargo fetch --locked --manifest-path "${manifest}"
+            fi
+          done
+          python3 "${GITHUB_WORKSPACE}/tools/hellbird.py" bootstrap-vcpkg --upstream "${GITHUB_WORKSPACE}/upstream/ladybird" --preset "${PRESET}"
+
+      - name: Configure & Build Hellbird
+        run: |
+          python3 tools/hellbird.py build \
+            --upstream upstream/ladybird \
+            --preset "${PRESET}" \
+            --no-tests \
+            --extra-cmake-arg="-DCMAKE_C_COMPILER=${CC}" \
+            --extra-cmake-arg="-DCMAKE_CXX_COMPILER=${CXX}" \
+            --extra-cmake-arg=-DLADYBIRD_ENABLE_LTO=OFF \
+            --extra-cmake-arg=-DLADYBIRD_GENERATE_SYMBOL_FILES=OFF
+
+      - name: Save caches (even if build fails or times out early)
+        if: always() && steps.cache-restore.outputs.cache-primary-key != ''
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .ccache
+            upstream/ladybird/Build/caches/vcpkg-binary-cache
+            ~/.cargo/registry
+          key: ${{ steps.cache-restore.outputs.cache-primary-key }}
+
+      - name: Package macOS disk image and archive
+        run: |
+          python3 tools/hellbird.py package \
+            --upstream upstream/ladybird \
+            --preset "${PRESET}" \
+            --format "${PKG_FORMAT}" \
+            --out dist
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hellbird-macos-arm64-${{ env.PRESET }}
+          path: |
+            dist/*.dmg
+            dist/*.tar.xz
+          if-no-files-found: error

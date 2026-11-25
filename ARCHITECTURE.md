@@ -1,8 +1,8 @@
 # Hellbird Architecture & Contribution Contract
 
-**Hellbird** is a privacy-first, minimalist desktop web browser combining the **UI/UX philosophy and privacy/ergonomic features of [Helium](https://github.com/imputnet/helium)** with the independent **[Ladybird](https://github.com/ladybirdbrowser/ladybird)** web engine (pinned to the first Alpha release **`2026.47.7`**, commit `4e9acf4c02ca23239fe32224a303dcea4614562b`).
+**Hellbird** is a privacy-first, minimalist desktop web browser combining the **UI/UX philosophy and privacy/ergonomic features of [Helium](https://github.com/imputnet/helium)** with the independent **[Ladybird](https://github.com/ladybirdbrowser/ladybird)** web engine (pinned to Ladybird Alpha **`2026.47.8`**, commit `0be55a57cc07ed258362c631a13a10bb4f6d707a`).
 
-First-class target platforms for v0.1.0-alpha.1: **Windows (x64)** and **Linux (x64)**.
+First-class target platforms: **Windows (x64)**, **Linux (x64)**, and **macOS (arm64)**.
 
 ---
 
@@ -12,8 +12,8 @@ Instead of vendoring the full ~500k+ LOC Ladybird repository, Hellbird uses a cl
 
 ```text
 Hellbird/
-├── version.txt                  # Hellbird release version (0.1.0-alpha.1)
-├── ladybird_version.txt         # Pinned upstream Ladybird tag (2026.47.7)
+├── version.txt                  # Hellbird release version (e.g. 0.1.0-alpha.6)
+├── ladybird_version.txt         # Pinned upstream Ladybird tag (2026.47.8)
 ├── ladybird_revision.txt        # Pinned upstream Ladybird full commit SHA
 ├── ARCHITECTURE.md              # This contract
 ├── README.md                    # User & developer documentation
@@ -47,7 +47,8 @@ Hellbird/
         ├── verify.yml           # Fast CI: patch verification, resource check, unit tests
         ├── build-linux.yml      # Linux x64 build & .tar.xz / .deb packaging
         ├── build-windows.yml    # Windows x64 (ClangCL + Qt6) build & portable .zip packaging
-        └── release.yml          # Tagged release pipeline (Windows + Linux)
+        ├── build-macos.yml      # macOS arm64 build & .dmg / .tar.xz packaging
+        └── release.yml          # Tagged release pipeline (Windows + Linux + macOS)
 ```
 
 ---
@@ -60,7 +61,7 @@ Patches are applied strictly in this stage order:
 3. `patches/features/series`
 4. `patches/ui/series`
 
-Each `series` file lists relative `.patch` paths (one per line; `#` comments and blank lines ignored). Every `.patch` MUST be a standard unified diff (`git diff`) with `a/` and `b/` prefixes that applies cleanly via `git apply --check` against upstream Ladybird `4e9acf4c02ca23239fe32224a303dcea4614562b` (after preceding patches in order).
+Each `series` file lists relative `.patch` paths (one per line; `#` comments and blank lines ignored). Every `.patch` MUST be a standard unified diff (`git diff`) with `a/` and `b/` prefixes that applies cleanly via `git apply --check` against upstream Ladybird `0be55a57cc07ed258362c631a13a10bb4f6d707a` (after preceding patches in order).
 
 ### Strict File Ownership Boundaries (Zero Conflict Contract)
 
@@ -69,7 +70,7 @@ Each `series` file lists relative `.patch` paths (one per line; `#` comments and
 | **Infrastructure, Build & Packaging** | `tools/`, `tests/`, `resources/branding/`, `resources/manifest.json`, `.github/workflows/`, `patches/build/`, `README.md`, `LICENSE` | `CMakeLists.txt`, `UI/CMakeLists.txt`, `UI/cmake/*`, `Meta/CMake/*` |
 | **Helium UI/UX, Privacy & Features** | `patches/privacy/`, `patches/features/`, `patches/ui/`, `resources/overlay/` (optional), `docs/UX-DESIGN.md` | `Libraries/*`, `Services/*`, `UI/Qt/*`, `Base/res/*` |
 
-**Cross-platform rule:** All C++/Qt patches under `UI/Qt/`, `Libraries/`, and `Services/` MUST compile cleanly on both **Linux (Clang/GCC)** and **Windows (`clang-cl` / MSVC ABI)** — avoid POSIX-only headers without `#ifndef AK_OS_WINDOWS` / `#ifdef Q_OS_LINUX` guards, and stick strictly to verified APIs in Ladybird `2026.47.7` (Qt 6.10+, AK, LibWebView, LibURL, LibCore).
+**Cross-platform rule:** All C++/Qt patches under `UI/Qt/`, `Libraries/`, and `Services/` MUST compile cleanly on **Linux (Clang/GCC)**, **Windows (`clang-cl` / MSVC ABI)**, and **macOS (AppleClang)** — avoid POSIX-only headers without `#ifndef AK_OS_WINDOWS` / `#ifdef Q_OS_LINUX` guards, and stick strictly to verified APIs in Ladybird `2026.47.8` (Qt 6.10+, AK, LibWebView, LibURL, LibCore).
 
 ---
 

@@ -1,0 +1,2549 @@
+diff --git a/Services/Hub/Application.cpp b/Services/Hub/Application.cpp
+index cbdd97a17b..b4fb55ff43 100644
+--- a/Services/Hub/Application.cpp
++++ b/Services/Hub/Application.cpp
+@@ -9,6 +9,7 @@
+ #include <AK/Queue.h>
+ #include <Hub/Application.h>
+ #include <Hub/ConnectionFromUI.h>
++#include <Hub/DevToolsAgent.h>
+ #include <Hub/Proxies.h>
+ #include <LibCore/ArgsParser.h>
+ #include <LibCore/EventLoop.h>
+@@ -609,4 +610,47 @@ Vector<u64> Application::platform_presentation_drm_format_modifiers() const
+     return WebView::Application::platform_presentation_drm_format_modifiers();
+ }
+ 
++DevToolsAgent* Application::devtools_agent_of_view(u64 view_id) const
++{
++    auto view = m_views.find(view_id);
++    if (view == m_views.end())
++        return nullptr;
++    return &view->value->devtools_agent();
++}
++
++// A client of the DevTools server takes the place of the view's built-in developer tools for as long as it is connected.
++// NB: What these override is private, so each does what that does as well.
++void Application::stop_listening_for_inspect_element_requests(DevTools::TabDescription const& description) const
++{
++    auto view = WebView::ViewImplementation::find_view_by_id(description.id);
++    if (!view.has_value())
++        return;
++
++    view->on_inspect_element_request = nullptr;
++    if (auto* agent = devtools_agent_of_view(description.id))
++        agent->external_client_did_stop_listening_for_inspect_element_requests();
++}
++
++void Application::did_connect_devtools_client(DevTools::TabDescription const& description) const
++{
++    auto view = WebView::ViewImplementation::find_view_by_id(description.id);
++    if (!view.has_value())
++        return;
++
++    if (auto* agent = devtools_agent_of_view(description.id))
++        agent->external_client_will_connect();
++    view->did_connect_devtools_client();
++}
++
++void Application::did_disconnect_devtools_client(DevTools::TabDescription const& description) const
++{
++    auto view = WebView::ViewImplementation::find_view_by_id(description.id);
++    if (!view.has_value())
++        return;
++
++    view->did_disconnect_devtools_client();
++    if (auto* agent = devtools_agent_of_view(description.id))
++        agent->external_client_did_disconnect();
++}
++
+ }
+diff --git a/Services/Hub/Application.h b/Services/Hub/Application.h
+index 903d11f8e0..5cf38b9fdb 100644
+--- a/Services/Hub/Application.h
++++ b/Services/Hub/Application.h
+@@ -106,6 +106,9 @@ private:
+     virtual bool captures_browser_crashes() const override { return true; }
+     virtual void on_devtools_enabled() const override;
+     virtual void on_devtools_disabled() const override;
++    virtual void stop_listening_for_inspect_element_requests(DevTools::TabDescription const&) const override;
++    virtual void did_connect_devtools_client(DevTools::TabDescription const&) const override;
++    virtual void did_disconnect_devtools_client(DevTools::TabDescription const&) const override;
+     virtual void on_compositor_gpu_painting_changed() const override;
+     virtual void create_platform_actions() override;
+     virtual Optional<String> ui_font_family() const override;
+@@ -150,6 +153,8 @@ private:
+     };
+     NewTabSource new_tab_source(WebView::ViewImplementation const* source_view) const;
+ 
++    DevToolsAgent* devtools_agent_of_view(u64 view_id) const;
++
+     mutable u64 m_next_ui_request_id { 1 };
+ };
+ 
+diff --git a/Services/Hub/CMakeLists.txt b/Services/Hub/CMakeLists.txt
+index 410288c3b7..6e03d3d9eb 100644
+--- a/Services/Hub/CMakeLists.txt
++++ b/Services/Hub/CMakeLists.txt
+@@ -15,6 +15,7 @@ target_link_libraries(hubipc PRIVATE LibCore LibGfx LibHTTP LibIPC LibURL LibWeb
+ set(SOURCES
+     Application.cpp
+     ConnectionFromUI.cpp
++    DevToolsAgent.cpp
+     Proxies.cpp
+     View.cpp
+ )
+diff --git a/Services/Hub/ConnectionFromUI.cpp b/Services/Hub/ConnectionFromUI.cpp
+index 039ead5d8e..64afd250b6 100644
+--- a/Services/Hub/ConnectionFromUI.cpp
++++ b/Services/Hub/ConnectionFromUI.cpp
+@@ -8,6 +8,7 @@
+ #include <AK/Array.h>
+ #include <Hub/Application.h>
+ #include <Hub/ConnectionFromUI.h>
++#include <Hub/DevToolsAgent.h>
+ #include <Hub/Proxies.h>
+ #include <LibCore/Environment.h>
+ #include <LibCore/EventLoop.h>
+@@ -1440,4 +1441,10 @@ void ConnectionFromUI::view_reset_site_permissions(u64 view_id, URL::Origin orig
+     }
+ }
+ 
++void ConnectionFromUI::view_devtools_command(u64 view_id, u64 request_id, String command, ByteString params_json)
++{
++    if (auto* view = find_view(view_id))
++        view->devtools_agent().handle_command(request_id, command, params_json);
++}
++
+ }
+diff --git a/Services/Hub/ConnectionFromUI.h b/Services/Hub/ConnectionFromUI.h
+index 343a8beb11..413744326c 100644
+--- a/Services/Hub/ConnectionFromUI.h
++++ b/Services/Hub/ConnectionFromUI.h
+@@ -228,6 +228,7 @@ private:
+     virtual void view_deny_fullscreen_window(u64 view_id) override;
+     virtual void view_set_is_fullscreen(u64 view_id, Web::ViewportIsFullscreen is_fullscreen) override;
+     virtual void view_reset_site_permissions(u64 view_id, URL::Origin origin) override;
++    virtual void view_devtools_command(u64 view_id, u64 request_id, String command, ByteString params_json) override;
+ };
+ 
+ }
+diff --git a/Services/Hub/DevToolsAgent.cpp b/Services/Hub/DevToolsAgent.cpp
+new file mode 100644
+index 0000000000..cb0e79709d
+--- /dev/null
++++ b/Services/Hub/DevToolsAgent.cpp
+@@ -0,0 +1,1619 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#include <AK/Base64.h>
++#include <AK/CharacterTypes.h>
++#include <AK/JsonArray.h>
++#include <AK/UnicodeUtils.h>
++#include <AK/Utf8View.h>
++#include <Hub/Application.h>
++#include <Hub/ConnectionFromUI.h>
++#include <Hub/DevToolsAgent.h>
++#include <Hub/View.h>
++#include <LibCore/EventLoop.h>
++#include <LibCore/Timer.h>
++#include <LibHTTP/Cookie/Cookie.h>
++#include <LibRequests/NetworkError.h>
++#include <LibRequests/RequestTimingInfo.h>
++#include <LibWebCommon/WebView/Attribute.h>
++#include <LibWebCommon/WebView/ConsoleOutput.h>
++#include <LibWebCommon/WebView/Debugger.h>
++#include <LibWebCommon/WebView/Mutation.h>
++#include <LibWebView/CanonicalTraversable.h>
++#include <LibWebView/WebContentPage.h>
++#include <math.h>
++
++namespace Hub {
++
++static constexpr auto SHORT_REPLY_TIMEOUT = AK::Duration::from_seconds(3);
++static constexpr auto LONG_REPLY_TIMEOUT = AK::Duration::from_seconds(15);
++static constexpr auto TIMEOUT_CHECK_INTERVAL = AK::Duration::from_milliseconds(250);
++static constexpr auto COALESCING_INTERVAL = AK::Duration::from_milliseconds(100);
++
++static constexpr size_t MAX_RESPONSE_BODY_SIZE = 5 * MiB;
++static constexpr size_t MAX_RESPONSE_BODIES_SIZE = 64 * MiB;
++static constexpr size_t MAX_NETWORK_ENTRIES = 5000;
++static constexpr size_t MAX_REQUEST_BODY_SIZE = 1 * MiB;
++static constexpr size_t MAX_MUTATED_NODES = 256;
++// The connection to the UI refuses a message of 128 MiB.
++static constexpr size_t MAX_PAYLOAD_SIZE = 64 * MiB;
++
++static constexpr auto HTML_NAMESPACE = "http://www.w3.org/1999/xhtml"sv;
++
++static bool is_textual_mime_type(String const& mime_type)
++{
++    if (mime_type.starts_with_bytes("text/"sv))
++        return true;
++    for (auto textual : { "json"sv, "javascript"sv, "ecmascript"sv, "xml"sv, "x-www-form-urlencoded"sv }) {
++        if (mime_type.contains(textual))
++            return true;
++    }
++    return false;
++}
++
++static JsonObject serialize_body(ReadonlyBytes bytes, String const& mime_type, bool truncated)
++{
++    StringView text { bytes };
++    JsonObject body;
++    if (is_textual_mime_type(mime_type) || (!text.contains('\0') && Utf8View { text }.validate(AllowLonelySurrogates::No)))
++        body.set("text"sv, String::from_utf8_with_replacement_character(text));
++    else
++        body.set("base64"sv, MUST(encode_base64(bytes)));
++    body.set("truncated"sv, truncated);
++    return body;
++}
++
++static JsonArray serialize_headers(ReadonlySpan<HTTP::Header> headers)
++{
++    JsonArray serialized;
++    for (auto const& header : headers) {
++        JsonObject entry;
++        entry.set("name"sv, String::from_utf8_with_replacement_character(header.name));
++        entry.set("value"sv, String::from_utf8_with_replacement_character(header.value));
++        serialized.must_append(move(entry));
++    }
++    return serialized;
++}
++
++// Is empty if the headers do not say.
++static String mime_type_from_headers(ReadonlySpan<HTTP::Header> headers)
++{
++    for (auto const& header : headers) {
++        if (!header.name.equals_ignoring_ascii_case("content-type"sv))
++            continue;
++        auto value = header.value.view();
++        if (auto semicolon = value.find(';'); semicolon.has_value())
++            value = value.substring_view(0, *semicolon);
++        return String::from_utf8_with_replacement_character(value.trim_whitespace()).to_ascii_lowercase();
++    }
++    return {};
++}
++
++static JsonObject grip_of_type(StringView type)
++{
++    JsonObject grip;
++    grip.set("type"sv, type);
++    return grip;
++}
++
++static JsonValue serialize_value(WebView::DebuggerValue const& value)
++{
++    switch (value.type) {
++    case WebView::DebuggerValueType::Undefined:
++        return grip_of_type("undefined"sv);
++    case WebView::DebuggerValueType::Null:
++    case WebView::DebuggerValueType::Uninitialized:
++        return grip_of_type("null"sv);
++    case WebView::DebuggerValueType::Boolean:
++        return value.boolean_value;
++    case WebView::DebuggerValueType::Number:
++        if (isnan(value.number_value))
++            return grip_of_type("NaN"sv);
++        if (isinf(value.number_value))
++            return grip_of_type(value.number_value < 0 ? "-Infinity"sv : "Infinity"sv);
++        if (value.number_value == 0 && signbit(value.number_value))
++            return grip_of_type("-0"sv);
++        return value.number_value;
++    case WebView::DebuggerValueType::String:
++        return value.text.to_well_formed_utf8();
++    case WebView::DebuggerValueType::BigInt: {
++        auto grip = grip_of_type("BigInt"sv);
++        grip.set("text"sv, value.text.to_well_formed_utf8());
++        return grip;
++    }
++    case WebView::DebuggerValueType::Object: {
++        auto grip = grip_of_type("object"sv);
++        if (value.grip_fields.is_object()) {
++            value.grip_fields.as_object().for_each_member([&](auto const& key, auto const& member) {
++                grip.set(key, member);
++            });
++        }
++        grip.set("objectId"sv, value.object_id);
++        grip.set("class"sv, value.object_class);
++        return grip;
++    }
++    }
++    VERIFY_NOT_REACHED();
++}
++
++static JsonObject serialize_object_properties(WebView::DebuggerObjectProperties const& object)
++{
++    JsonArray properties;
++    for (auto const& property : object.properties) {
++        JsonObject entry;
++        entry.set("name"sv, property.name.to_well_formed_utf8());
++        if (property.value.has_value())
++            entry.set("value"sv, serialize_value(*property.value));
++        if (property.getter.has_value())
++            entry.set("get"sv, serialize_value(*property.getter));
++        if (property.setter.has_value())
++            entry.set("set"sv, serialize_value(*property.setter));
++        entry.set("writable"sv, property.writable);
++        entry.set("enumerable"sv, property.enumerable);
++        entry.set("configurable"sv, property.configurable);
++        properties.must_append(move(entry));
++    }
++
++    JsonObject serialized;
++    if (object.prototype.has_value())
++        serialized.set("prototype"sv, serialize_value(*object.prototype));
++    else
++        serialized.set("prototype"sv, JsonValue {});
++    serialized.set("properties"sv, move(properties));
++    return serialized;
++}
++
++static JsonObject serialize_stack_frame(WebView::StackFrame const& frame)
++{
++    JsonObject serialized;
++    if (frame.function.has_value())
++        serialized.set("function"sv, *frame.function);
++    if (frame.file.has_value())
++        serialized.set("file"sv, *frame.file);
++    if (frame.line.has_value())
++        serialized.set("line"sv, static_cast<u64>(*frame.line));
++    if (frame.column.has_value())
++        serialized.set("column"sv, static_cast<u64>(*frame.column));
++    return serialized;
++}
++
++static JsonArray serialize_stack(ReadonlySpan<WebView::StackFrame> stack)
++{
++    JsonArray serialized;
++    for (auto const& frame : stack)
++        serialized.must_append(serialize_stack_frame(frame));
++    return serialized;
++}
++
++static StringView console_level_name(JS::ConsoleLogLevel level)
++{
++    switch (level) {
++    case JS::ConsoleLogLevel::Assert:
++        return "assert"sv;
++    case JS::ConsoleLogLevel::Count:
++        return "count"sv;
++    case JS::ConsoleLogLevel::CountReset:
++        return "countReset"sv;
++    case JS::ConsoleLogLevel::Debug:
++        return "debug"sv;
++    case JS::ConsoleLogLevel::Dir:
++        return "dir"sv;
++    case JS::ConsoleLogLevel::DirXML:
++        return "dirxml"sv;
++    case JS::ConsoleLogLevel::Error:
++        return "error"sv;
++    case JS::ConsoleLogLevel::Group:
++        return "group"sv;
++    case JS::ConsoleLogLevel::GroupCollapsed:
++        return "groupCollapsed"sv;
++    case JS::ConsoleLogLevel::Info:
++        return "info"sv;
++    case JS::ConsoleLogLevel::Log:
++        return "log"sv;
++    case JS::ConsoleLogLevel::TimeEnd:
++        return "timeEnd"sv;
++    case JS::ConsoleLogLevel::TimeLog:
++        return "timeLog"sv;
++    case JS::ConsoleLogLevel::Table:
++        return "table"sv;
++    case JS::ConsoleLogLevel::Trace:
++        return "trace"sv;
++    case JS::ConsoleLogLevel::Warn:
++        return "warn"sv;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++static JsonObject serialize_console_output(WebView::ConsoleOutput const& console_output)
++{
++    JsonObject serialized;
++    serialized.set("timestamp"sv, console_output.timestamp.milliseconds_since_epoch());
++    console_output.output.visit(
++        [&](WebView::ConsoleLog const& log) {
++            serialized.set("kind"sv, "log"sv);
++            serialized.set("level"sv, console_level_name(log.level));
++            serialized.set("args"sv, JsonArray(log.arguments));
++            if (log.location.has_value())
++                serialized.set("location"sv, serialize_stack_frame(*log.location));
++        },
++        [&](WebView::ConsoleError const& error) {
++            serialized.set("kind"sv, "error"sv);
++            serialized.set("name"sv, error.name);
++            serialized.set("message"sv, error.message);
++            serialized.set("inPromise"sv, error.inside_promise);
++            serialized.set("stack"sv, serialize_stack(error.trace));
++        },
++        [&](WebView::ConsoleTrace const& trace) {
++            serialized.set("kind"sv, "trace"sv);
++            serialized.set("label"sv, trace.label);
++            serialized.set("stack"sv, serialize_stack(trace.stack));
++        },
++        [&](WebView::ConsoleGroupEnd const&) {
++            serialized.set("kind"sv, "groupEnd"sv);
++        });
++    return serialized;
++}
++
++static StringView priority_name(Web::Fetch::Infrastructure::RequestPriority priority)
++{
++    switch (priority) {
++    case Web::Fetch::Infrastructure::RequestPriority::High:
++        return "high"sv;
++    case Web::Fetch::Infrastructure::RequestPriority::Low:
++        return "low"sv;
++    case Web::Fetch::Infrastructure::RequestPriority::Auto:
++        return "auto"sv;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++static StringView cache_state_name(Requests::CacheState cache_state)
++{
++    switch (cache_state) {
++    case Requests::CacheState::NotCached:
++        return "none"sv;
++    case Requests::CacheState::Local:
++        return "local"sv;
++    case Requests::CacheState::Validated:
++        return "validated"sv;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++static String script_key(Web::HTML::ScriptRegistryIdentifier const& id)
++{
++    return MUST(String::formatted("script:{}:{}", id.document_id.value(), id.script_id));
++}
++
++static Optional<Web::HTML::ScriptRegistryIdentifier> script_from_key(String const& key)
++{
++    auto view = key.bytes_as_string_view();
++    if (!view.starts_with("script:"sv))
++        return {};
++    auto parts = view.substring_view("script:"sv.length()).split_view(':');
++    if (parts.size() != 2)
++        return {};
++    auto document_id = parts[0].to_number<i64>();
++    auto script_id = parts[1].to_number<u64>();
++    if (!document_id.has_value() || !script_id.has_value())
++        return {};
++    return Web::HTML::ScriptRegistryIdentifier { .document_id = *document_id, .script_id = *script_id };
++}
++
++static String style_sheet_key(Web::CSS::StyleSheetIdentifier const& style_sheet)
++{
++    i64 element_id = style_sheet.dom_element_unique_id.has_value() ? style_sheet.dom_element_unique_id->value() : 0;
++    auto url = style_sheet.url.has_value() ? style_sheet.url->to_well_formed_utf8() : String {};
++    return MUST(String::formatted("stylesheet:{}:{}:{}", to_underlying(style_sheet.type), element_id, url));
++}
++
++static JsonObject serialize_script(Web::HTML::ScriptRegistryDescription const& script)
++{
++    JsonObject source;
++    source.set("key"sv, script_key(script.id));
++    source.set("kind"sv, "script"sv);
++    if (script.url.has_value())
++        source.set("url"sv, script.url->serialize());
++    source.set("displayName"sv, script.display_url.to_well_formed_utf8());
++    source.set("inline"sv, script.is_inline_source);
++    if (!script.content_type.is_empty())
++        source.set("contentType"sv, script.content_type.to_well_formed_utf8());
++    source.set("startLine"sv, script.source_start_line);
++    source.set("length"sv, static_cast<u64>(script.source_length));
++    return source;
++}
++
++static JsonObject serialize_style_sheet(Web::CSS::StyleSheetIdentifier const& style_sheet)
++{
++    auto is_inline = style_sheet.type == Web::CSS::StyleSheetIdentifier::Type::StyleElement;
++    auto url = style_sheet.url.has_value() ? style_sheet.url->to_well_formed_utf8() : String {};
++
++    JsonObject source;
++    source.set("key"sv, style_sheet_key(style_sheet));
++    source.set("kind"sv, "stylesheet"sv);
++    if (!url.is_empty())
++        source.set("url"sv, url);
++    source.set("displayName"sv, is_inline || url.is_empty() ? "<style>"_string : url);
++    source.set("inline"sv, is_inline);
++    source.set("contentType"sv, "text/css"sv);
++    return source;
++}
++
++static bool is_safe_markup_name(String const& name)
++{
++    if (name.is_empty())
++        return false;
++    for (auto character : name.bytes()) {
++        if (character <= ' ' || character == 0x7f || "/>=\"'<"sv.contains(static_cast<char>(character)))
++            return false;
++    }
++    return true;
++}
++
++static bool is_safe_tag_name(String const& name)
++{
++    return is_safe_markup_name(name) && is_ascii_alpha(name.bytes()[0]);
++}
++
++static Optional<Web::StorageAPI::StorageEndpointType> storage_endpoint_from_params(JsonObject const& params)
++{
++    auto store = params.get_string("store"sv);
++    if (!store.has_value())
++        return {};
++    if (*store == "local"sv)
++        return Web::StorageAPI::StorageEndpointType::LocalStorage;
++    if (*store == "session"sv)
++        return Web::StorageAPI::StorageEndpointType::SessionStorage;
++    return {};
++}
++
++struct PseudoElementParameter {
++    bool is_valid { true };
++    Optional<Web::CSS::PseudoElement> pseudo_element {};
++};
++
++static PseudoElementParameter pseudo_element_from_params(JsonObject const& params)
++{
++    if (!params.has("pseudo"sv))
++        return {};
++    auto value = params.get_integer<u32>("pseudo"sv);
++    // NB: The page takes what it gets to be in range.
++    if (!value.has_value() || *value >= to_underlying(Web::CSS::PseudoElement::KnownPseudoElementCount))
++        return { .is_valid = false, .pseudo_element = {} };
++    return { .is_valid = true, .pseudo_element = static_cast<Web::CSS::PseudoElement>(*value) };
++}
++
++DevToolsAgent::DevToolsAgent(View& view)
++    : m_view(view)
++{
++    m_view.on_web_content_process_change_for_cross_site_navigation = weak([](auto& self) {
++        self.sync_display_page();
++    });
++}
++
++DevToolsAgent::~DevToolsAgent() = default;
++
++void DevToolsAgent::listen_for_inspect_element_requests()
++{
++    m_listens_for_inspect_element_requests = true;
++    m_view.on_inspect_element_request = weak([](auto& self, Web::UniqueNodeID node_id) {
++        JsonObject payload;
++        payload.set("nodeId"sv, node_id.value());
++        self.send_event("InspectElement"sv, payload);
++    });
++}
++
++bool DevToolsAgent::has_open_page() const
++{
++    if (!m_view.has_traversable())
++        return false;
++    auto page = m_view.traversable().display_page();
++    return page && page->is_open();
++}
++
++bool DevToolsAgent::has_usable_page() const
++{
++    return has_open_page() && !m_view.crash_overlay_active();
++}
++
++DevTools::TabDescription DevToolsAgent::description() const
++{
++    return { .id = m_view.view_id(), .title = {}, .url = m_view.url().serialize() };
++}
++
++void DevToolsAgent::attach()
++{
++    if (m_external_client_connected) {
++        send_detached("external"sv);
++        return;
++    }
++
++    if (!has_usable_page()) {
++        m_announces_availability = true;
++        send_detached("crash"sv);
++        return;
++    }
++
++    sync_display_page();
++
++    // NB: The page sends what its console has shown so far only to a client that did not listen to it before, and the UI
++    //     forgets all of it when it attaches.
++    if (m_attached)
++        let_go("not-attached"_string);
++    if (exchange(m_client_to_disconnect, false))
++        m_view.did_disconnect_devtools_client();
++
++    m_announces_availability = false;
++    m_attached = true;
++    install_callbacks();
++    send_event("Attached"sv, {});
++
++    m_view.did_connect_devtools_client();
++    m_view.start_sending_console_output(true, true);
++}
++
++void DevToolsAgent::detach(StringView reason, String error)
++{
++    if (!m_attached)
++        return;
++    let_go(move(error));
++    send_detached(reason);
++}
++
++void DevToolsAgent::let_go(String error)
++{
++    stop_picker("stopped"sv);
++    m_attached = false;
++    fail_everything(error);
++
++    if (has_usable_page()) {
++        if (m_wants_dom_mutations)
++            m_view.set_listen_for_dom_mutations(false);
++        m_view.clear_highlighted_dom_node();
++        m_view.did_disconnect_devtools_client();
++    } else {
++        m_client_to_disconnect = true;
++    }
++
++    // NB: A client of the DevTools server that is connecting may be listening in our place already.
++    if (!m_external_client_connected)
++        remove_callbacks();
++    if (auto listener_id = exchange(m_storage_listener_id, {}); listener_id.has_value())
++        m_view.remove_storage_change_listener(*listener_id);
++
++    m_wants_dom_mutations = false;
++    m_known_nodes.clear();
++    m_style_sheets.clear();
++    m_network_ids.clear();
++    m_network_entries.clear();
++    m_network_body_bytes = 0;
++    m_mutated_nodes.clear();
++    m_child_list_changed = false;
++    m_cookies_changed = false;
++    m_local_storage_changed = false;
++    m_session_storage_changed = false;
++}
++
++void DevToolsAgent::install_callbacks()
++{
++    m_view.on_received_dom_tree = weak([](auto& self, JsonObject dom_tree) {
++        // NB: A tree that is nested too deeply to be parsed arrives as an empty object, which no document serializes to.
++        if (dom_tree.is_empty()) {
++            self.settle(Slot::DOMTree, "too-deep"_string);
++            return;
++        }
++        if (self.m_attached) {
++            self.m_known_nodes.clear();
++            self.learn_nodes(dom_tree);
++        }
++        self.settle(Slot::DOMTree, JsonValue { move(dom_tree) });
++    });
++
++    m_view.on_received_dom_node_properties = weak([](auto& self, WebView::DOMNodeProperties properties) {
++        if (properties.type == self.m_expected_properties)
++            self.settle(Slot::NodeProperties, move(properties.properties));
++    });
++
++    m_view.on_received_dom_node_html = weak([](auto& self, String html) {
++        self.settle(Slot::HTML, JsonValue { move(html) });
++    });
++
++    m_view.on_finished_editing_dom_node = weak([](auto& self, Optional<Web::UniqueNodeID> const& node_id) {
++        if (!node_id.has_value()) {
++            self.settle(Slot::Edit, "gone"_string);
++            return;
++        }
++        JsonObject result;
++        result.set("nodeId"sv, node_id->value());
++        self.settle(Slot::Edit, JsonValue { move(result) });
++    });
++
++    m_view.on_received_style_sheet_list = weak([](auto& self, Vector<Web::CSS::StyleSheetIdentifier> style_sheets) {
++        self.m_received_style_sheets = move(style_sheets);
++        self.settle(Slot::StyleSheetList, JsonValue {});
++    });
++
++    m_view.on_received_style_sheet_source = weak([](auto& self, Web::CSS::StyleSheetIdentifier const& style_sheet, URL::URL const&, Utf16String const& text) {
++        if (!self.m_expected_style_sheet.has_value() || !(*self.m_expected_style_sheet == style_sheet))
++            return;
++        JsonObject source;
++        source.set("text"sv, text.to_well_formed_utf8());
++        source.set("contentType"sv, "text/css"sv);
++        self.settle(Slot::Source, JsonValue { move(source) });
++    });
++
++    m_view.on_devtools_source_available = weak([](auto& self, Web::HTML::ScriptRegistryDescription script) {
++        if (self.m_attached)
++            self.send_event("SourceAdded"sv, serialize_script(script));
++    });
++
++    m_view.on_received_js_console_result = weak([](auto& self, WebView::DebuggerValue value) {
++        if (!self.m_attached)
++            return;
++        JsonObject payload;
++        payload.set("value"sv, serialize_value(value));
++        self.send_event("EvalResult"sv, payload);
++    });
++
++    m_view.on_console_message = weak([](auto& self, WebView::ConsoleOutput console_output) {
++        if (self.m_attached)
++            self.send_event("Console"sv, serialize_console_output(console_output));
++    });
++
++    m_view.on_dom_mutation_received = weak([](auto& self, WebView::Mutation mutation) {
++        if (!self.m_attached || !self.m_wants_dom_mutations)
++            return;
++        auto changes_child_list = mutation.type == "childList"sv || mutation.mutation.has<WebView::ChildListMutation>();
++        if (self.m_mutated_nodes.size() < MAX_MUTATED_NODES)
++            self.m_mutated_nodes.set(mutation.target.value());
++        // NB: A list cut short leaves out nodes, so the whole tree has to be looked at again.
++        if (changes_child_list || self.m_mutated_nodes.size() >= MAX_MUTATED_NODES)
++            self.m_child_list_changed = true;
++        self.schedule_coalesced_events();
++    });
++
++    m_view.on_network_request_started = weak([](auto& self, u64 request_id, URL::URL const& url, ByteString const& method, Vector<HTTP::Header> const& headers, ByteBuffer request_body, Optional<String> initiator, String referrer_policy, bool is_navigation, Web::Fetch::Infrastructure::RequestPriority priority) {
++        if (!self.m_attached)
++            return;
++        auto id = self.m_next_network_id++;
++        self.m_network_ids.set(request_id, id);
++        self.m_network_entries.set(id, {});
++        self.evict_network_entries();
++
++        JsonObject payload;
++        payload.set("id"sv, id);
++        payload.set("url"sv, url.serialize());
++        payload.set("method"sv, String::from_utf8_with_replacement_character(method));
++        payload.set("startTime"sv, UnixDateTime::now().milliseconds_since_epoch());
++        payload.set("headers"sv, serialize_headers(headers));
++        if (initiator.has_value())
++            payload.set("initiator"sv, initiator.release_value());
++        payload.set("referrerPolicy"sv, move(referrer_policy));
++        payload.set("isNavigation"sv, is_navigation);
++        payload.set("priority"sv, priority_name(priority));
++        if (!request_body.is_empty()) {
++            auto truncated = request_body.size() > MAX_REQUEST_BODY_SIZE;
++            ReadonlyBytes bytes = request_body.bytes();
++            payload.set("requestBody"sv, serialize_body(bytes.trim(MAX_REQUEST_BODY_SIZE), mime_type_from_headers(headers), truncated));
++        }
++        self.send_event("NetworkStarted"sv, payload);
++    });
++
++    m_view.on_network_response_headers_received = weak([](auto& self, u64 request_id, u32 status, Optional<String> const& reason, Vector<HTTP::Header> const& headers, Requests::CacheState cache_state) {
++        auto id = self.m_network_ids.get(request_id);
++        if (!self.m_attached || !id.has_value())
++            return;
++        auto mime_type = mime_type_from_headers(headers);
++        if (auto entry = self.m_network_entries.find(*id); entry != self.m_network_entries.end())
++            entry->value.mime_type = mime_type;
++
++        JsonObject payload;
++        payload.set("id"sv, *id);
++        payload.set("status"sv, status);
++        if (reason.has_value())
++            payload.set("reason"sv, *reason);
++        payload.set("headers"sv, serialize_headers(headers));
++        payload.set("cache"sv, cache_state_name(cache_state));
++        if (!mime_type.is_empty())
++            payload.set("mimeType"sv, move(mime_type));
++        self.send_event("NetworkHeaders"sv, payload);
++    });
++
++    m_view.on_network_response_body_received = weak([](auto& self, u64 request_id, ByteBuffer data) {
++        auto id = self.m_network_ids.get(request_id);
++        if (!self.m_attached || !id.has_value())
++            return;
++        auto entry = self.m_network_entries.find(*id);
++        if (entry == self.m_network_entries.end())
++            return;
++
++        auto& body = entry->value.body;
++        ReadonlyBytes bytes = data.bytes();
++        bytes = bytes.trim(MAX_RESPONSE_BODY_SIZE - body.size());
++        if (bytes.size() < data.size())
++            entry->value.truncated = true;
++        if (body.try_append(bytes).is_error()) {
++            entry->value.truncated = true;
++            return;
++        }
++        self.m_network_body_bytes += bytes.size();
++        self.evict_network_entries();
++    });
++
++    m_view.on_network_request_finished = weak([](auto& self, u64 request_id, u64 body_size, Requests::RequestTimingInfo const& timing_info, Optional<Requests::NetworkError> const& error) {
++        auto id = self.m_network_ids.take(request_id);
++        if (!self.m_attached || !id.has_value())
++            return;
++
++        JsonObject timing;
++        timing.set("dnsStart"sv, timing_info.domain_lookup_start_microseconds);
++        timing.set("dnsEnd"sv, timing_info.domain_lookup_end_microseconds);
++        timing.set("connectStart"sv, timing_info.connect_start_microseconds);
++        timing.set("connectEnd"sv, timing_info.connect_end_microseconds);
++        timing.set("tlsStart"sv, timing_info.secure_connect_start_microseconds);
++        timing.set("requestStart"sv, timing_info.request_start_microseconds);
++        timing.set("responseStart"sv, timing_info.response_start_microseconds);
++        timing.set("responseEnd"sv, timing_info.response_end_microseconds);
++        timing.set("encodedSize"sv, timing_info.encoded_body_size);
++        timing.set("protocol"sv, MUST(String::from_byte_string(Requests::alpn_http_version_to_byte_string(timing_info.http_version_alpn_identifier))));
++
++        JsonObject payload;
++        payload.set("id"sv, *id);
++        payload.set("size"sv, body_size);
++        if (error.has_value())
++            payload.set("error"sv, Requests::network_error_to_string(*error));
++        payload.set("timing"sv, move(timing));
++        self.send_event("NetworkFinished"sv, payload);
++    });
++
++    m_view.listen_for_host_cookie_changes(weak([](auto& self, Vector<HTTP::Cookie::Cookie> cookies) {
++        if (!self.m_attached || cookies.is_empty())
++            return;
++        self.m_cookies_changed = true;
++        self.schedule_coalesced_events();
++    }));
++
++    m_storage_listener_id = m_view.add_storage_change_listener(weak([](auto& self, DevTools::DevToolsDelegate::StorageChange change) {
++        if (!self.m_attached)
++            return;
++        if (change.storage_endpoint == Web::StorageAPI::StorageEndpointType::SessionStorage)
++            self.m_session_storage_changed = true;
++        else
++            self.m_local_storage_changed = true;
++        self.schedule_coalesced_events();
++    }));
++}
++
++void DevToolsAgent::remove_callbacks()
++{
++    m_view.on_received_dom_tree = nullptr;
++    m_view.on_received_dom_node_properties = nullptr;
++    m_view.on_received_dom_node_html = nullptr;
++    m_view.on_finished_editing_dom_node = nullptr;
++    m_view.on_received_style_sheet_list = nullptr;
++    m_view.on_received_style_sheet_source = nullptr;
++    m_view.on_devtools_source_available = nullptr;
++    m_view.on_received_js_console_result = nullptr;
++    m_view.on_console_message = nullptr;
++    m_view.on_dom_mutation_received = nullptr;
++    m_view.on_network_request_started = nullptr;
++    m_view.on_network_response_headers_received = nullptr;
++    m_view.on_network_response_body_received = nullptr;
++    m_view.on_network_request_finished = nullptr;
++    m_view.stop_listening_for_host_cookie_changes();
++}
++
++void DevToolsAgent::did_commit_navigation()
++{
++    sync_display_page();
++    stop_picker("stopped"sv);
++
++    // NB: The IDs of nodes and of style sheets are those of the document that is gone.
++    m_known_nodes.clear();
++    m_style_sheets.clear();
++    m_mutated_nodes.clear();
++    m_child_list_changed = false;
++
++    if (!m_attached) {
++        announce_availability_if_possible();
++        return;
++    }
++
++    rearm_dom_mutations();
++
++    JsonObject payload;
++    payload.set("url"sv, m_view.url().serialize());
++    send_event("Navigated"sv, payload);
++}
++
++void DevToolsAgent::did_change_page_availability()
++{
++    if (has_usable_page()) {
++        sync_display_page();
++        announce_availability_if_possible();
++        return;
++    }
++
++    if (!m_attached)
++        return;
++    m_announces_availability = true;
++    detach("crash"sv, "no-page"_string);
++}
++
++void DevToolsAgent::announce_availability_if_possible()
++{
++    if (!m_announces_availability || m_attached || m_external_client_connected || !has_usable_page())
++        return;
++    m_announces_availability = false;
++    if (exchange(m_client_to_disconnect, false))
++        m_view.did_disconnect_devtools_client();
++    send_event("Available"sv, {});
++}
++
++void DevToolsAgent::external_client_will_connect()
++{
++    m_external_client_connected = true;
++    // NB: The client gets what the console has shown so far only if nothing listened to the console before.
++    detach("external"sv, "external"_string);
++    m_client_to_disconnect = false;
++}
++
++void DevToolsAgent::external_client_did_disconnect()
++{
++    m_external_client_connected = false;
++    m_client_to_disconnect = false;
++    external_client_did_stop_listening_for_inspect_element_requests();
++
++    // NB: The client goes away piece by piece, and each piece stops listening.
++    m_announces_availability = true;
++    Core::deferred_invoke(weak([](auto& self) {
++        self.announce_availability_if_possible();
++    }));
++}
++
++void DevToolsAgent::external_client_did_stop_listening_for_inspect_element_requests()
++{
++    if (m_listens_for_inspect_element_requests)
++        listen_for_inspect_element_requests();
++}
++
++// The replies that a page has yet to send are lost once another page displays the tab.
++void DevToolsAgent::sync_display_page()
++{
++    if (!has_open_page())
++        return;
++    auto page_id = m_view.page().id();
++    if (m_page_id == page_id)
++        return;
++    m_page_id = page_id;
++
++    for (auto& operations : m_queues)
++        operations.in_flight.clear();
++    fail_everything("gone"_string);
++    m_network_ids.clear();
++    m_known_nodes.clear();
++    m_style_sheets.clear();
++    rearm_dom_mutations();
++}
++
++// A page that comes to display the tab does not know that its mutations are listened for.
++void DevToolsAgent::rearm_dom_mutations()
++{
++    if (m_attached && m_wants_dom_mutations && has_usable_page())
++        m_view.set_listen_for_dom_mutations(true);
++}
++
++void DevToolsAgent::expect_reply(u64 request_id, AK::Duration timeout)
++{
++    if (request_id == 0)
++        return;
++    m_pending_replies.set(request_id, MonotonicTime::now() + timeout);
++    if (!m_timeout_timer) {
++        m_timeout_timer = Core::Timer::create_repeating(TIMEOUT_CHECK_INTERVAL, [this] {
++            check_timeouts();
++        });
++    }
++    if (!m_timeout_timer->is_active())
++        m_timeout_timer->start();
++}
++
++void DevToolsAgent::check_timeouts()
++{
++    auto now = MonotonicTime::now();
++    Vector<u64> expired;
++    for (auto const& [request_id, deadline] : m_pending_replies) {
++        if (deadline <= now)
++            expired.append(request_id);
++    }
++    for (auto request_id : expired)
++        fail(request_id, "timeout"_string);
++    if (m_pending_replies.is_empty())
++        m_timeout_timer->stop();
++}
++
++void DevToolsAgent::reply(u64 request_id, JsonValue const& value)
++{
++    if (!m_pending_replies.remove(request_id))
++        return;
++    send_reply(request_id, true, value.serialized().to_byte_string());
++}
++
++void DevToolsAgent::fail(u64 request_id, String const& error)
++{
++    if (!m_pending_replies.remove(request_id))
++        return;
++    send_reply(request_id, false, error.to_byte_string());
++}
++
++void DevToolsAgent::reply_with(u64 request_id, Result const& result)
++{
++    if (result.is_error())
++        fail(request_id, result.error());
++    else
++        reply(request_id, result.value());
++}
++
++// NB: What is in flight stays so, as its reply has to be told from the reply to what is sent next.
++void DevToolsAgent::fail_everything(String const& error)
++{
++    Vector<u64> request_ids;
++    for (auto const& it : m_pending_replies)
++        request_ids.append(it.key);
++    for (auto request_id : request_ids)
++        fail(request_id, error);
++    for (auto& operations : m_queues)
++        operations.waiting.clear();
++}
++
++void DevToolsAgent::send_reply(u64 request_id, bool ok, ByteString payload)
++{
++    auto* ui = ConnectionFromUI::the();
++    if (!ui)
++        return;
++    if (payload.length() > MAX_PAYLOAD_SIZE) {
++        ok = false;
++        payload = "unsupported"sv;
++    }
++    ui->async_view_devtools_reply(m_view.view_id(), request_id, ok, move(payload));
++}
++
++void DevToolsAgent::send_event(StringView name, JsonObject const& payload)
++{
++    auto* ui = ConnectionFromUI::the();
++    if (!ui)
++        return;
++    auto serialized = payload.serialized().to_byte_string();
++    if (serialized.length() > MAX_PAYLOAD_SIZE)
++        return;
++    ui->async_view_devtools_event(m_view.view_id(), MUST(String::from_utf8(name)), move(serialized));
++}
++
++void DevToolsAgent::send_detached(StringView reason)
++{
++    JsonObject payload;
++    payload.set("reason"sv, reason);
++    send_event("Detached"sv, payload);
++}
++
++void DevToolsAgent::run(Slot slot, u64 request_id, Function<void()> send, Function<void(Result)> on_result)
++{
++    if (!m_pending_replies.contains(request_id))
++        return;
++    operations_for(slot).waiting.enqueue(Operation { .request_id = request_id, .send = move(send), .on_result = move(on_result), .fence = 0 });
++    start_next(slot);
++}
++
++void DevToolsAgent::start_next(Slot slot)
++{
++    auto& operations = operations_for(slot);
++    while (!operations.in_flight.has_value() && !operations.waiting.is_empty()) {
++        auto operation = operations.waiting.dequeue();
++        // NB: Nothing waits for this any longer, so doing it this late would only surprise.
++        if (!m_pending_replies.contains(operation.request_id))
++            continue;
++        if (!has_usable_page()) {
++            fail(operation.request_id, "no-page"_string);
++            continue;
++        }
++
++        auto fence = m_next_fence++;
++        operation.fence = fence;
++        operations.in_flight = move(operation);
++        operations.in_flight->send();
++
++        // The page answers in order, and always answers this. So, once it has, what was sent before it has either been
++        // answered already or never will be.
++        m_view.resolve_dom_node_url({}, "about:blank"_string, weak([slot, fence](auto& self, ErrorOr<String>) {
++            self.fence_returned(slot, fence);
++        }));
++    }
++}
++
++void DevToolsAgent::settle(Slot slot, Result result)
++{
++    auto& operations = operations_for(slot);
++    if (!operations.in_flight.has_value())
++        return;
++    auto operation = operations.in_flight.release_value();
++    operation.on_result(move(result));
++    start_next(slot);
++}
++
++void DevToolsAgent::fence_returned(Slot slot, u64 fence)
++{
++    auto& operations = operations_for(slot);
++    if (operations.in_flight.has_value() && operations.in_flight->fence == fence)
++        settle(slot, "gone"_string);
++}
++
++void DevToolsAgent::request_dom_tree(u64 request_id, Function<void(Result)> on_result)
++{
++    run(Slot::DOMTree, request_id, [this] { m_view.inspect_dom_tree(); }, move(on_result));
++}
++
++void DevToolsAgent::learn_nodes(JsonObject const& document)
++{
++    auto is_in_html_namespace = [](JsonObject const& node) {
++        auto namespace_uri = node.get_string("namespace"sv);
++        return namespace_uri.has_value() && *namespace_uri == HTML_NAMESPACE;
++    };
++
++    auto learn = [&](auto& learn_node, JsonObject const& node, bool is_child_of_document, bool is_in_html_document) -> void {
++        auto type = node.get_string("type"sv);
++        auto is_document = type.has_value() && *type == "document"sv;
++        auto children = node.get_array("children"sv);
++
++        // NB: Only an HTML document gives the names of its HTML elements in uppercase.
++        if (is_document) {
++            is_in_html_document = false;
++            if (children.has_value()) {
++                children->for_each([&](JsonValue const& child) {
++                    if (!child.is_object() || !is_in_html_namespace(child.as_object()))
++                        return;
++                    auto name = child.as_object().get_string("name"sv);
++                    if (name.has_value() && *name == "HTML"sv)
++                        is_in_html_document = true;
++                });
++            }
++        }
++
++        if (auto id = node.get_i64("id"sv); id.has_value()) {
++            KnownNode known_node;
++            known_node.is_child_of_document = is_child_of_document;
++            known_node.is_in_html_document = is_in_html_document;
++            if (is_document) {
++                known_node.type = KnownNode::Type::Document;
++            } else if (type.has_value() && *type == "element"sv) {
++                known_node.type = KnownNode::Type::Element;
++                known_node.is_html_element = is_in_html_namespace(node);
++            } else if (type.has_value() && (*type == "text"sv || *type == "comment"sv)) {
++                known_node.type = KnownNode::Type::CharacterData;
++            } else if (type.has_value() && *type == "shadow-root"sv) {
++                known_node.type = KnownNode::Type::ShadowRoot;
++            }
++            m_known_nodes.set(*id, known_node);
++        }
++
++        if (!children.has_value())
++            return;
++        children->for_each([&](JsonValue const& child) {
++            if (child.is_object())
++                learn_node(learn_node, child.as_object(), is_document, is_in_html_document);
++        });
++    };
++    learn(learn, document, false, false);
++}
++
++// NB: The page crashes on some edits that it should refuse, so it must not hear of those.
++Optional<String> DevToolsAgent::reason_not_to_edit(i64 node_id) const
++{
++    auto node = m_known_nodes.get(node_id);
++    if (!node.has_value())
++        return "gone"_string;
++    if (node->type != KnownNode::Type::Element && node->type != KnownNode::Type::CharacterData)
++        return "unsupported"_string;
++    return {};
++}
++
++void DevToolsAgent::edit(u64 request_id, Function<void()> send)
++{
++    run(Slot::Edit, request_id, move(send), [this, request_id](Result result) {
++        reply_with(request_id, result);
++    });
++}
++
++// The page crashes when it removes a node that has neither a parent nor a sibling, such as one that a script took out
++// since the UI got the tree. So, this looks for the node in the tree as it is now first.
++void DevToolsAgent::remove_node(u64 request_id, i64 node_id)
++{
++    request_dom_tree(request_id, [this, request_id, node_id](Result result) {
++        if (result.is_error()) {
++            fail(request_id, result.error());
++            return;
++        }
++        if (auto reason = reason_not_to_edit(node_id); reason.has_value()) {
++            fail(request_id, *reason);
++            return;
++        }
++        edit(request_id, [this, node_id] { m_view.remove_dom_node(node_id); });
++    });
++}
++
++void DevToolsAgent::edit_node(u64 request_id, StringView command, i64 node_id, JsonObject const& params)
++{
++    if (auto reason = reason_not_to_edit(node_id); reason.has_value()) {
++        fail(request_id, *reason);
++        return;
++    }
++    auto node = *m_known_nodes.get(node_id);
++    auto is_element = node.type == KnownNode::Type::Element;
++
++    // Names in HTML are lowercase, and the page takes a name as it is.
++    auto markup_name = [&](String const& name) {
++        return Utf16FlyString::from_utf8(node.is_in_html_document && node.is_html_element ? name.to_ascii_lowercase() : name);
++    };
++
++    if (command == "set-outer-html"sv) {
++        auto html = params.get_string("html"sv);
++        if (!html.has_value()) {
++            fail(request_id, "invalid"_string);
++            return;
++        }
++        // NB: The page crashes on outer HTML for a child of the document, and on XML that isn't well-formed.
++        if (is_element && (node.is_child_of_document || !node.is_in_html_document)) {
++            fail(request_id, "unsupported"_string);
++            return;
++        }
++        edit(request_id, [this, node_id, html = String { *html }] { m_view.set_dom_node_outer_html(node_id, html); });
++        return;
++    }
++
++    if (command == "set-text"sv) {
++        auto text = params.get_string("text"sv);
++        if (!text.has_value()) {
++            fail(request_id, "invalid"_string);
++            return;
++        }
++        if (is_element) {
++            fail(request_id, "unsupported"_string);
++            return;
++        }
++        edit(request_id, [this, node_id, text = String { *text }] { m_view.set_dom_node_text(node_id, text); });
++        return;
++    }
++
++    if (command == "set-tag"sv) {
++        auto tag = params.get_string("tag"sv);
++        if (!tag.has_value() || !is_safe_tag_name(*tag)) {
++            fail(request_id, "invalid"_string);
++            return;
++        }
++        if (!is_element) {
++            fail(request_id, "unsupported"_string);
++            return;
++        }
++        edit(request_id, [this, node_id, name = markup_name(*tag)] { m_view.set_dom_node_tag(node_id, name); });
++        return;
++    }
++
++    if (command == "set-attributes"sv) {
++        auto attribute_list = params.get_array("attributes"sv);
++        auto replaced_name = params.get_string("replace"sv);
++        if (!attribute_list.has_value() || (replaced_name.has_value() && !is_safe_markup_name(*replaced_name))) {
++            fail(request_id, "invalid"_string);
++            return;
++        }
++        if (!is_element) {
++            fail(request_id, "unsupported"_string);
++            return;
++        }
++
++        Vector<WebView::Attribute> attributes;
++        for (auto const& attribute : attribute_list->values()) {
++            if (!attribute.is_object()) {
++                fail(request_id, "invalid"_string);
++                return;
++            }
++            auto name = attribute.as_object().get_string("name"sv);
++            auto value = attribute.as_object().get_string("value"sv);
++            if (!name.has_value() || !value.has_value() || !is_safe_markup_name(*name)) {
++                fail(request_id, "invalid"_string);
++                return;
++            }
++            attributes.append({ .name = markup_name(*name), .value = Utf16String::from_utf8(*value) });
++        }
++
++        if (replaced_name.has_value()) {
++            edit(request_id, [this, node_id, name = markup_name(*replaced_name), attributes = move(attributes)] {
++                m_view.replace_dom_node_attribute(node_id, name, attributes);
++            });
++        } else {
++            edit(request_id, [this, node_id, attributes = move(attributes)] {
++                m_view.add_dom_node_attributes(node_id, attributes);
++            });
++        }
++        return;
++    }
++
++    if (command == "clone-node"sv) {
++        // A document has room for one element only.
++        if (is_element && node.is_child_of_document) {
++            fail(request_id, "unsupported"_string);
++            return;
++        }
++        edit(request_id, [this, node_id] { m_view.clone_dom_node(node_id); });
++        return;
++    }
++
++    VERIFY(command == "remove-node"sv);
++    remove_node(request_id, node_id);
++}
++
++void DevToolsAgent::start_picker()
++{
++    m_view.start_node_picker(weak([](auto& self, DevTools::DevToolsDelegate::NodePickerEvent event) {
++        self.did_receive_picker_event(event);
++    }));
++    m_picker_active = true;
++    m_view.push_state_to_ui();
++}
++
++void DevToolsAgent::stop_picker(StringView event_type, Optional<i64> node_id)
++{
++    // NB: With no page to clear its highlight from, the picker waits to be stopped until there is one.
++    if (!m_picker_active || !has_open_page())
++        return;
++    m_picker_active = false;
++    m_view.stop_node_picker();
++    m_view.push_state_to_ui();
++
++    JsonObject payload;
++    payload.set("type"sv, event_type);
++    if (node_id.has_value())
++        payload.set("nodeId"sv, *node_id);
++    send_event("Picker"sv, payload);
++}
++
++void DevToolsAgent::did_receive_picker_event(DevTools::DevToolsDelegate::NodePickerEvent event)
++{
++    if (!m_picker_active)
++        return;
++
++    switch (event.type) {
++    case DevTools::DevToolsDelegate::NodePickerEvent::Type::Hovered:
++    case DevTools::DevToolsDelegate::NodePickerEvent::Type::Previewed: {
++        if (!event.node_id.has_value() || !has_usable_page())
++            return;
++        m_view.highlight_dom_node(*event.node_id, {});
++        JsonObject payload;
++        payload.set("type"sv, "hovered"sv);
++        payload.set("nodeId"sv, event.node_id->value());
++        send_event("Picker"sv, payload);
++        return;
++    }
++    case DevTools::DevToolsDelegate::NodePickerEvent::Type::Picked:
++        if (event.node_id.has_value())
++            stop_picker("picked"sv, event.node_id->value());
++        return;
++    case DevTools::DevToolsDelegate::NodePickerEvent::Type::Canceled:
++        stop_picker("canceled"sv);
++        return;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++void DevToolsAgent::list_sources(u64 request_id)
++{
++    m_view.retrieve_devtools_sources(weak([request_id](auto& self, ErrorOr<Vector<Web::HTML::ScriptRegistryDescription>> scripts) {
++        if (scripts.is_error()) {
++            self.fail(request_id, "gone"_string);
++            return;
++        }
++        JsonArray sources;
++        for (auto const& script : scripts.value())
++            sources.must_append(serialize_script(script));
++        self.list_sources_with_style_sheets(request_id, move(sources));
++    }));
++}
++
++void DevToolsAgent::list_sources_with_style_sheets(u64 request_id, JsonArray sources)
++{
++    auto send = [this] { m_view.list_style_sheets(); };
++    run(Slot::StyleSheetList, request_id, move(send), [this, request_id, sources = move(sources)](Result result) mutable {
++        auto style_sheets = move(m_received_style_sheets);
++        if (result.is_error()) {
++            fail(request_id, result.error());
++            return;
++        }
++        m_style_sheets.clear();
++        for (auto const& style_sheet : style_sheets) {
++            if (style_sheet.type == Web::CSS::StyleSheetIdentifier::Type::UserAgent || style_sheet.type == Web::CSS::StyleSheetIdentifier::Type::UserStyle)
++                continue;
++            m_style_sheets.set(style_sheet_key(style_sheet), style_sheet);
++            sources.must_append(serialize_style_sheet(style_sheet));
++        }
++        reply(request_id, sources);
++    });
++}
++
++void DevToolsAgent::get_source(u64 request_id, String const& key)
++{
++    auto on_result = [this, request_id](Result result) {
++        m_expected_style_sheet.clear();
++        reply_with(request_id, result);
++    };
++
++    if (auto script = script_from_key(key); script.has_value()) {
++        auto send = [this, script = *script] {
++            m_view.on_received_devtools_source.set(script, weak([](auto& self, Optional<Web::HTML::ScriptRegistryContent> content) {
++                if (!content.has_value()) {
++                    self.settle(Slot::Source, "gone"_string);
++                    return;
++                }
++                JsonObject source;
++                source.set("text"sv, content->text.to_well_formed_utf8());
++                source.set("contentType"sv, content->content_type.to_well_formed_utf8());
++                self.settle(Slot::Source, JsonValue { move(source) });
++            }));
++            m_view.request_devtools_source(script);
++        };
++        run(Slot::Source, request_id, move(send), move(on_result));
++        return;
++    }
++
++    auto style_sheet = m_style_sheets.get(key);
++    if (!style_sheet.has_value()) {
++        fail(request_id, "gone"_string);
++        return;
++    }
++    auto send = [this, style_sheet = Web::CSS::StyleSheetIdentifier { *style_sheet }] {
++        m_expected_style_sheet = style_sheet;
++        m_view.request_style_sheet_source(style_sheet);
++    };
++    run(Slot::Source, request_id, move(send), move(on_result));
++}
++
++void DevToolsAgent::get_cookies(u64 request_id)
++{
++    JsonArray cookies;
++    auto host = HTTP::Cookie::canonicalize_domain(m_view.url());
++    if (!host.has_value()) {
++        reply(request_id, cookies);
++        return;
++    }
++
++    // NB: The application's overrides are not public, but what they override is.
++    DevTools::DevToolsDelegate const& delegate = Application::the();
++
++    for (auto const& cookie : delegate.cookies(description())) {
++        auto is_for_host = cookie.host_only ? cookie.domain == *host : HTTP::Cookie::domain_matches(*host, cookie.domain);
++        if (!is_for_host)
++            continue;
++
++        JsonObject entry;
++        entry.set("name"sv, cookie.name);
++        entry.set("value"sv, cookie.value);
++        entry.set("domain"sv, cookie.domain);
++        entry.set("path"sv, cookie.path);
++        if (cookie.persistent)
++            entry.set("expires"sv, cookie.expiry_time.milliseconds_since_epoch());
++        else
++            entry.set("expires"sv, JsonValue {});
++        entry.set("secure"sv, cookie.secure);
++        entry.set("httpOnly"sv, cookie.http_only);
++        entry.set("sameSite"sv, HTTP::Cookie::same_site_to_string(cookie.same_site));
++        entry.set("hostOnly"sv, cookie.host_only);
++        entry.set("size"sv, static_cast<u64>(cookie.name.byte_count() + cookie.value.byte_count()));
++        entry.set("partitionKey"sv, cookie.partition_key.to_well_formed_utf8());
++        cookies.must_append(move(entry));
++    }
++    reply(request_id, cookies);
++}
++
++void DevToolsAgent::delete_cookie(u64 request_id, JsonObject const& cookie_to_delete)
++{
++    auto name = cookie_to_delete.get_string("name"sv);
++    auto domain = cookie_to_delete.get_string("domain"sv);
++    auto path = cookie_to_delete.get_string("path"sv);
++    auto host_only = cookie_to_delete.get_bool("hostOnly"sv);
++    auto partition_key = cookie_to_delete.get_string("partitionKey"sv);
++    if (!name.has_value() || !domain.has_value() || !path.has_value() || !host_only.has_value() || !partition_key.has_value()) {
++        fail(request_id, "invalid"_string);
++        return;
++    }
++
++    HTTP::Cookie::Cookie cookie;
++    cookie.name = *name;
++    cookie.domain = *domain;
++    cookie.path = *path;
++    cookie.host_only = *host_only;
++    cookie.partition_key = Utf16String::from_utf8(*partition_key);
++
++    DevTools::DevToolsDelegate const& delegate = Application::the();
++    Vector<HTTP::Cookie::Cookie> cookies;
++    cookies.append(move(cookie));
++    delegate.delete_cookies(description(), move(cookies));
++    reply(request_id, true);
++}
++
++void DevToolsAgent::handle_storage_command(u64 request_id, StringView command, JsonObject const& params)
++{
++    auto endpoint = storage_endpoint_from_params(params);
++    if (!endpoint.has_value()) {
++        fail(request_id, "invalid"_string);
++        return;
++    }
++
++    DevTools::DevToolsDelegate const& delegate = Application::the();
++    auto tab = description();
++
++    if (command == "get-storage"sv) {
++        delegate.inspect_storage(tab, *endpoint, weak([request_id](auto& self, ErrorOr<Vector<DevTools::DevToolsDelegate::StorageItem>> items) {
++            if (items.is_error()) {
++                self.fail(request_id, "unsupported"_string);
++                return;
++            }
++            JsonArray serialized;
++            for (auto const& item : items.value()) {
++                JsonObject entry;
++                entry.set("name"sv, item.name);
++                entry.set("value"sv, item.value);
++                serialized.must_append(move(entry));
++            }
++            self.reply(request_id, serialized);
++        }));
++        return;
++    }
++
++    if (command == "clear-storage"sv) {
++        if (delegate.clear_storage(tab, *endpoint, tab.url).is_error())
++            fail(request_id, "unsupported"_string);
++        else
++            reply(request_id, true);
++        return;
++    }
++
++    auto key = params.get_string("key"sv);
++    if (!key.has_value()) {
++        fail(request_id, "invalid"_string);
++        return;
++    }
++
++    if (command == "remove-storage-item"sv) {
++        if (delegate.remove_storage_item(tab, *endpoint, tab.url, *key).is_error())
++            fail(request_id, "unsupported"_string);
++        else
++            reply(request_id, true);
++        return;
++    }
++
++    VERIFY(command == "set-storage-item"sv);
++    auto value = params.get_string("value"sv);
++    if (!value.has_value()) {
++        fail(request_id, "invalid"_string);
++        return;
++    }
++    if (delegate.set_storage_item(tab, *endpoint, tab.url, *key, *value).is_error())
++        fail(request_id, "unsupported"_string);
++    else
++        reply(request_id, true);
++}
++
++void DevToolsAgent::get_response_body(u64 request_id, u64 network_id)
++{
++    auto entry = m_network_entries.find(network_id);
++    if (entry == m_network_entries.end()) {
++        fail(request_id, "gone"_string);
++        return;
++    }
++    reply(request_id, serialize_body(entry->value.body.bytes(), entry->value.mime_type, entry->value.truncated));
++}
++
++void DevToolsAgent::evict_network_entries()
++{
++    while (!m_network_entries.is_empty() && (m_network_body_bytes > MAX_RESPONSE_BODIES_SIZE || m_network_entries.size() > MAX_NETWORK_ENTRIES)) {
++        auto oldest = m_network_entries.take_first();
++        m_network_body_bytes -= oldest.body.size();
++    }
++}
++
++void DevToolsAgent::schedule_coalesced_events()
++{
++    if (!m_coalescing_timer) {
++        m_coalescing_timer = Core::Timer::create_single_shot(COALESCING_INTERVAL, [this] {
++            send_coalesced_events();
++        });
++    }
++    if (!m_coalescing_timer->is_active())
++        m_coalescing_timer->start();
++}
++
++void DevToolsAgent::send_coalesced_events()
++{
++    if (!m_attached)
++        return;
++
++    if (!m_mutated_nodes.is_empty()) {
++        JsonArray targets;
++        for (auto node_id : m_mutated_nodes)
++            targets.must_append(node_id);
++        m_mutated_nodes.clear();
++
++        JsonObject payload;
++        payload.set("targets"sv, move(targets));
++        payload.set("childList"sv, exchange(m_child_list_changed, false));
++        send_event("DomMutated"sv, payload);
++    }
++
++    auto send_storage_change = [&](StringView store) {
++        JsonObject payload;
++        payload.set("store"sv, store);
++        send_event("StorageChanged"sv, payload);
++    };
++    if (exchange(m_cookies_changed, false))
++        send_storage_change("cookies"sv);
++    if (exchange(m_local_storage_changed, false))
++        send_storage_change("local"sv);
++    if (exchange(m_session_storage_changed, false))
++        send_storage_change("session"sv);
++}
++
++void DevToolsAgent::handle_command(u64 request_id, StringView command, ByteString const& params_json)
++{
++    if (command == "attach"sv) {
++        attach();
++        return;
++    }
++    if (command == "detach"sv) {
++        m_announces_availability = false;
++        detach("closed"sv, "not-attached"_string);
++        return;
++    }
++
++    // NB: This answers what the previous page did not, so it has to come before the command is among what is waited for.
++    if (m_attached)
++        sync_display_page();
++
++    auto is_short = command.is_one_of("get-html"sv, "get-source"sv);
++    expect_reply(request_id, is_short ? SHORT_REPLY_TIMEOUT : LONG_REPLY_TIMEOUT);
++
++    if (m_external_client_connected) {
++        fail(request_id, "external"_string);
++        return;
++    }
++    if (!m_attached) {
++        fail(request_id, "not-attached"_string);
++        return;
++    }
++    if (!has_usable_page()) {
++        fail(request_id, "no-page"_string);
++        return;
++    }
++
++    auto parsed_params = JsonValue::from_string(params_json);
++    if (parsed_params.is_error() || !parsed_params.value().is_object()) {
++        fail(request_id, "invalid"_string);
++        return;
++    }
++    auto const& params = parsed_params.value().as_object();
++    auto node_id = params.get_i64("nodeId"sv);
++
++    auto reply_directly = [this, request_id](Result result) {
++        reply_with(request_id, result);
++    };
++
++    if (command == "get-dom-tree"sv) {
++        request_dom_tree(request_id, move(reply_directly));
++    } else if (command == "set-dom-mutations-enabled"sv) {
++        m_wants_dom_mutations = params.get_bool("enabled"sv).value_or(false);
++        m_view.set_listen_for_dom_mutations(m_wants_dom_mutations);
++    } else if (command == "get-node-properties"sv) {
++        get_node_properties(request_id, params);
++    } else if (command == "highlight-node"sv) {
++        auto pseudo = pseudo_element_from_params(params);
++        if (node_id.has_value() && pseudo.is_valid)
++            m_view.highlight_dom_node(*node_id, pseudo.pseudo_element);
++    } else if (command == "clear-highlight"sv) {
++        m_view.clear_highlighted_dom_node();
++    } else if (command == "start-picker"sv) {
++        start_picker();
++    } else if (command == "stop-picker"sv) {
++        stop_picker("stopped"sv);
++    } else if (command == "get-html"sv && node_id.has_value()) {
++        auto outer = params.get_bool("outer"sv).value_or(true);
++        auto send = [this, node_id = *node_id, outer] {
++            if (outer)
++                m_view.get_dom_node_outer_html(node_id);
++            else
++                m_view.get_dom_node_inner_html(node_id);
++        };
++        run(Slot::HTML, request_id, move(send), move(reply_directly));
++    } else if (command.is_one_of("set-outer-html"sv, "set-text"sv, "set-tag"sv, "set-attributes"sv, "clone-node"sv, "remove-node"sv) && node_id.has_value()) {
++        edit_node(request_id, command, *node_id, params);
++    } else if (command == "evaluate"sv) {
++        if (auto source = params.get_string("source"sv); source.has_value())
++            m_view.js_console_input(*source);
++    } else if (command == "complete"sv && params.has_string("input"sv)) {
++        complete(request_id, *params.get_string("input"sv));
++    } else if (command == "get-object-properties"sv && params.get_u64("objectId"sv).has_value()) {
++        m_view.retrieve_debugger_object_properties(*params.get_u64("objectId"sv), WebView::DebuggerObjectScope::Console, weak([request_id](auto& self, ErrorOr<WebView::DebuggerObjectProperties, String> properties) {
++            if (properties.is_error())
++                self.fail(request_id, "gone"_string);
++            else
++                self.reply(request_id, serialize_object_properties(properties.value()));
++        }));
++    } else if (command == "get-response-body"sv && params.get_u64("id"sv).has_value()) {
++        get_response_body(request_id, *params.get_u64("id"sv));
++    } else if (command == "list-sources"sv) {
++        list_sources(request_id);
++    } else if (command == "get-source"sv && params.has_string("key"sv)) {
++        get_source(request_id, *params.get_string("key"sv));
++    } else if (command == "get-cookies"sv) {
++        get_cookies(request_id);
++    } else if (command == "delete-cookie"sv && params.has_object("cookie"sv)) {
++        delete_cookie(request_id, *params.get_object("cookie"sv));
++    } else if (command.is_one_of("get-storage"sv, "set-storage-item"sv, "remove-storage-item"sv, "clear-storage"sv)) {
++        handle_storage_command(request_id, command, params);
++    } else {
++        fail(request_id, "invalid"_string);
++    }
++}
++
++void DevToolsAgent::get_node_properties(u64 request_id, JsonObject const& params)
++{
++    auto node_id = params.get_i64("nodeId"sv);
++    auto kind = params.get_string("kind"sv);
++    auto pseudo = pseudo_element_from_params(params);
++    if (!node_id.has_value() || !kind.has_value() || !pseudo.is_valid) {
++        fail(request_id, "invalid"_string);
++        return;
++    }
++
++    auto type = WebView::DOMNodeProperties::Type::ComputedStyle;
++    JsonObject options;
++    if (*kind == "applied-rules"sv) {
++        type = WebView::DOMNodeProperties::Type::AppliedStyleRules;
++        options.set("inherited"sv, true);
++    } else if (*kind == "layout"sv) {
++        type = WebView::DOMNodeProperties::Type::Layout;
++    } else if (*kind == "fonts"sv) {
++        type = WebView::DOMNodeProperties::Type::UsedFonts;
++    } else if (*kind != "computed"sv) {
++        fail(request_id, "invalid"_string);
++        return;
++    }
++
++    auto send = [this, node_id = *node_id, type, pseudo_element = pseudo.pseudo_element, options = move(options)] {
++        m_expected_properties = type;
++        m_view.inspect_dom_node(node_id, type, pseudo_element, JsonValue { options });
++    };
++    run(Slot::NodeProperties, request_id, move(send), [this, request_id](Result result) {
++        reply_with(request_id, result);
++    });
++}
++
++void DevToolsAgent::complete(u64 request_id, String const& input)
++{
++    m_view.complete_js_console_input(input, weak([request_id](auto& self, ErrorOr<DevTools::DevToolsDelegate::ConsoleInputCompletion> completion) {
++        if (completion.is_error()) {
++            self.fail(request_id, "gone"_string);
++            return;
++        }
++        JsonObject result;
++        if (completion.value().matches.has_value()) {
++            JsonArray matches;
++            for (auto const& match : *completion.value().matches)
++                matches.must_append(match);
++            result.set("matches"sv, move(matches));
++        } else {
++            result.set("matches"sv, JsonValue {});
++        }
++        result.set("matchProp"sv, completion.value().match_prop);
++        self.reply(request_id, result);
++    }));
++}
++
++}
+diff --git a/Services/Hub/DevToolsAgent.h b/Services/Hub/DevToolsAgent.h
+new file mode 100644
+index 0000000000..1cfd93117f
+--- /dev/null
++++ b/Services/Hub/DevToolsAgent.h
+@@ -0,0 +1,207 @@
++/*
++ * Copyright (c) 2026-present, the Hellbird developers.
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++
++#pragma once
++
++#include <AK/ByteBuffer.h>
++#include <AK/Function.h>
++#include <AK/HashMap.h>
++#include <AK/HashTable.h>
++#include <AK/JsonArray.h>
++#include <AK/JsonObject.h>
++#include <AK/JsonValue.h>
++#include <AK/Noncopyable.h>
++#include <AK/Queue.h>
++#include <AK/RefPtr.h>
++#include <AK/Time.h>
++#include <AK/Weakable.h>
++#include <LibCore/Forward.h>
++#include <LibDevTools/DevToolsDelegate.h>
++#include <LibWebCommon/CSS/PseudoElement.h>
++#include <LibWebCommon/CSS/StyleSheetIdentifier.h>
++#include <LibWebCommon/Page/PageId.h>
++#include <LibWebCommon/WebView/DOMNodeProperties.h>
++
++namespace Hub {
++
++class View;
++
++// What the built-in developer tools of a view ask of its page, and what they hear from it.
++//
++// Each of the view's callbacks for developer tools has room for one listener. So the built-in tools listen only while
++// they are attached, and give way while a client of the DevTools server is connected to the view.
++class DevToolsAgent final : public Weakable<DevToolsAgent> {
++    AK_MAKE_NONCOPYABLE(DevToolsAgent);
++    AK_MAKE_NONMOVABLE(DevToolsAgent);
++
++public:
++    AK_ALLOC_WITH_KMALLOC;
++
++    explicit DevToolsAgent(View&);
++    ~DevToolsAgent();
++
++    // The UI offers Inspect Element for a tab whether or not its developer tools are open.
++    void listen_for_inspect_element_requests();
++
++    void handle_command(u64 request_id, StringView command, ByteString const& params_json);
++
++    void did_commit_navigation();
++    // The page crashed, or was replaced after a crash.
++    void did_change_page_availability();
++
++    void external_client_will_connect();
++    void external_client_did_disconnect();
++    void external_client_did_stop_listening_for_inspect_element_requests();
++
++private:
++    using Result = ErrorOr<JsonValue, String>;
++
++    // Replies to these carry nothing that tells which request they answer, so there is at most one request of each kind
++    // on its way at a time.
++    enum class Slot : u8 {
++        DOMTree,
++        NodeProperties,
++        HTML,
++        Edit,
++        StyleSheetList,
++        Source,
++        Count,
++    };
++
++    struct Operation {
++        u64 request_id { 0 };
++        Function<void()> send;
++        Function<void(Result)> on_result;
++        u64 fence { 0 };
++    };
++
++    struct OperationQueue {
++        Optional<Operation> in_flight;
++        Queue<Operation> waiting;
++    };
++
++    struct KnownNode {
++        enum class Type : u8 {
++            Element,
++            CharacterData,
++            Document,
++            ShadowRoot,
++            Other,
++        };
++        Type type { Type::Other };
++        bool is_child_of_document { false };
++        bool is_in_html_document { false };
++        bool is_html_element { false };
++    };
++
++    struct NetworkEntry {
++        ByteBuffer body;
++        String mime_type;
++        bool truncated { false };
++    };
++
++    template<typename Callback>
++    auto weak(Callback&& callback)
++    {
++        return [weak_self = make_weak_ptr<DevToolsAgent>(), callback = forward<Callback>(callback)]<typename... Args>(Args&&... args) mutable {
++            if (auto* self = weak_self.unsafe_ptr())
++                callback(*self, forward<Args>(args)...);
++        };
++    }
++
++    bool has_open_page() const;
++    bool has_usable_page() const;
++    DevTools::TabDescription description() const;
++
++    void attach();
++    void detach(StringView reason, String error);
++    void let_go(String error);
++    void install_callbacks();
++    void remove_callbacks();
++    void announce_availability_if_possible();
++    void sync_display_page();
++    void rearm_dom_mutations();
++
++    void expect_reply(u64 request_id, AK::Duration timeout);
++    void reply(u64 request_id, JsonValue const&);
++    void fail(u64 request_id, String const& error);
++    void reply_with(u64 request_id, Result const&);
++    void fail_everything(String const& error);
++    void send_reply(u64 request_id, bool ok, ByteString payload);
++    void send_event(StringView name, JsonObject const& payload);
++    void send_detached(StringView reason);
++    void check_timeouts();
++
++    void run(Slot, u64 request_id, Function<void()> send, Function<void(Result)> on_result);
++    void start_next(Slot);
++    void settle(Slot, Result);
++    void fence_returned(Slot, u64 fence);
++    OperationQueue& operations_for(Slot slot) { return m_queues[to_underlying(slot)]; }
++
++    void request_dom_tree(u64 request_id, Function<void(Result)> on_result);
++    void learn_nodes(JsonObject const& document);
++    Optional<String> reason_not_to_edit(i64 node_id) const;
++    void edit(u64 request_id, Function<void()> send);
++    void remove_node(u64 request_id, i64 node_id);
++    void edit_node(u64 request_id, StringView command, i64 node_id, JsonObject const& params);
++    void get_node_properties(u64 request_id, JsonObject const& params);
++    void complete(u64 request_id, String const& input);
++
++    void start_picker();
++    void stop_picker(StringView event_type, Optional<i64> node_id = {});
++    void did_receive_picker_event(DevTools::DevToolsDelegate::NodePickerEvent);
++
++    void list_sources(u64 request_id);
++    void list_sources_with_style_sheets(u64 request_id, JsonArray sources);
++    void get_source(u64 request_id, String const& key);
++    void get_cookies(u64 request_id);
++    void delete_cookie(u64 request_id, JsonObject const& cookie_to_delete);
++    void handle_storage_command(u64 request_id, StringView command, JsonObject const& params);
++    void get_response_body(u64 request_id, u64 network_id);
++    void evict_network_entries();
++
++    void schedule_coalesced_events();
++    void send_coalesced_events();
++
++    View& m_view;
++
++    bool m_listens_for_inspect_element_requests { false };
++    bool m_attached { false };
++    bool m_external_client_connected { false };
++    bool m_announces_availability { false };
++    // The view still takes there to be a client, as the page was gone when the tools let go of it.
++    bool m_client_to_disconnect { false };
++    bool m_picker_active { false };
++    bool m_wants_dom_mutations { false };
++    Optional<Web::PageId> m_page_id;
++
++    HashMap<u64, MonotonicTime> m_pending_replies;
++    RefPtr<Core::Timer> m_timeout_timer;
++    OperationQueue m_queues[to_underlying(Slot::Count)];
++    u64 m_next_fence { 1 };
++
++    HashMap<i64, KnownNode> m_known_nodes;
++    WebView::DOMNodeProperties::Type m_expected_properties { WebView::DOMNodeProperties::Type::ComputedStyle };
++    Vector<Web::CSS::StyleSheetIdentifier> m_received_style_sheets;
++    HashMap<String, Web::CSS::StyleSheetIdentifier> m_style_sheets;
++    Optional<Web::CSS::StyleSheetIdentifier> m_expected_style_sheet;
++
++    // Each process numbers its requests anew, so the UI knows them by IDs from here.
++    HashMap<u64, u64> m_network_ids;
++    OrderedHashMap<u64, NetworkEntry> m_network_entries;
++    size_t m_network_body_bytes { 0 };
++    u64 m_next_network_id { 1 };
++
++    Optional<u64> m_storage_listener_id;
++    HashTable<i64> m_mutated_nodes;
++    bool m_child_list_changed { false };
++    bool m_cookies_changed { false };
++    bool m_local_storage_changed { false };
++    bool m_session_storage_changed { false };
++    RefPtr<Core::Timer> m_coalescing_timer;
++};
++
++}
+diff --git a/Services/Hub/HubClient.ipc b/Services/Hub/HubClient.ipc
+index a786113356..9723c6dc8f 100644
+--- a/Services/Hub/HubClient.ipc
++++ b/Services/Hub/HubClient.ipc
+@@ -392,4 +392,6 @@ endpoint HubClient
+     view_crash_overlay_state_change(u64 view_id, bool active) =|
+     view_crash_report_saved(u64 view_id) =|
+     view_performance_stats(u64 view_id, WebView::TabPerformanceStats stats) =|
++    view_devtools_reply(u64 view_id, u64 request_id, bool ok, ByteString payload) =|
++    view_devtools_event(u64 view_id, String name, ByteString payload) =|
+ }
+diff --git a/Services/Hub/HubServer.ipc b/Services/Hub/HubServer.ipc
+index 05eb0df766..d0e8024d12 100644
+--- a/Services/Hub/HubServer.ipc
++++ b/Services/Hub/HubServer.ipc
+@@ -299,4 +299,5 @@ endpoint HubServer
+     view_deny_fullscreen_window(u64 view_id) =|
+     view_set_is_fullscreen(u64 view_id, Web::ViewportIsFullscreen is_fullscreen) =|
+     view_reset_site_permissions(u64 view_id, URL::Origin origin) =|
++    view_devtools_command(u64 view_id, u64 request_id, String command, ByteString params_json) =|
+ }
+diff --git a/Services/Hub/View.cpp b/Services/Hub/View.cpp
+index 058db09632..e5b6ae57f9 100644
+--- a/Services/Hub/View.cpp
++++ b/Services/Hub/View.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include <Hub/Application.h>
+ #include <Hub/ConnectionFromUI.h>
++#include <Hub/DevToolsAgent.h>
+ #include <Hub/View.h>
+ #include <LibWebView/PageTranslation.h>
+ 
+@@ -106,6 +107,9 @@ View::View(InitialState initial_state)
+     m_screen_shows_high_dynamic_range = initial_state.screen_shows_high_dynamic_range;
+     set_scales_frames_to_fit(initial_state.scales_frames_to_fit);
+     m_backing_stores = make<BackingStoresInUI>(*this);
++    m_devtools_agent = make<DevToolsAgent>(*this);
++    if (initial_state.is_tab)
++        m_devtools_agent->listen_for_inspect_element_requests();
+     forward_callbacks_to_ui(initial_state.is_tab);
+ 
+     if (initial_state.owner_view_id.has_value()) {
+@@ -115,6 +119,8 @@ View::View(InitialState initial_state)
+     set_page_background_color_to_system_canvas(m_websites_prefer_dark);
+ }
+ 
++View::~View() = default;
++
+ void View::initialize(Optional<WebView::CanonicalTraversable&> traversable)
+ {
+     initialize_tab(Web::HTML::VisibilityState::Hidden, traversable);
+@@ -355,6 +361,7 @@ void View::forward_callbacks_to_ui(bool is_tab)
+             push_state_to_ui();
+             ui->async_view_top_level_navigation_commit(view_id());
+         }
++        m_devtools_agent->did_commit_navigation();
+     };
+ 
+     on_browser_history_traversal_complete = [this] {
+@@ -600,6 +607,7 @@ void View::forward_callbacks_to_ui(bool is_tab)
+             push_state_to_ui();
+             ui->async_view_web_content_crashed(view_id(), arguments...);
+         }
++        m_devtools_agent->did_change_page_availability();
+     };
+ 
+     on_crash_overlay_state_change = [this](auto const&... arguments) {
+@@ -607,6 +615,7 @@ void View::forward_callbacks_to_ui(bool is_tab)
+             push_state_to_ui();
+             ui->async_view_crash_overlay_state_change(view_id(), arguments...);
+         }
++        m_devtools_agent->did_change_page_availability();
+     };
+ 
+     on_crash_report_saved = [this] {
+diff --git a/Services/Hub/View.h b/Services/Hub/View.h
+index 0d1d8198cc..65f6ce38bd 100644
+--- a/Services/Hub/View.h
++++ b/Services/Hub/View.h
+@@ -11,6 +11,8 @@
+ 
+ namespace Hub {
+ 
++class DevToolsAgent;
++
+ // A tab's view. It holds the tab's pages and everything else about them, and leaves showing them to its ViewHost.
+ class View final : public WebView::ViewImplementation {
+ public:
+@@ -32,6 +34,7 @@ public:
+     };
+ 
+     explicit View(InitialState);
++    virtual ~View() override;
+ 
+     void initialize(Optional<WebView::CanonicalTraversable&>);
+     InitialState initial_state_for_related_view() const;
+@@ -52,6 +55,8 @@ public:
+     void set_wants_frame_notifications(bool wants_frame_notifications) { m_wants_frame_notifications = wants_frame_notifications; }
+     void did_install_backing_stores_in_ui();
+ 
++    DevToolsAgent& devtools_agent() { return *m_devtools_agent; }
++
+     using ViewImplementation::microphone_authorizer;
+     using ViewImplementation::rect_fitting_frame;
+     using ViewImplementation::set_page_background_color_to_system_canvas;
+@@ -95,6 +100,8 @@ private:
+     HashMap<u64, Function<void(bool)>> m_pending_answers;
+     HashMap<u64, WebView::PermissionPromptCallback> m_pending_permission_answers;
+     u64 m_next_answer_id { 1 };
++
++    OwnPtr<DevToolsAgent> m_devtools_agent;
+ };
+ 
+ }
+diff --git a/UI/Qt/HubConnection.cpp b/UI/Qt/HubConnection.cpp
+index 28da7b6b37..769a2530d9 100644
+--- a/UI/Qt/HubConnection.cpp
++++ b/UI/Qt/HubConnection.cpp
+@@ -1167,4 +1167,16 @@ void HubConnection::view_performance_stats(u64 view_id, WebView::TabPerformanceS
+         view->on_performance_stats(move(stats));
+ }
+ 
++void HubConnection::view_devtools_reply(u64 view_id, u64 request_id, bool ok, ByteString payload)
++{
++    if (auto* view = RemoteView::find(view_id))
++        view->did_receive_devtools_reply(request_id, ok, payload);
++}
++
++void HubConnection::view_devtools_event(u64 view_id, String name, ByteString payload)
++{
++    if (auto* view = RemoteView::find(view_id))
++        view->did_receive_devtools_event(name, payload);
++}
++
+ }
+diff --git a/UI/Qt/HubConnection.h b/UI/Qt/HubConnection.h
+index 9142d5de4e..5362c23a93 100644
+--- a/UI/Qt/HubConnection.h
++++ b/UI/Qt/HubConnection.h
+@@ -232,6 +232,8 @@ private:
+     virtual void view_crash_overlay_state_change(u64 view_id, bool active) override;
+     virtual void view_crash_report_saved(u64 view_id) override;
+     virtual void view_performance_stats(u64 view_id, WebView::TabPerformanceStats stats) override;
++    virtual void view_devtools_reply(u64 view_id, u64 request_id, bool ok, ByteString payload) override;
++    virtual void view_devtools_event(u64 view_id, String name, ByteString payload) override;
+ };
+ 
+ }
+diff --git a/UI/Qt/RemoteView.cpp b/UI/Qt/RemoteView.cpp
+index 010f4ae384..01138445e6 100644
+--- a/UI/Qt/RemoteView.cpp
++++ b/UI/Qt/RemoteView.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include <AK/AnyOf.h>
+ #include <AK/HashMap.h>
++#include <AK/JsonArray.h>
+ #ifndef LADYBIRD_HUB_IN_OWN_PROCESS
+ #    include <Hub/Application.h>
+ #    include <LibWebView/PageTranslation.h>
+@@ -801,4 +802,300 @@ void RemoteView::finish_external_url()
+     });
+ }
+ 
++void RemoteView::send_devtools_command(StringView command, JsonObject const& params, u64 request_id)
++{
++    HubConnection::the().async_view_devtools_command(view_id(), request_id, MUST(String::from_utf8(command)), params.serialized().to_byte_string());
++}
++
++void RemoteView::send_devtools_request(StringView command, JsonObject const& params, DevToolsReply on_reply)
++{
++    auto request_id = m_next_request_id++;
++    m_pending_devtools_replies.set(request_id, move(on_reply));
++    send_devtools_command(command, params, request_id);
++}
++
++void RemoteView::did_receive_devtools_reply(u64 request_id, bool ok, ByteString const& payload)
++{
++    auto on_reply = m_pending_devtools_replies.take(request_id);
++    if (!on_reply.has_value() || !*on_reply)
++        return;
++
++    if (!ok) {
++        (*on_reply)(String::from_utf8_with_replacement_character(payload));
++        return;
++    }
++
++    auto value = JsonValue::from_string(payload);
++    if (value.is_error())
++        (*on_reply)("invalid"_string);
++    else
++        (*on_reply)(value.release_value());
++}
++
++static Optional<RemoteView::DevToolsEvent> devtools_event_from_name(String const& name)
++{
++    if (name == "Attached"sv)
++        return RemoteView::DevToolsEvent::Attached;
++    if (name == "Detached"sv)
++        return RemoteView::DevToolsEvent::Detached;
++    if (name == "Available"sv)
++        return RemoteView::DevToolsEvent::Available;
++    if (name == "InspectElement"sv)
++        return RemoteView::DevToolsEvent::InspectElement;
++    if (name == "Navigated"sv)
++        return RemoteView::DevToolsEvent::Navigated;
++    if (name == "Picker"sv)
++        return RemoteView::DevToolsEvent::Picker;
++    if (name == "DomMutated"sv)
++        return RemoteView::DevToolsEvent::DomMutated;
++    if (name == "Console"sv)
++        return RemoteView::DevToolsEvent::Console;
++    if (name == "EvalResult"sv)
++        return RemoteView::DevToolsEvent::EvalResult;
++    if (name == "NetworkStarted"sv)
++        return RemoteView::DevToolsEvent::NetworkStarted;
++    if (name == "NetworkHeaders"sv)
++        return RemoteView::DevToolsEvent::NetworkHeaders;
++    if (name == "NetworkFinished"sv)
++        return RemoteView::DevToolsEvent::NetworkFinished;
++    if (name == "SourceAdded"sv)
++        return RemoteView::DevToolsEvent::SourceAdded;
++    if (name == "StorageChanged"sv)
++        return RemoteView::DevToolsEvent::StorageChanged;
++    return {};
++}
++
++void RemoteView::did_receive_devtools_event(String const& name, ByteString const& payload)
++{
++    auto event = devtools_event_from_name(name);
++    if (!event.has_value())
++        return;
++
++    // NB: A page can nest what it logs too deeply to be parsed.
++    auto value = JsonValue::from_string(payload);
++    if (value.is_error() || !value.value().is_object())
++        return;
++
++    if (*event == DevToolsEvent::Attached)
++        m_devtools_attached = true;
++    else if (*event == DevToolsEvent::Detached)
++        m_devtools_attached = false;
++
++    if (on_devtools_event)
++        on_devtools_event(*event, value.value().as_object());
++}
++
++static JsonObject devtools_node_params(i64 node_id, Optional<u32> pseudo = {})
++{
++    JsonObject params;
++    params.set("nodeId"sv, node_id);
++    if (pseudo.has_value())
++        params.set("pseudo"sv, *pseudo);
++    return params;
++}
++
++static JsonObject devtools_storage_params(RemoteView::DevToolsStorage storage)
++{
++    JsonObject params;
++    params.set("store"sv, storage == RemoteView::DevToolsStorage::Local ? "local"sv : "session"sv);
++    return params;
++}
++
++static StringView devtools_node_properties_name(RemoteView::DevToolsNodeProperties properties)
++{
++    switch (properties) {
++    case RemoteView::DevToolsNodeProperties::AppliedRules:
++        return "applied-rules"sv;
++    case RemoteView::DevToolsNodeProperties::Computed:
++        return "computed"sv;
++    case RemoteView::DevToolsNodeProperties::Layout:
++        return "layout"sv;
++    case RemoteView::DevToolsNodeProperties::Fonts:
++        return "fonts"sv;
++    }
++    VERIFY_NOT_REACHED();
++}
++
++void RemoteView::devtools_attach()
++{
++    send_devtools_command("attach"sv);
++}
++
++void RemoteView::devtools_detach()
++{
++    m_devtools_attached = false;
++    send_devtools_command("detach"sv);
++}
++
++void RemoteView::devtools_get_dom_tree(DevToolsReply on_reply)
++{
++    send_devtools_request("get-dom-tree"sv, {}, move(on_reply));
++}
++
++void RemoteView::devtools_set_dom_mutations_enabled(bool enabled)
++{
++    JsonObject params;
++    params.set("enabled"sv, enabled);
++    send_devtools_command("set-dom-mutations-enabled"sv, params);
++}
++
++void RemoteView::devtools_get_node_properties(i64 node_id, Optional<u32> pseudo, DevToolsNodeProperties properties, DevToolsReply on_reply)
++{
++    auto params = devtools_node_params(node_id, pseudo);
++    params.set("kind"sv, devtools_node_properties_name(properties));
++    send_devtools_request("get-node-properties"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_highlight_node(i64 node_id, Optional<u32> pseudo)
++{
++    send_devtools_command("highlight-node"sv, devtools_node_params(node_id, pseudo));
++}
++
++void RemoteView::devtools_clear_highlight()
++{
++    send_devtools_command("clear-highlight"sv);
++}
++
++void RemoteView::devtools_start_picker()
++{
++    send_devtools_command("start-picker"sv);
++}
++
++void RemoteView::devtools_stop_picker()
++{
++    send_devtools_command("stop-picker"sv);
++}
++
++void RemoteView::devtools_get_html(i64 node_id, bool outer, DevToolsReply on_reply)
++{
++    auto params = devtools_node_params(node_id);
++    params.set("outer"sv, outer);
++    send_devtools_request("get-html"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_set_outer_html(i64 node_id, String html, DevToolsReply on_reply)
++{
++    auto params = devtools_node_params(node_id);
++    params.set("html"sv, move(html));
++    send_devtools_request("set-outer-html"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_set_text(i64 node_id, String text, DevToolsReply on_reply)
++{
++    auto params = devtools_node_params(node_id);
++    params.set("text"sv, move(text));
++    send_devtools_request("set-text"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_set_tag(i64 node_id, String tag, DevToolsReply on_reply)
++{
++    auto params = devtools_node_params(node_id);
++    params.set("tag"sv, move(tag));
++    send_devtools_request("set-tag"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_set_attributes(i64 node_id, Optional<String> replace_name, Vector<DevToolsAttribute> attributes, DevToolsReply on_reply)
++{
++    JsonArray serialized_attributes;
++    for (auto& attribute : attributes) {
++        JsonObject serialized_attribute;
++        serialized_attribute.set("name"sv, move(attribute.name));
++        serialized_attribute.set("value"sv, move(attribute.value));
++        serialized_attributes.must_append(move(serialized_attribute));
++    }
++
++    auto params = devtools_node_params(node_id);
++    if (replace_name.has_value())
++        params.set("replace"sv, replace_name.release_value());
++    params.set("attributes"sv, move(serialized_attributes));
++    send_devtools_request("set-attributes"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_clone_node(i64 node_id, DevToolsReply on_reply)
++{
++    send_devtools_request("clone-node"sv, devtools_node_params(node_id), move(on_reply));
++}
++
++void RemoteView::devtools_remove_node(i64 node_id, DevToolsReply on_reply)
++{
++    send_devtools_request("remove-node"sv, devtools_node_params(node_id), move(on_reply));
++}
++
++void RemoteView::devtools_evaluate(String source)
++{
++    JsonObject params;
++    params.set("source"sv, move(source));
++    send_devtools_command("evaluate"sv, params);
++}
++
++void RemoteView::devtools_complete(String input, DevToolsReply on_reply)
++{
++    JsonObject params;
++    params.set("input"sv, move(input));
++    send_devtools_request("complete"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_get_object_properties(u64 object_id, DevToolsReply on_reply)
++{
++    JsonObject params;
++    params.set("objectId"sv, object_id);
++    send_devtools_request("get-object-properties"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_get_response_body(u64 request_id, DevToolsReply on_reply)
++{
++    JsonObject params;
++    params.set("id"sv, request_id);
++    send_devtools_request("get-response-body"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_list_sources(DevToolsReply on_reply)
++{
++    send_devtools_request("list-sources"sv, {}, move(on_reply));
++}
++
++void RemoteView::devtools_get_source(String source_key, DevToolsReply on_reply)
++{
++    JsonObject params;
++    params.set("key"sv, move(source_key));
++    send_devtools_request("get-source"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_get_cookies(DevToolsReply on_reply)
++{
++    send_devtools_request("get-cookies"sv, {}, move(on_reply));
++}
++
++void RemoteView::devtools_delete_cookie(JsonObject cookie, DevToolsReply on_reply)
++{
++    JsonObject params;
++    params.set("cookie"sv, move(cookie));
++    send_devtools_request("delete-cookie"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_get_storage(DevToolsStorage storage, DevToolsReply on_reply)
++{
++    send_devtools_request("get-storage"sv, devtools_storage_params(storage), move(on_reply));
++}
++
++void RemoteView::devtools_set_storage_item(DevToolsStorage storage, String key, String value, DevToolsReply on_reply)
++{
++    auto params = devtools_storage_params(storage);
++    params.set("key"sv, move(key));
++    params.set("value"sv, move(value));
++    send_devtools_request("set-storage-item"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_remove_storage_item(DevToolsStorage storage, String key, DevToolsReply on_reply)
++{
++    auto params = devtools_storage_params(storage);
++    params.set("key"sv, move(key));
++    send_devtools_request("remove-storage-item"sv, params, move(on_reply));
++}
++
++void RemoteView::devtools_clear_storage(DevToolsStorage storage, DevToolsReply on_reply)
++{
++    send_devtools_request("clear-storage"sv, devtools_storage_params(storage), move(on_reply));
++}
++
+ }
+diff --git a/UI/Qt/RemoteView.h b/UI/Qt/RemoteView.h
+index 5ca39f06d6..93d2a91575 100644
+--- a/UI/Qt/RemoteView.h
++++ b/UI/Qt/RemoteView.h
+@@ -6,6 +6,9 @@
+ 
+ #pragma once
+ 
++#include <AK/Error.h>
++#include <AK/JsonObject.h>
++#include <AK/JsonValue.h>
+ #include <AK/NonnullOwnPtr.h>
+ #include <AK/Queue.h>
+ #include <Hub/View.h>
+@@ -261,6 +264,84 @@ public:
+     // The page that presented the backing stores that the view holds.
+     u64 backing_stores_page_id() const { return m_backing_stores_page_id; }
+ 
++    // The view's developer tools. All of these go to the Hub without waiting for it, and each reply is called exactly once,
++    // with one of these errors if not with a value: "external", "not-attached", "no-page", "gone", "too-deep", "timeout",
++    // "unsupported", or "invalid". A view that goes away drops the replies that it still waits for.
++    //
++    // NB: The headers, bodies, cookies, and storage that come through here are the user's secrets, so they are neither to be
++    //     logged nor stored. And text from a page is only ever to be shown as plain text.
++    using DevToolsReply = Function<void(ErrorOr<JsonValue, String>)>;
++    enum class DevToolsNodeProperties : u8 {
++        AppliedRules,
++        Computed,
++        Layout,
++        Fonts,
++    };
++    enum class DevToolsStorage : u8 {
++        Local,
++        Session,
++    };
++    struct DevToolsAttribute {
++        String name;
++        String value;
++    };
++    enum class DevToolsEvent : u8 {
++        Attached,
++        Detached,
++        Available,
++        InspectElement,
++        Navigated,
++        Picker,
++        DomMutated,
++        Console,
++        EvalResult,
++        NetworkStarted,
++        NetworkHeaders,
++        NetworkFinished,
++        SourceAdded,
++        StorageChanged,
++    };
++
++    // Answered by the event Attached or Detached.
++    void devtools_attach();
++    void devtools_detach();
++    bool devtools_is_attached() const { return m_devtools_attached; }
++
++    void devtools_get_dom_tree(DevToolsReply);
++    void devtools_set_dom_mutations_enabled(bool);
++    void devtools_get_node_properties(i64 node_id, Optional<u32> pseudo, DevToolsNodeProperties, DevToolsReply);
++    void devtools_highlight_node(i64 node_id, Optional<u32> pseudo);
++    void devtools_clear_highlight();
++    void devtools_start_picker();
++    void devtools_stop_picker();
++
++    void devtools_get_html(i64 node_id, bool outer, DevToolsReply);
++    void devtools_set_outer_html(i64 node_id, String html, DevToolsReply);
++    void devtools_set_text(i64 node_id, String text, DevToolsReply);
++    void devtools_set_tag(i64 node_id, String tag, DevToolsReply);
++    void devtools_set_attributes(i64 node_id, Optional<String> replace_name, Vector<DevToolsAttribute>, DevToolsReply);
++    void devtools_clone_node(i64 node_id, DevToolsReply);
++    void devtools_remove_node(i64 node_id, DevToolsReply);
++
++    // Answered by the event EvalResult, or by Console if the source throws.
++    void devtools_evaluate(String source);
++    void devtools_complete(String input, DevToolsReply);
++    void devtools_get_object_properties(u64 object_id, DevToolsReply);
++
++    void devtools_get_response_body(u64 request_id, DevToolsReply);
++    void devtools_list_sources(DevToolsReply);
++    void devtools_get_source(String source_key, DevToolsReply);
++
++    void devtools_get_cookies(DevToolsReply);
++    void devtools_delete_cookie(JsonObject cookie, DevToolsReply);
++    void devtools_get_storage(DevToolsStorage, DevToolsReply);
++    void devtools_set_storage_item(DevToolsStorage, String key, String value, DevToolsReply);
++    void devtools_remove_storage_item(DevToolsStorage, String key, DevToolsReply);
++    void devtools_clear_storage(DevToolsStorage, DevToolsReply);
++
++    void did_receive_devtools_reply(u64 request_id, bool ok, ByteString const& payload);
++    void did_receive_devtools_event(String const& name, ByteString const& payload);
++
+ protected:
+     virtual void show_context_menu(Menu&, Gfx::IntPoint) { }
+     virtual void did_accept_presented_backing_store(i32, Gfx::IntRect) { }
+@@ -336,6 +417,11 @@ private:
+     HashMap<u64, OwnPtr<Web::BrowserInputData>> m_input_in_hub;
+     u64 m_next_input_id { 1 };
+ 
++    void send_devtools_command(StringView command, JsonObject const& params = {}, u64 request_id = 0);
++    void send_devtools_request(StringView command, JsonObject const& params, DevToolsReply);
++    HashMap<u64, DevToolsReply> m_pending_devtools_replies;
++    bool m_devtools_attached { false };
++
+ public:
+     decltype(Hub::View::on_load_start) on_load_start;
+     decltype(Hub::View::on_load_finish) on_load_finish;
+@@ -398,6 +484,7 @@ public:
+     decltype(Hub::View::on_web_content_crashed) on_web_content_crashed;
+     decltype(Hub::View::on_crash_overlay_state_change) on_crash_overlay_state_change;
+     decltype(Hub::View::on_crash_report_saved) on_crash_report_saved;
++    Function<void(DevToolsEvent, JsonObject const&)> on_devtools_event;
+ };
+ 
+ }
