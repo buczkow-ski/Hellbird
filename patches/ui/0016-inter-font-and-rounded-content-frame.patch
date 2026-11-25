@@ -43,7 +43,7 @@ index 8322aae9ba..7791b94407 100644
  * {
      color-scheme: light dark;
 -    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
++    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Inter", system-ui, sans-serif;
  
      margin: 0;
      padding: 0;
@@ -304,7 +304,7 @@ index c096dafef6..8987c2ba2e 100644
 +    QRegion region(rect.adjusted(0, r, 0, -r));
 +    for (int y = 0; y < r; ++y) {
 +        auto dy = r - (y + 0.5);
-+        auto inset = qFloor(r - qSqrt((r * r) - (dy * dy)));
++        auto inset = max(0, qRound(r - qSqrt((r * r) - (dy * dy))));
 +        auto w = rect.width() - (2 * inset);
 +        region += QRect(rect.left() + inset, rect.top() + y, w, 1);
 +        region += QRect(rect.left() + inset, rect.bottom() - y, w, 1);
@@ -461,7 +461,7 @@ index a2f5489326..6f800d178f 100644
      return handle->startSystemMove();
  }
  
-+static constexpr int CONTENT_FRAME_CORNER_RADIUS = 10;
++static constexpr int CONTENT_FRAME_CORNER_RADIUS = 8;
 +
 +static int content_frame_corner_radius()
 +{
@@ -816,10 +816,18 @@ index 6ae07a9164..2f89df51cb 100644
          if (m_vertical_tab_overlay_left > 0)
              window_mask -= QRect { 0, 0, m_vertical_tab_overlay_left, size.height() };
 diff --git a/UI/Qt/WebContentViewWindows.cpp b/UI/Qt/WebContentViewWindows.cpp
-index 0c014ff4d1..c0aab2fd03 100644
+index 0c014ff..aa7961b 100644
 --- a/UI/Qt/WebContentViewWindows.cpp
 +++ b/UI/Qt/WebContentViewWindows.cpp
-@@ -14,6 +14,8 @@
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: BSD-2-Clause
+  */
+ 
++#include <AK/ByteBuffer.h>
+ #include <AK/Debug.h>
+ #include <LibGfx/Bitmap.h>
+ #include <LibGfx/SharedImageBuffer.h>
+@@ -14,6 +15,8 @@
  #include <QChildEvent>
  #include <QColor>
  #include <QImage>
@@ -828,10 +836,56 @@ index 0c014ff4d1..c0aab2fd03 100644
  #include <rhi/qrhi.h>
  #include <rhi/qrhi_platform.h>
  
-@@ -117,12 +119,57 @@ void WebContentView::update_whether_view_hosts_remote_layer()
+@@ -117,12 +120,103 @@ void WebContentView::update_whether_view_hosts_remote_layer()
      set_hosts_remote_layer(should_host);
  }
  
++static HRGN create_exact_rounded_rect_rgn(int width, int height, int radius)
++{
++    if (width <= 0 || height <= 0)
++        return nullptr;
++
++    auto r = min(radius, min(width, height) / 2);
++    if (r <= 0)
++        return CreateRectRgn(0, 0, width, height);
++
++    bool has_middle_band = height > (2 * r);
++    size_t rect_count = static_cast<size_t>(2 * r) + (has_middle_band ? 1 : 0);
++    auto total_size = sizeof(RGNDATAHEADER) + (rect_count * sizeof(RECT));
++    auto buffer_or_error = ByteBuffer::create_zeroed(total_size);
++    if (buffer_or_error.is_error())
++        return CreateRoundRectRgn(0, 0, width + 1, height + 1, 2 * r, 2 * r);
++
++    auto buffer = buffer_or_error.release_value();
++    auto* data = reinterpret_cast<RGNDATA*>(buffer.data());
++    data->rdh.dwSize = sizeof(RGNDATAHEADER);
++    data->rdh.iType = RDH_RECTANGLES;
++    data->rdh.nCount = static_cast<DWORD>(rect_count);
++    data->rdh.nRgnSize = static_cast<DWORD>(rect_count * sizeof(RECT));
++    data->rdh.rcBound = RECT { 0, 0, width, height };
++
++    auto* rects = reinterpret_cast<RECT*>(data->Buffer);
++    size_t rect_index = 0;
++    auto inset_for_corner_row = [r](int row) {
++        auto dy = static_cast<double>(r) - (static_cast<double>(row) + 0.5);
++        auto dx = static_cast<double>(r) - qSqrt((static_cast<double>(r) * r) - (dy * dy));
++        return clamp(qRound(dx), 0, r);
++    };
++
++    for (int y = 0; y < r; ++y) {
++        auto inset = inset_for_corner_row(y);
++        rects[rect_index++] = RECT { inset, y, width - inset, y + 1 };
++    }
++    if (has_middle_band)
++        rects[rect_index++] = RECT { 0, r, width, height - r };
++    for (int y = height - r; y < height; ++y) {
++        auto inset = inset_for_corner_row(height - 1 - y);
++        rects[rect_index++] = RECT { inset, y, width - inset, y + 1 };
++    }
++
++    return ExtCreateRegion(nullptr, static_cast<DWORD>(total_size), data);
++}
++
 +void WebContentView::apply_windows_corner_mask(CornerMaskPass pass)
 +{
 +    if (m_corner_radius <= 0 || rect().isEmpty()) {
@@ -869,7 +923,7 @@ index 0c014ff4d1..c0aab2fd03 100644
 +            device_height = max(device_height, logical_device_height);
 +        }
 +        auto radius_px = max(1, qRound(r * dpr));
-+        if (HRGN region = CreateRoundRectRgn(0, 0, device_width + 1, device_height + 1, 2 * radius_px, 2 * radius_px)) {
++        if (HRGN region = create_exact_rounded_rect_rgn(device_width, device_height, radius_px)) {
 +            if (!SetWindowRgn(hwnd, region, TRUE))
 +                DeleteObject(region);
 +        }

@@ -169,3 +169,35 @@ index e3ff68273c..86ba1e271b 100644
          set(qt_conf_plugins PlugIns)
  
          get_target_property(qt_core_type Qt6::Core TYPE)
+diff --git a/Services/Compositor/CoreAnimationWindowServer.mm b/Services/Compositor/CoreAnimationWindowServer.mm
+index 40637f9581..7c78c40b11 100644
+--- a/Services/Compositor/CoreAnimationWindowServer.mm
++++ b/Services/Compositor/CoreAnimationWindowServer.mm
+@@ -380,11 +380,13 @@ static AVSampleBufferDisplayLayer* as_sample_buffer_layer(CALayer* layer)
+ // window server then tone maps the content to the headroom of the display it is on.
+ static void let_layer_show_high_dynamic_range(CALayer* layer, bool shows_high_dynamic_range)
+ {
++#if defined(__MAC_26_0) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_26_0
+     if (@available(macOS 26.0, *)) {
+         layer.preferredDynamicRange = shows_high_dynamic_range ? CADynamicRangeHigh : CADynamicRangeStandard;
+-    } else {
+-        layer.wantsExtendedDynamicRangeContent = shows_high_dynamic_range;
++        return;
+     }
++#endif
++    layer.wantsExtendedDynamicRangeContent = shows_high_dynamic_range;
+ }
+ 
+ void CoreAnimationRemoteLayer::use_content_layer_of_kind_for(ShownSublayer& shown_sublayer, RemoteSublayer const& sublayer)
+@@ -400,9 +402,11 @@ void CoreAnimationRemoteLayer::use_content_layer_of_kind_for(ShownSublayer& show
+         sample_buffer_layer.videoGravity = AVLayerVideoGravityResize;
+         sample_buffer_layer.opaque = YES;
+         let_layer_show_high_dynamic_range(sample_buffer_layer, true);
++#if defined(__MAC_26_0) && __MAC_OS_X_VERSION_MAX_ALLOWED >= __MAC_26_0
+         // Other browsers tag HDR video with the 4 stops of headroom of an XDR display.
+         if (@available(macOS 26.0, *))
+             sample_buffer_layer.contentsHeadroom = 16;
++#endif
+         replacement = sample_buffer_layer;
+     } else {
+         replacement = [[CALayer alloc] init];

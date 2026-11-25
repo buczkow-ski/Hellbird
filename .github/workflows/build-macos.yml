@@ -33,7 +33,7 @@ permissions:
 jobs:
   build-macos:
     name: macOS arm64 (${{ inputs.preset || 'Distribution' }})
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 300
 
     env:

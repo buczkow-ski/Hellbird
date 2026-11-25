@@ -1,0 +1,326 @@
+diff --git a/Libraries/LibWeb/ContentBlocker/Rust/src/lib.rs b/Libraries/LibWeb/ContentBlocker/Rust/src/lib.rs
+index 289f087..0795df8 100644
+--- a/Libraries/LibWeb/ContentBlocker/Rust/src/lib.rs
++++ b/Libraries/LibWeb/ContentBlocker/Rust/src/lib.rs
+@@ -142,6 +142,15 @@ impl GenericSelectorListRules {
+                 continue;
+             }
+ 
++            // Every cosmetic filter contains at least two '#' delimiters (e.g. "##", "#@#", "#?#").
++            // Skip pure network rules before invoking the full cosmetic filter parser.
++            let Some(first_hash) = trimmed_line.find('#') else {
++                continue;
++            };
++            if !trimmed_line[first_hash + 1..].contains('#') {
++                continue;
++            }
++
+             let Ok(filter) = adblock::filters::cosmetic::CosmeticFilter::parse(
+                 trimmed_line,
+                 false,
+diff --git a/Libraries/LibWeb/Loader/ContentBlocker.cpp b/Libraries/LibWeb/Loader/ContentBlocker.cpp
+index e4a65ec..5b923c8 100644
+--- a/Libraries/LibWeb/Loader/ContentBlocker.cpp
++++ b/Libraries/LibWeb/Loader/ContentBlocker.cpp
+@@ -7,6 +7,9 @@
+ #include <AK/ScopeGuard.h>
+ #include <AK/StringBuilder.h>
+ #include <AK/Vector.h>
++#include <LibCore/EventLoop.h>
++#include <LibGC/HeapAccess.h>
++#include <LibThreading/ThreadPool.h>
+ #include <LibURL/Parser.h>
+ #include <LibWeb/ContentBlockerRustFFI.h>
+ #include <LibWeb/Loader/ContentBlocker.h>
+@@ -124,14 +127,32 @@ static bool line_looks_like_supported_cosmetic_rule(StringView line)
+     return between_sharps.is_empty();
+ }
+ 
++static bool is_internal_unfiltered_scheme(StringView scheme)
++{
++    return scheme.is_one_of("about"sv, "resource"sv, "data"sv, "javascript"sv);
++}
++
+ static bool rules_contain_cosmetic_rules(ReadonlyBytes rules_bytes)
+ {
+-    bool has_cosmetic_rules = false;
+-    StringView { rules_bytes }.for_each_split_view('\n', SplitBehavior::Nothing, [&](StringView line) {
+-        if (line_looks_like_supported_cosmetic_rule(line))
+-            has_cosmetic_rules = true;
++    StringView view { rules_bytes };
++    size_t start = 0;
++    while (start < view.length()) {
++        auto newline = view.find('\n', start);
++        auto end = newline.value_or(view.length());
++        if (line_looks_like_supported_cosmetic_rule(view.substring_view(start, end - start)))
++            return true;
++        if (!newline.has_value())
++            break;
++        start = *newline + 1;
++    }
++    return false;
++}
++
++void ContentBlocker::wait_for_pending_build_locked() const
++{
++    m_build_condition.wait_while([&] {
++        return m_build_in_progress.load(AK::MemoryOrder::memory_order_acquire);
+     });
+-    return has_cosmetic_rules;
+ }
+ 
+ ErrorOr<void> ContentBlocker::set_patterns(ReadonlySpan<String> patterns)
+@@ -156,8 +177,11 @@ ErrorOr<void> ContentBlocker::set_rules_from_bytes(ReadonlyBytes rules_bytes)
+     //               Drop the engine instead of rebuilding an empty one.
+     if (rules_bytes.is_empty()) {
+         MutexLocker locker(m_mutex);
++        ++m_build_generation;
++        m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
+         ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(nullptr));
+-        m_has_cosmetic_rules = false;
++        m_has_cosmetic_rules.store(false, AK::MemoryOrder::memory_order_release);
++        m_build_condition.broadcast();
+         return {};
+     }
+ 
+@@ -168,11 +192,83 @@ ErrorOr<void> ContentBlocker::set_rules_from_bytes(ReadonlyBytes rules_bytes)
+     auto has_cosmetic_rules = rules_contain_cosmetic_rules(rules_bytes);
+ 
+     MutexLocker locker(m_mutex);
++    ++m_build_generation;
++    m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
+     ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(engine));
+-    m_has_cosmetic_rules = has_cosmetic_rules;
++    m_has_cosmetic_rules.store(has_cosmetic_rules, AK::MemoryOrder::memory_order_release);
++    m_build_condition.broadcast();
+     return {};
+ }
+ 
++void ContentBlocker::set_rules_from_buffer_async(Core::AnonymousBuffer rules_buffer, Function<void(bool has_cosmetic_rules_change)> on_complete)
++{
++    if (!rules_buffer.is_valid() || rules_buffer.size() == 0) {
++        bool had_cosmetic_rules = false;
++        {
++            MutexLocker locker(m_mutex);
++            ++m_build_generation;
++            had_cosmetic_rules = m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_relaxed);
++            m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
++            ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(nullptr));
++            m_has_cosmetic_rules.store(false, AK::MemoryOrder::memory_order_release);
++            m_build_condition.broadcast();
++        }
++        if (on_complete)
++            on_complete(had_cosmetic_rules);
++        return;
++    }
++
++    u64 generation = 0;
++    {
++        MutexLocker locker(m_mutex);
++        generation = ++m_build_generation;
++        m_build_in_progress.store(true, AK::MemoryOrder::memory_order_release);
++    }
++
++    RefPtr<Core::WeakEventLoopReference> event_loop;
++    if (Core::EventLoop::is_running())
++        event_loop = Core::EventLoop::current_weak();
++
++    Threading::ThreadPool::the().submit([this, rules_buffer = move(rules_buffer), generation, event_loop = move(event_loop), on_complete = move(on_complete)]() mutable {
++        GC::forbid_heap_access_on_this_thread();
++
++        auto rules_bytes = rules_buffer.bytes();
++        auto* engine = ContentBlocking::FFI::rust_content_blocker_create(rules_bytes);
++        auto has_cosmetic_rules = engine ? rules_contain_cosmetic_rules(rules_bytes) : false;
++
++        bool cosmetic_rules_changed = false;
++        {
++            MutexLocker locker(m_mutex);
++            if (m_build_generation != generation) {
++                ContentBlocking::FFI::rust_content_blocker_free(engine);
++                return;
++            }
++
++            auto had_cosmetic_rules = m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_relaxed);
++            if (engine) {
++                ContentBlocking::FFI::rust_content_blocker_free(m_engine.exchange(engine));
++                m_has_cosmetic_rules.store(has_cosmetic_rules, AK::MemoryOrder::memory_order_release);
++                cosmetic_rules_changed = had_cosmetic_rules || has_cosmetic_rules;
++            } else {
++                dbgln("Failed to create content blocker");
++            }
++            m_build_in_progress.store(false, AK::MemoryOrder::memory_order_release);
++            m_build_condition.broadcast();
++        }
++
++        if (!on_complete || !event_loop)
++            return;
++
++        auto origin_event_loop = event_loop->take();
++        if (!origin_event_loop.is_alive())
++            return;
++
++        origin_event_loop->deferred_invoke([on_complete = move(on_complete), cosmetic_rules_changed]() mutable {
++            on_complete(cosmetic_rules_changed);
++        });
++    });
++}
++
+ bool ContentBlocker::is_filtered(URL::URL const& url) const
+ {
+     return is_filtered(url, url, ResourceType::Other);
+@@ -185,10 +281,10 @@ bool ContentBlocker::is_filtered(URL::URL const& url, URL::URL const& source_url
+ 
+ bool ContentBlocker::is_filtered(URL::URL const& url, URL::URL const& source_url, ResourceType resource_type) const
+ {
+-    if (!has_rules())
++    if (is_internal_unfiltered_scheme(url.scheme()))
+         return false;
+ 
+-    if (url.scheme() == "data"sv)
++    if (!has_rules())
+         return false;
+ 
+     auto url_string = serialized_url_for_matching(url);
+@@ -197,7 +293,8 @@ bool ContentBlocker::is_filtered(URL::URL const& url, URL::URL const& source_url
+     auto request_type = resource_type_to_adblock_request_type(resource_type);
+ 
+     MutexLocker locker(m_mutex);
+-    auto* engine = m_engine.load();
++    wait_for_pending_build_locked();
++    auto* engine = m_engine.load(AK::MemoryOrder::memory_order_acquire);
+     if (!engine)
+         return false;
+     return ContentBlocking::FFI::rust_content_blocker_matches(
+@@ -214,6 +311,9 @@ Utf16String ContentBlocker::cosmetic_style_sheet_for_url(URL::URL const& url) co
+ 
+ Utf16String ContentBlocker::cosmetic_style_sheet_for_url(URL::URL const& url, ReadonlySpan<Utf16FlyString> classes, ReadonlySpan<Utf16FlyString> ids) const
+ {
++    if (is_internal_unfiltered_scheme(url.scheme()))
++        return {};
++
+     if (!has_cosmetic_rules())
+         return {};
+ 
+@@ -230,8 +330,9 @@ Utf16String ContentBlocker::cosmetic_style_sheet_for_url(URL::URL const& url, Re
+     auto ids_bytes = ids_string.value().bytes_as_string_view();
+ 
+     MutexLocker locker(m_mutex);
+-    auto* engine = m_engine.load();
+-    if (!engine)
++    wait_for_pending_build_locked();
++    auto* engine = m_engine.load(AK::MemoryOrder::memory_order_acquire);
++    if (!engine || !m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_acquire))
+         return {};
+     return take_rust_utf16_string(ContentBlocking::FFI::rust_content_blocker_cosmetic_css(
+         engine,
+@@ -242,6 +343,9 @@ Utf16String ContentBlocker::cosmetic_style_sheet_for_url(URL::URL const& url, Re
+ 
+ bool ContentBlocker::has_generic_cosmetic_selectors_for_url(URL::URL const& url, ReadonlySpan<Utf16FlyString> classes, ReadonlySpan<Utf16FlyString> ids) const
+ {
++    if (is_internal_unfiltered_scheme(url.scheme()))
++        return false;
++
+     if (!has_cosmetic_rules())
+         return false;
+ 
+@@ -258,8 +362,9 @@ bool ContentBlocker::has_generic_cosmetic_selectors_for_url(URL::URL const& url,
+     auto ids_bytes = ids_string.value().bytes_as_string_view();
+ 
+     MutexLocker locker(m_mutex);
+-    auto* engine = m_engine.load();
+-    if (!engine)
++    wait_for_pending_build_locked();
++    auto* engine = m_engine.load(AK::MemoryOrder::memory_order_acquire);
++    if (!engine || !m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_acquire))
+         return false;
+     return ContentBlocking::FFI::rust_content_blocker_has_generic_cosmetic_selectors(
+         engine,
+diff --git a/Libraries/LibWeb/Loader/ContentBlocker.h b/Libraries/LibWeb/Loader/ContentBlocker.h
+index 66c9c14..a2f6266 100644
+--- a/Libraries/LibWeb/Loader/ContentBlocker.h
++++ b/Libraries/LibWeb/Loader/ContentBlocker.h
+@@ -7,13 +7,16 @@
+ 
+ #pragma once
+ 
++#include <AK/ConditionVariable.h>
+ #include <AK/Error.h>
++#include <AK/Function.h>
+ #include <AK/Noncopyable.h>
+ #include <AK/OwnPtr.h>
+ #include <AK/String.h>
+ #include <AK/Utf16FlyString.h>
+ #include <AK/Utf16String.h>
+ #include <AK/kmalloc.h>
++#include <LibCore/AnonymousBuffer.h>
+ #include <LibURL/URL.h>
+ #include <LibWeb/Export.h>
+ #include <LibWeb/Fetch/Infrastructure/HTTP/Requests.h>
+@@ -44,14 +47,23 @@ public:
+ 
+     static ContentBlocker& the();
+ 
+-    bool has_rules() const { return m_engine.load(AK::MemoryOrder::memory_order_relaxed) != nullptr; }
+-    bool has_cosmetic_rules() const { return m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_relaxed); }
++    bool has_rules() const
++    {
++        return m_engine.load(AK::MemoryOrder::memory_order_acquire) != nullptr
++            || m_build_in_progress.load(AK::MemoryOrder::memory_order_acquire);
++    }
++    bool has_cosmetic_rules() const
++    {
++        return m_has_cosmetic_rules.load(AK::MemoryOrder::memory_order_acquire)
++            || m_build_in_progress.load(AK::MemoryOrder::memory_order_acquire);
++    }
+ 
+     bool is_filtered(URL::URL const&) const;
+     bool is_filtered(URL::URL const&, URL::URL const& source_url, ResourceType) const;
+     bool is_filtered(URL::URL const&, URL::URL const& source_url, Optional<Fetch::Infrastructure::Request::Destination> const&, Optional<Fetch::Infrastructure::Request::InitiatorType> const&, Fetch::Infrastructure::Request::Mode) const;
+     ErrorOr<void> set_patterns(ReadonlySpan<String>);
+     ErrorOr<void> set_rules_from_bytes(ReadonlyBytes);
++    void set_rules_from_buffer_async(Core::AnonymousBuffer, Function<void(bool has_cosmetic_rules_change)> on_complete = {});
+ 
+     Utf16String cosmetic_style_sheet_for_url(URL::URL const&) const;
+     Utf16String cosmetic_style_sheet_for_url(URL::URL const&, ReadonlySpan<Utf16FlyString> classes, ReadonlySpan<Utf16FlyString> ids) const;
+@@ -64,11 +76,16 @@ private:
+     ContentBlocker();
+     ~ContentBlocker();
+ 
++    void wait_for_pending_build_locked() const;
++
+     // Agents on any thread ask, and the engine is not one that several threads can use at once. The atomics let a check
+     // for no rules at all skip the lock.
+     mutable Mutex m_mutex;
++    mutable ConditionVariable m_build_condition { m_mutex };
+     Atomic<bool> m_has_cosmetic_rules { false };
++    Atomic<bool> m_build_in_progress { false };
+     Atomic<void*> m_engine { nullptr };
++    u64 m_build_generation { 0 };
+ };
+ 
+ // A rule on its own, which tells what it would block if it were one of the content blocker's.
+diff --git a/Services/WebContent/ConnectionFromClient.cpp b/Services/WebContent/ConnectionFromClient.cpp
+index 6cbcb1b..d90e031 100644
+--- a/Services/WebContent/ConnectionFromClient.cpp
++++ b/Services/WebContent/ConnectionFromClient.cpp
+@@ -3466,16 +3466,10 @@ void ConnectionFromClient::set_content_blocking_policy(Web::PageId page_id, bool
+ 
+ void ConnectionFromClient::set_content_blockers(Core::AnonymousBuffer patterns_buffer)
+ {
+-    auto& blocker = Web::ContentBlocker::the();
+-    auto had_cosmetic_rules = blocker.has_cosmetic_rules();
+-    auto result = blocker.set_rules_from_bytes(patterns_buffer.bytes());
+-    if (result.is_error()) {
+-        dbgln("Failed to set content blockers: {}", result.error());
+-        return;
+-    }
+-
+-    if (had_cosmetic_rules || blocker.has_cosmetic_rules())
+-        m_page_host->invalidate_user_style();
++    Web::ContentBlocker::the().set_rules_from_buffer_async(move(patterns_buffer), [weak_client = make_weak_ptr<ConnectionFromClient>()](bool has_cosmetic_rules_change) {
++        if (has_cosmetic_rules_change && weak_client)
++            weak_client->m_page_host->invalidate_user_style();
++    });
+ }
+ 
+ void ConnectionFromClient::set_force_dark_settings(Web::PageId page_id, bool enabled, HashMap<String, bool> per_host)
